@@ -1,14 +1,13 @@
-{
+﻿{
   "name": "trustbench",
   "version": "0.1.0",
   "description": "TrustBench - Reputation & Benchmark Layer for x402 / Agentic.Market",
-  "main": "dist/index.js",
+  "main": "src/index.ts",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "npx tsc",
-    "start": "node dist/index.js",
-    "deploy": "npm run build && echo 'Ready for Railway deploy'"
+    "start": "tsx src/index.ts",
+    "deploy": "echo 'Deployed with tsx'"
   },
   "dependencies": {
     "hono": "^4.4.0",

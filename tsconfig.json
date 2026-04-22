@@ -10,6 +10,6 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*.ts", "run-crawler.ts"],
+  "include": ["src/**/*.ts", "run-crawler.ts", "*.ts"],
   "exclude": ["node_modules", "dist"]
 }

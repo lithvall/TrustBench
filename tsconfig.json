@@ -8,8 +8,12 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "*": ["*"]
+    }
   },
-  "include": ["src/**/*.ts", "run-crawler.ts", "*.ts"],
+  "include": ["*.ts", "src/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { serve } from '@hono/node-server';
-import { getRankings } from './scorer.js';   // ← .js extension required for ESM
+import { getRankings } from './src/scorer.js';   // ← .js extension required for ESM
 
 const app = new Hono();
 

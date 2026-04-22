@@ -14,9 +14,14 @@ async function runFullCrawlCycle() {
   try {
     await crawlBazaar();
 
-    const { data: providers } = await supabase
+    const { data: providers, error } = await supabase
       .from('providers')
       .select('*');
+
+    if (error) {
+      console.error('❌ Failed to fetch providers:', error);
+      return;
+    }
 
     if (!providers || providers.length === 0) {
       console.log('No providers found to probe');
@@ -26,30 +31,43 @@ async function runFullCrawlCycle() {
     console.log(`Probing ${providers.length} providers...`);
 
     for (const provider of providers) {
-      const result = await probeProvider(provider);
-      const score = result.status === 'success' ? 85 : 30;
+      try {
+        const result = await probeProvider(provider);
+        const score = result.status === 'success' ? 85 : 30;
 
-      await supabase.from('scorecards').upsert({
-        provider_id: provider.id,
-        capability: provider.capability || 'search',
-        score: score,
-        latency_p50: result.latency_ms || 0,
-        latency_p95: result.latency_ms || 0,
-        uptime_7d: 100,
-        last_updated: new Date().toISOString()
-      }, { onConflict: 'provider_id,capability' });
+        await supabase.from('scorecards').upsert({
+          provider_id: provider.id,
+          capability: provider.capability || 'search',
+          score: score,
+          latency_p50: result.latency_ms || 0,
+          latency_p95: result.latency_ms || 0,
+          uptime_7d: 100,
+          last_updated: new Date().toISOString()
+        }, { onConflict: 'provider_id,capability' });
+
+        console.log(`✅ Scored ${provider.id} (${provider.capability || 'search'}): ${score}`);
+      } catch (probeError) {
+        console.error(`❌ Failed to probe ${provider.id}:`, probeError);
+      }
     }
 
     console.log('✅ [TrustBench Crawler] Full cycle completed successfully!');
   } catch (error) {
-    console.error('❌ [TrustBench Crawler] Error during cycle:', error);
+    console.error('❌ [TrustBench Crawler] Critical error during cycle:', error);
   }
 }
 
-// Run immediately
+// Run immediately on start
 runFullCrawlCycle();
 
 // Then every hour
-setInterval(runFullCrawlCycle, 60 * 60 * 1000);
+const interval = setInterval(runFullCrawlCycle, 60 * 60 * 1000);
 
 console.log('🔄 [TrustBench Crawler] Background worker started — will run every hour');
+
+// Graceful shutdown (good practice for Railway)
+process.on('SIGTERM', () => {
+  console.log('🛑 Received SIGTERM, shutting down...');
+  clearInterval(interval);
+  process.exit(0);
+});

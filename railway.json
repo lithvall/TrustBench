@@ -1,9 +1,4 @@
 {
   "buildCommand": "npm run build",
-  "startCommand": "npm start",
-  "deploy": {
-    "build": {
-      "paths": ["dist"]
-    }
-  }
+  "startCommand": "npm start"
 }

@@ -1,0 +1,169 @@
+# Supabase 2026 Key System — Briefing for Project Setup
+
+This document explains the current state of Supabase API keys and JWT signing as of April 2026, so you can help me wire up a new project correctly. My project has already been migrated to the new JWT Signing Keys system (the dashboard shows "Legacy JWT secret has been migrated to new JWT Signing Keys"), and I want to use the new `sb_publishable_...` / `sb_secret_...` API keys from the start.
+
+---
+
+## 1. Two independent systems, working together
+
+Supabase now has **two separate but cooperating** credential systems. Old docs and tutorials often conflate them. The distinction matters.
+
+**System A — API keys (how clients identify themselves to Supabase).**
+These are the strings you put in the `apikey` / `Authorization: Bearer` headers when calling PostgREST, Storage, Realtime, and Edge Functions. They tell Supabase which Postgres role to use (`anon` / `authenticated` / `service_role`) and gate access to the REST surface.
+
+- **Legacy** (deprecated, being phased out): `anon` and `service_role`. These are long-lived JWTs (10-year expiry) signed with the project's legacy HS256 JWT secret. They embed a `role` claim in the token itself.
+- **New**: `sb_publishable_...` (replaces `anon`, safe in browsers/mobile) and `sb_secret_...` (replaces `service_role`, server-only). These are **not JWTs** — they are opaque API keys. Supabase maps them to the appropriate Postgres role server-side.
+
+**System B — JWT signing keys (how Supabase Auth signs user session tokens).**
+When a user signs in through Supabase Auth, Auth issues them a short-lived access token (a JWT). This system controls how those user JWTs are signed and verified.
+
+- **Legacy**: single HS256 symmetric secret. Same secret signs and verifies. Rotation requires cutover.
+- **New**: asymmetric signing keys (RS256 or ES256). Public key is published at the JWKS endpoint so any service can verify without holding the signing secret. Supports multiple key states (Current, Standby, Previously used, Revoked) for zero-downtime rotation. Default access-token expiry is 5 minutes (legacy was 10 years on the API keys; user tokens were typically 1 hour).
+
+The two systems are independent. You can rotate API keys without touching signing keys, and vice versa — which is the whole point of the redesign.
+
+---
+
+## 2. What "Legacy JWT secret has been migrated" means
+
+On my project, the legacy HS256 secret has been imported into the new JWT Signing Keys store as one of the keys. The dashboard no longer offers a "regenerate JWT secret" button. Consequences:
+
+- The legacy `anon` and `service_role` JWTs are still valid, because the imported legacy key is still trusted for verification.
+- The only way to kill the legacy `anon` / `service_role` is to **revoke the imported legacy signing key**.
+- Once that key is revoked, the legacy JWTs can't be verified by anything, so they stop working immediately and permanently. There is no way to re-mint them.
+- So the correct migration path is: create new `sb_publishable_...` + `sb_secret_...`, roll them out everywhere, verify, *then* revoke the legacy signing key.
+
+---
+
+## 3. The new API keys in detail
+
+### Publishable key (`sb_publishable_...`)
+- Replaces the legacy `anon` key one-for-one.
+- Safe to embed in client apps (web, mobile, desktop), public repos, etc.
+- Maps to the Postgres `anon` role until a user signs in; then requests made with that user's access token run as `authenticated`.
+- There is **one** publishable key per project. Rotating it invalidates the old one immediately, so plan client deploys accordingly.
+
+### Secret key (`sb_secret_...`)
+- Replaces the legacy `service_role` key.
+- **Server-only.** Supabase actively blocks requests that carry a secret key from a browser User-Agent (returns HTTP 401). Do not put it in client code, public env files, or browser-exposed Next.js `NEXT_PUBLIC_*` vars.
+- Maps to the Postgres `service_role` role, which has `BYPASSRLS` — meaning **all Row Level Security policies are skipped** when using this key. Use it only where that's the intended behavior (admin scripts, server-side mutations, cron, webhooks).
+- **Multiple secret keys can exist at once.** This is what enables zero-downtime rotation: create a new one, deploy it, delete the old one.
+- Name your keys meaningfully (e.g. `backend-prod`, `cron-worker`, `admin-cli`) so you can rotate them independently and see which is in use.
+
+### How RLS works with the new keys
+- Publishable key + no user session → request runs as Postgres `anon`, RLS applies with `auth.uid()` = null.
+- Publishable key + user access token in `Authorization: Bearer <jwt>` → request runs as `authenticated`, RLS applies with `auth.uid()` set to the user's ID.
+- Secret key → request runs as `service_role`, **RLS is bypassed entirely**.
+
+### Drop-in compatibility
+All official Supabase client libraries (`@supabase/supabase-js`, supabase-py, supabase-dart, supabase-swift, etc.) accept the new keys in the exact same slot where you used `anon` / `service_role` before. No code changes needed — just swap the string.
+
+---
+
+## 4. The new JWT Signing Keys in detail
+
+This governs user authentication tokens, not API keys. Relevant when:
+- You're verifying Supabase-issued JWTs in an external service (a separate backend, a third-party API gateway, a Cloudflare Worker, etc.).
+- You care about short token lifetimes and proper rotation.
+
+Key facts:
+- Signing algorithm is **RS256 or ES256** (asymmetric). The private key stays in Supabase; the public key is exposed at:
+  `https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json`
+- External verifiers should fetch JWKS and cache with a short TTL (≤10 minutes) so they pick up rotations automatically.
+- Key states: **Standby** (advertised in JWKS, not yet signing), **Current** (actively signing new JWTs), **Previously used** (still trusted for verification, not signing), **Revoked** (not trusted).
+- User JWT default expiry is short (5 minutes is Supabase's recommendation; configurable in Auth settings). Refresh tokens handle long-lived sessions. This means a rotation drains naturally without kicking users out.
+
+---
+
+## 5. Environment variable conventions
+
+Supabase auto-generates these variable names in Edge Functions and the Next.js/Vercel integration:
+
+```
+SUPABASE_URL                             # e.g. https://abcd.supabase.co
+SUPABASE_PUBLISHABLE_DEFAULT_KEY         # the sb_publishable_... value
+SUPABASE_SECRET_DEFAULT_KEY              # the sb_secret_... value (server-only!)
+```
+
+If you create additionally named secret keys (e.g. "cron"), they appear as `SUPABASE_SECRET_CRON_KEY`.
+
+For my own app code I typically use these names, which you should follow unless there's a reason to deviate:
+
+```
+# Client-exposed (safe to prefix with NEXT_PUBLIC_ / VITE_ / EXPO_PUBLIC_)
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
+
+# Server-only (never prefix with NEXT_PUBLIC_ or any public marker)
+SUPABASE_SECRET_KEY=sb_secret_...
+```
+
+Older tutorials use `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY`. If I'm migrating existing code you can keep those names and just change the values, but for a new project prefer the `PUBLISHABLE` / `SECRET` naming since it matches the new key prefixes and prevents confusion.
+
+---
+
+## 6. Client setup patterns
+
+### Browser / public client (Next.js, Vite, React Native, etc.)
+```ts
+import { createClient } from '@supabase/supabase-js'
+
+export const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
+)
+```
+This client runs as `anon` until a user signs in, then as `authenticated`. RLS is enforced. Safe to ship to browsers.
+
+### Server-side admin client (Route Handler, server action, worker, cron)
+```ts
+import { createClient } from '@supabase/supabase-js'
+
+export const supabaseAdmin = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SECRET_KEY!,
+  { auth: { persistSession: false, autoRefreshToken: false } }
+)
+```
+This client bypasses RLS. Never import this module from a file that ends up in the client bundle. In Next.js, keep it in `server-only` modules (import `'server-only'` at the top, or put it under `app/api/` / server actions).
+
+### Verifying a Supabase user JWT in an external backend
+```ts
+import { createRemoteJWKSet, jwtVerify } from 'jose'
+
+const JWKS = createRemoteJWKSet(
+  new URL(`${process.env.SUPABASE_URL}/auth/v1/.well-known/jwks.json`)
+)
+
+export async function verifySupabaseJwt(token: string) {
+  const { payload } = await jwtVerify(token, JWKS, {
+    issuer: `${process.env.SUPABASE_URL}/auth/v1`,
+  })
+  return payload // contains sub (user id), email, role, aud, exp, etc.
+}
+```
+This works with any RS256/ES256-capable JWT library (`jose`, `jsonwebtoken`, PyJWT with `cryptography`, etc.). Always verify via JWKS rather than a hardcoded public key so rotation works.
+
+---
+
+## 7. Practical rules for the project setup
+
+1. **Never put the secret key in client code.** Not in `NEXT_PUBLIC_*`, not in a React component, not in a mobile app bundle. Supabase will 401 anyway due to browser User-Agent detection, but treat the leak as an immediate rotate-and-revoke event.
+2. **Use the secret key only where RLS bypass is genuinely needed** (admin mutations, cross-user queries, service-to-service). For normal authenticated user actions, use the publishable key + the user's access token — that way RLS still protects the data.
+3. **Create multiple secret keys for different uses** (e.g. `backend-api`, `cron-jobs`, `migration-script`). Makes incident response and rotation far easier.
+4. **Set up JWKS-based verification in any external service that consumes Supabase JWTs** so rotations don't break it.
+5. **Configure short access-token expiry** in Supabase Auth settings (5–15 minutes) and rely on refresh tokens for long sessions. This makes signing-key rotations fast.
+6. **Enable Row Level Security on every table from the start** and write policies. The new key system makes RLS more important, not less, because it's the main line of defense when the publishable key is public.
+
+---
+
+## 8. What I need from you (Grok)
+
+Help me scaffold the project with:
+- Correct Supabase client initialization for both browser and server contexts.
+- Proper env-var setup and `.env.example` template using the new key names.
+- A `server-only` pattern (or equivalent in the framework I specify) so the secret key cannot leak into the client bundle.
+- If applicable, JWKS-based JWT verification for any non-Supabase backend service that sits alongside this project.
+- RLS policy scaffolding appropriate for the app's data model.
+
+Ask me which framework I'm using (Next.js App Router, SvelteKit, Remix, Expo, plain Node backend, etc.) and what the app does, then produce the files.

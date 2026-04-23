@@ -1,23 +1,54 @@
-﻿import { createClient } from '@supabase/supabase-js';
+import 'dotenv/config';
+import { createClient } from '@supabase/supabase-js';
+import { Provider } from './types';
 
+// Supabase admin client
 const supabase = createClient(
   process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.SUPABASE_SECRET_KEY!,
+  { auth: { persistSession: false, autoRefreshToken: false } }
 );
 
-export async function crawlBazaar() {
-  console.log('🔍 Starting Bazaar crawl...');
+export async function crawlAgenticMarket() {
+  console.log('🚀 Starting Agentic.Market crawl...');
 
-  // Real Bazaar discovery endpoint (placeholder for now - we'll connect to live API soon)
-  const mockProviders = [
-    { id: 'coingecko', name: 'CoinGecko', url: 'https://api.coingecko.com', capability: 'data', description: 'Crypto market data' },
-    { id: 'exa', name: 'Exa', url: 'https://api.exa.ai', capability: 'search', description: 'AI-powered web search' },
-    { id: 'perplexity', name: 'Perplexity', url: 'https://api.perplexity.ai', capability: 'search', description: 'Search + reasoning' },
+  // TODO: Replace with real Agentic.Market / Bazaar API when public
+  // For MVP we seed + update known high-quality x402 providers
+  const sampleProviders: Provider[] = [
+    {
+      id: 'openai-search',
+      url: 'https://api.openai.com/v1',
+      capability: 'search',
+      name: 'OpenAI Search',
+      description: 'Official OpenAI endpoint'
+    },
+    {
+      id: 'groq-inference',
+      url: 'https://api.groq.com',
+      capability: 'inference',
+      name: 'Groq Inference',
+      description: 'Fastest inference provider'
+    },
+    {
+      id: 'perplexity-data',
+      url: 'https://api.perplexity.ai',
+      capability: 'data',
+      name: 'Perplexity Data',
+      description: 'Real-time web data'
+    }
   ];
 
-  for (const p of mockProviders) {
-    await supabase.from('providers').upsert(p, { onConflict: 'id' });
-  }
+  const { error } = await supabase
+    .from('providers')
+    .upsert(sampleProviders, { onConflict: 'id' });
 
-  console.log('✅ Crawled and stored', mockProviders.length, 'providers');
+  if (error) throw error;
+
+  console.log(`✅ Crawled and upserted ${sampleProviders.length} providers`);
+  return sampleProviders.length;
+}
+
+// Run directly with: npm run crawl
+if (import.meta.url === `file://${process.argv[1]}`) {
+  crawlAgenticMarket().catch(console.error);
 }

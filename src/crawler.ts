@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
-import { Provider } from './types';
+import { Provider } from './types.js';
 
 // Supabase admin client
 const supabase = createClient(

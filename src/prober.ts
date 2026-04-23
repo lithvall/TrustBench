@@ -1,7 +1,7 @@
 import 'dotenv/config';   // ← MUST be first line
 
 import { createClient } from '@supabase/supabase-js';
-import { ProbeResult } from './types';
+import { ProbeResult } from './types.js';
 
 console.log('🔥 Prober script starting...');
 console.log('SUPABASE_URL present:', !!process.env.SUPABASE_URL);

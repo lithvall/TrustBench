@@ -1,0 +1,38 @@
+name: Autonomous @TrustBench Posts
+
+on:
+  schedule:
+    - cron: '0 14 * * *'      # Daily at 2 PM UTC
+  workflow_dispatch:          # Allows manual trigger from GitHub UI
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Post daily update from @TrustBench
+        env:
+          X_CONSUMER_KEY: ${{ secrets.X_CONSUMER_KEY }}
+          X_CONSUMER_SECRET: ${{ secrets.X_CONSUMER_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+        run: node -e '
+          const { TwitterApi } = require("twitter-api-v2");
+          const client = new TwitterApi({
+            appKey: process.env.X_CONSUMER_KEY,
+            appSecret: process.env.X_CONSUMER_SECRET,
+            accessToken: process.env.X_ACCESS_TOKEN,
+            accessSecret: process.env.X_ACCESS_TOKEN_SECRET,
+          });
+          client.v2.tweet("TrustBench daily rankings are live! Check the best x402 providers right now 👇\n\nhttps://trustbench-production.up.railway.app/rankings?capability=search\n\n#x402 #AgenticMarket #AI #TrustBench").then(r => console.log("Posted:", r)).catch(console.error);
+        '

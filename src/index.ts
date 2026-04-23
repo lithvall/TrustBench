@@ -1,15 +1,14 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
-import { getRankings, getProviderScore } from './scorer.js';
-import { paymentMiddleware } from '@x402/hono';
+import { getRankings } from './scorer.js';
 
 const app = new Hono();
 
 app.use('*', cors());
 app.use('*', logger());
 
-// Public rankings (free tier - rate limited)
+// Public rankings (free tier - rate limited) - this is what matters for MVP
 app.get('/rankings', async (c) => {
   const capability = c.req.query('capability') || 'search';
   const limit = Number(c.req.query('limit') || 10);
@@ -18,30 +17,7 @@ app.get('/rankings', async (c) => {
   return c.json({ success: true, data: results, source: 'TrustBench' });
 });
 
-// Paid x402 endpoint ($0.002 per lookup)
-app.use('/rankings/paid', paymentMiddleware({
-  accepts: [{
-    scheme: 'exact',
-    price: '$0.002',
-    network: 'eip155:8453',
-    payTo: process.env.PAY_TO_ADDRESS!
-  }]
-}));
-
-app.get('/rankings/paid', async (c) => {
-  const capability = c.req.query('capability') || 'search';
-  const limit = Number(c.req.query('limit') || 10);
-  
-  const results = await getRankings(capability as 'search' | 'inference' | 'data', limit);
-  return c.json({ 
-    success: true, 
-    data: results, 
-    paid: true,
-    source: 'TrustBench'
-  });
-});
-
-// Simple health check
+// Simple health check (required for Railway)
 app.get('/health', (c) => c.json({ status: 'ok', project: 'TrustBench' }));
 
 // MCP stub for agents
@@ -65,7 +41,7 @@ app.get('/mcp/tools', (c) => c.json({
 const port = Number(process.env.PORT) || 3000;
 console.log(`🚀 TrustBench running on http://localhost:${port}`);
 
-// Fixed serve call for Railway + @hono/node-server
+// Start server
 import { serve } from '@hono/node-server';
 serve({
   fetch: app.fetch,

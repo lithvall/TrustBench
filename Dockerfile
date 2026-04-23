@@ -5,7 +5,9 @@ WORKDIR /app
 
 # Copy package files first (better caching)
 COPY package*.json ./
-RUN npm ci --production
+
+# Full install (devDependencies needed for TypeScript build)
+RUN npm ci
 
 # Copy source
 COPY . .

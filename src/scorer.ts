@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
+// @ts-ignore - ESM compatibility fix for ioredis in Railway build
 import Redis from 'ioredis';
 
 const supabase = createClient(

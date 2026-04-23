@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
-import { getRankings, getProviderScore } from './scorer.js';   // ← .js added
+import { getRankings, getProviderScore } from './scorer.js';
 import { paymentMiddleware } from '@x402/hono';
 
 const app = new Hono();
@@ -14,7 +14,7 @@ app.get('/rankings', async (c) => {
   const capability = c.req.query('capability') || 'search';
   const limit = Number(c.req.query('limit') || 10);
   
-  const results = await getRankings(capability as 'search' | 'inference' | 'data', limit);  // ← fixed type
+  const results = await getRankings(capability as 'search' | 'inference' | 'data', limit);
   return c.json({ success: true, data: results, source: 'TrustBench' });
 });
 
@@ -41,6 +41,7 @@ app.get('/rankings/paid', async (c) => {
   });
 });
 
+// Simple health check
 app.get('/health', (c) => c.json({ status: 'ok', project: 'TrustBench' }));
 
 // MCP stub for agents
@@ -64,6 +65,7 @@ app.get('/mcp/tools', (c) => c.json({
 const port = Number(process.env.PORT) || 3000;
 console.log(`🚀 TrustBench running on http://localhost:${port}`);
 
+// Fixed serve call for Railway + @hono/node-server
 import { serve } from '@hono/node-server';
 serve({
   fetch: app.fetch,

@@ -1,11 +1,8 @@
-import 'dotenv/config';   // ← MUST be first line
-
+import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
 import { ProbeResult } from './types.js';
 
 console.log('🔥 Prober script starting...');
-console.log('SUPABASE_URL present:', !!process.env.SUPABASE_URL);
-console.log('SUPABASE_SECRET_KEY present:', !!process.env.SUPABASE_SECRET_KEY);
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -40,24 +37,24 @@ export async function probeProvider(providerUrl: string, providerId: string) {
         status: res.ok ? 'success' : 'error',
         region,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
       results.push({
         provider_id: providerId,
         timestamp: new Date().toISOString(),
         latency_ms: 5000,
         status: 'timeout',
-        error: err.message,
+        error: errorMessage,
         region,
       });
     }
   }
 
-  // Robust insert (no .catch chaining)
   try {
     await supabase.from('probes').insert(results);
     console.log(`✅ Stored ${results.length} probe results`);
   } catch (err) {
-    console.warn('⚠️ Could not store probes (table optional):', err.message);
+    console.warn('⚠️ Could not store probes (table optional):', err);
   }
 
   console.log(`✅ Probed ${providerId} across ${REGIONS.length} regions`);
@@ -101,6 +98,6 @@ export async function runFullProbeAndScore() {
   console.log('✅ Full probe + scoring completed — rankings updated!');
 }
 
-// Auto-run when executed directly
+// Auto-run
 console.log('🚀 Starting full pipeline...');
 runFullProbeAndScore().catch(console.error);

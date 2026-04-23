@@ -3,7 +3,7 @@ name: Autonomous @TrustBench Posts
 on:
   schedule:
     - cron: '0 14 * * *'      # Daily at 2 PM UTC
-  workflow_dispatch:          # Allows manual trigger
+  workflow_dispatch:          # Allows manual trigger from GitHub UI
 
 jobs:
   post:

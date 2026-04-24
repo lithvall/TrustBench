@@ -4,31 +4,25 @@ import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
-import { getRankings } from './scorer.js';
-
-// Basic x402 payment guard middleware (stub for now)
-const paymentMiddleware = async (c: any, next: any) => {
-  // TODO: Later we will integrate real x402 verification here
-  console.log('🔒 x402 payment middleware called');
-  await next();
-};
+import { paymentMiddleware } from '@x402/hono';   // real x402 middleware
+import { getRankings, signScorecard } from './scorer.js';
 
 const app = new Hono();
 
 app.use('*', cors());
 app.use('*', logger());
 
-// Health check
+// Health
 app.get('/health', (c) => c.json({ status: 'ok', project: 'TrustBench' }));
 
-// Main public rankings (free)
+// Public free rankings
 app.get('/rankings', async (c) => {
   const capability = c.req.query('capability') || 'search';
   const data = await getRankings(capability as any);
   return c.json({ success: true, data, source: 'TrustBench' });
 });
 
-// NEW: Intelligent Router - returns best provider for a capability
+// NEW: Intelligent Router – best provider for any capability
 app.get('/route', async (c) => {
   const capability = c.req.query('capability') || 'search';
   const rankings = await getRankings(capability as any);
@@ -37,9 +31,7 @@ app.get('/route', async (c) => {
     return c.json({ success: false, error: 'No providers available' }, 404);
   }
 
-  // Return the current #1 provider
   const best = rankings[0];
-
   return c.json({
     success: true,
     capability,
@@ -51,7 +43,7 @@ app.get('/route', async (c) => {
   });
 });
 
-// Paid route (protected by x402)
+// Paid route – protected by real x402
 app.get('/rankings/paid', paymentMiddleware, async (c) => {
   const capability = c.req.query('capability') || 'search';
   const data = await getRankings(capability as any);

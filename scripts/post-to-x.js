@@ -1,4 +1,5 @@
-﻿import 'dotenv/config';
+// scripts/post-to-x.js
+import 'dotenv/config';
 import { TwitterApi } from 'twitter-api-v2';
 
 (async () => {
@@ -17,13 +18,13 @@ import { TwitterApi } from 'twitter-api-v2';
       .slice(0, 3);
 
     const lines = sorted.map((p, i) => 
-      ${i + 1}.  - 
+      `${i + 1}. ${p.provider_id.replace('-search', '')} - ${p.score}`
     ).join('\n');
 
-    const tweetText = TrustBench daily rankings are live!\n\n +
-      Search category:\n\n\n +
-      Full leaderboard → https://trustbench-production.up.railway.app/rankings?capability=search\n\n +
-      #x402 #AgenticMarket #AI;
+    const tweetText = `TrustBench daily rankings are live!\n\n` +
+      `Search category:\n${lines}\n\n` +
+      `Full leaderboard → https://trustbench-production.up.railway.app/rankings?capability=search\n\n` +
+      `#x402 #AgenticMarket #AI`;
 
     const client = new TwitterApi({
       appKey: process.env.X_CONSUMER_KEY,

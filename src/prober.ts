@@ -11,9 +11,17 @@ const supabase = createClient(
 
 const REGIONS = ['us-east', 'eu-west', 'asia-southeast'];
 
+// Capability-specific test endpoints (lightweight, realistic probes)
+const TEST_ENDPOINTS: Record<string, string> = {
+  search: 'https://api.openai.com/v1/chat/completions',           // OpenAI-style search test
+  inference: 'https://api.groq.com/openai/v1/chat/completions',   // Groq-style inference test
+  data: 'https://api.perplexity.ai/chat/completions'              // Perplexity-style data test
+};
+
 async function probeProvider(providerId: string, capability: string): Promise<ProbeResult[]> {
-  console.log(`🔍 Probing ${providerId}...`);
+  console.log(`🔍 Probing ${providerId} (${capability})...`);
   const results: ProbeResult[] = [];
+  const testUrl = TEST_ENDPOINTS[capability] || 'https://httpbin.org/get';
 
   for (const region of REGIONS) {
     const start = Date.now();
@@ -21,10 +29,10 @@ async function probeProvider(providerId: string, capability: string): Promise<Pr
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 8000);
 
-      const res = await fetch(`https://api.${providerId.split('-')[0]}.com`, {
+      const res = await fetch(testUrl, {
         method: 'GET',
         signal: controller.signal,
-        headers: { 'User-Agent': 'TrustBench-Prober' }
+        headers: { 'User-Agent': 'TrustBench-Prober/1.0' }
       });
 
       clearTimeout(timeout);
@@ -53,20 +61,22 @@ async function probeProvider(providerId: string, capability: string): Promise<Pr
 }
 
 async function runFullProbeAndScore() {
-  console.log('🚀 Starting full probe + scoring pipeline...');
+  console.log('🚀 Starting full improved probe + scoring pipeline...');
 
   const { data: providers } = await supabase.from('providers').select('*');
 
   for (const p of providers || []) {
     const results = await probeProvider(p.provider_id, p.capability);
-    
+
     // Store raw probe results
     await supabase.from('probe_results').insert(results);
 
-    // Simple but realistic scoring
+    // Improved realistic scoring
     const successRate = results.filter(r => r.success).length / results.length;
     const avgLatency = results.reduce((sum, r) => sum + r.latency_ms, 0) / results.length;
-    const score = Math.max(40, Math.round(100 - (avgLatency / 8) - (1 - successRate) * 40));
+    
+    // Score formula: base 40–100, penalize high latency and low success
+    let score = Math.max(40, Math.round(100 - (avgLatency / 6) - (1 - successRate) * 50));
 
     await supabase
       .from('scorecards')
@@ -79,7 +89,7 @@ async function runFullProbeAndScore() {
       }, { onConflict: 'provider_id,capability' });
   }
 
-  console.log('✅ Full probe + scoring completed — rankings updated!');
+  console.log('✅ Full improved probe + scoring completed — rankings updated!');
 }
 
 runFullProbeAndScore().catch(console.error);

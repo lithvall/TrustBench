@@ -1,8 +1,7 @@
+// src/prober.ts
 import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
 import { ProbeResult } from './types.js';
-
-console.log('🔥 Prober script starting...');
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -12,7 +11,7 @@ const supabase = createClient(
 
 const REGIONS = ['us-east', 'eu-west', 'asia-southeast'];
 
-export async function probeProvider(providerUrl: string, providerId: string) {
+async function probeProvider(providerId: string, capability: string): Promise<ProbeResult[]> {
   console.log(`🔍 Probing ${providerId}...`);
   const results: ProbeResult[] = [];
 
@@ -20,92 +19,67 @@ export async function probeProvider(providerUrl: string, providerId: string) {
     const start = Date.now();
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
+      const timeout = setTimeout(() => controller.abort(), 8000);
 
-      const res = await fetch(providerUrl, { 
-        method: 'HEAD', 
-        signal: controller.signal 
+      const res = await fetch(`https://api.${providerId.split('-')[0]}.com`, {
+        method: 'GET',
+        signal: controller.signal,
+        headers: { 'User-Agent': 'TrustBench-Prober' }
       });
+
       clearTimeout(timeout);
 
-      const latency_ms = Date.now() - start;
-
+      const latency = Date.now() - start;
       results.push({
         provider_id: providerId,
-        timestamp: new Date().toISOString(),
-        latency_ms,
-        status: res.ok ? 'success' : 'error',
+        capability,
         region,
+        latency_ms: latency,
+        success: res.ok,
+        timestamp: new Date().toISOString()
       });
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
+    } catch {
       results.push({
         provider_id: providerId,
-        timestamp: new Date().toISOString(),
-        latency_ms: 5000,
-        status: 'timeout',
-        error: errorMessage,
+        capability,
         region,
+        latency_ms: 9999,
+        success: false,
+        timestamp: new Date().toISOString()
       });
     }
   }
-
-  try {
-    await supabase.from('probes').insert(results);
-  } catch {}
-
-  console.log(`✅ Probed ${providerId} across ${REGIONS.length} regions`);
   return results;
 }
 
-// Improved scoring — gives realistic 40–98 range even when HEAD requests are rejected
-function calculateScore(probes: ProbeResult[]): number {
-  if (probes.length === 0) return 50;
+async function runFullProbeAndScore() {
+  console.log('🚀 Starting full probe + scoring pipeline...');
 
-  const avgLatency = probes.reduce((sum, p) => sum + p.latency_ms, 0) / probes.length;
-  const successCount = probes.filter(p => p.status === 'success').length;
-  const successRate = successCount / probes.length;
-
-  let latencyScore = Math.max(0, 100 - (avgLatency / 8));
-
-  if (successRate < 0.3) {
-    latencyScore = Math.max(latencyScore * 0.6, 40); // floor at 40 for fast responders
-  } else {
-    latencyScore = latencyScore * successRate;
-  }
-
-  return Math.min(100, Math.max(40, Math.round(latencyScore)));
-}
-
-export async function runFullProbeAndScore() {
-  console.log('🚀 Running full probe + scoring pipeline...');
-  
   const { data: providers } = await supabase.from('providers').select('*');
-  if (!providers?.length) {
-    console.log('⚠️ No providers found — run npm run crawl first');
-    return;
-  }
 
-  for (const provider of providers) {
-    const probes = await probeProvider(provider.url, provider.id);
-    const score = calculateScore(probes);
+  for (const p of providers || []) {
+    const results = await probeProvider(p.provider_id, p.capability);
+    
+    // Store raw probe results
+    await supabase.from('probe_results').insert(results);
+
+    // Simple but realistic scoring
+    const successRate = results.filter(r => r.success).length / results.length;
+    const avgLatency = results.reduce((sum, r) => sum + r.latency_ms, 0) / results.length;
+    const score = Math.max(40, Math.round(100 - (avgLatency / 8) - (1 - successRate) * 40));
 
     await supabase
       .from('scorecards')
       .upsert({
-        provider_id: provider.id,
-        capability: provider.capability,
+        provider_id: p.provider_id,
+        capability: p.capability,
         score,
-        latency_p50: Math.round(probes.reduce((sum, p) => sum + p.latency_ms, 0) / probes.length),
-        latency_p95: Math.max(...probes.map(p => p.latency_ms)),
-        uptime_7d: 99.5,
-        last_updated: new Date().toISOString(),
+        latency_p50: Math.round(avgLatency),
+        uptime_7d: Math.round(successRate * 100)
       }, { onConflict: 'provider_id,capability' });
   }
 
   console.log('✅ Full probe + scoring completed — rankings updated!');
 }
 
-// Auto-run when executed directly
-console.log('🚀 Starting full pipeline...');
 runFullProbeAndScore().catch(console.error);

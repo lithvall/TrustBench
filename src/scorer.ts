@@ -22,7 +22,7 @@ export async function getRankings(capability: string) {
   const cached = await redis.get(cacheKey);
   if (cached) return JSON.parse(cached);
 
-  // Get ALL seeded providers for this capability + their latest scorecard (if any)
+  // Join ALL seeded providers with their latest scorecard (if any)
   const { data } = await supabase
     .from('providers')
     .select(`
@@ -46,7 +46,7 @@ export async function getRankings(capability: string) {
       provider_id: p.provider_id,
       capability: p.capability,
       name: p.name,
-      score: scorecard.score ?? 40,           // default fallback score
+      score: scorecard.score ?? 40,           // default fallback
       latency_p50: scorecard.latency_p50 ?? 9999,
       latency_p95: scorecard.latency_p95 ?? 9999,
       uptime_7d: scorecard.uptime_7d ?? 50,
@@ -55,7 +55,7 @@ export async function getRankings(capability: string) {
     };
   }).sort((a, b) => b.score - a.score) || [];
 
-  await redis.set(cacheKey, JSON.stringify(processed), 'EX', 300); // 5 min cache
+  await redis.set(cacheKey, JSON.stringify(processed), 'EX', 300);
   return processed;
 }
 

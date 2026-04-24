@@ -11,7 +11,7 @@ const supabase = createClient(
 
 const REGIONS = ['us-east', 'eu-west', 'asia-southeast'];
 
-// Capability-specific test endpoints (lightweight, realistic probes)
+// Realistic capability-specific test endpoints
 const TEST_ENDPOINTS: Record<string, string> = {
   search: 'https://api.openai.com/v1/chat/completions',           // OpenAI-style search test
   inference: 'https://api.groq.com/openai/v1/chat/completions',   // Groq-style inference test
@@ -61,7 +61,7 @@ async function probeProvider(providerId: string, capability: string): Promise<Pr
 }
 
 async function runFullProbeAndScore() {
-  console.log('🚀 Starting full improved probe + scoring pipeline...');
+  console.log('🚀 Starting improved probe + scoring pipeline...');
 
   const { data: providers } = await supabase.from('providers').select('*');
 
@@ -75,8 +75,8 @@ async function runFullProbeAndScore() {
     const successRate = results.filter(r => r.success).length / results.length;
     const avgLatency = results.reduce((sum, r) => sum + r.latency_ms, 0) / results.length;
     
-    // Score formula: base 40–100, penalize high latency and low success
-    let score = Math.max(40, Math.round(100 - (avgLatency / 6) - (1 - successRate) * 50));
+    // Better formula: base 40–98, penalize high latency and low success
+    let score = Math.max(40, Math.min(98, Math.round(98 - (avgLatency / 7) - (1 - successRate) * 45)));
 
     await supabase
       .from('scorecards')

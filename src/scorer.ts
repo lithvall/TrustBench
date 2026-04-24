@@ -22,10 +22,10 @@ export async function getRankings(capability: string) {
   const cached = await redis.get(cacheKey);
   if (cached) return JSON.parse(cached);
 
-  // Get all providers for this capability
+  // Get ALL seeded providers for this capability
   const { data: providers } = await supabase
     .from('providers')
-    .select('*')
+    .select('provider_id, capability, name')
     .eq('capability', capability);
 
   // Get existing scorecards for this capability

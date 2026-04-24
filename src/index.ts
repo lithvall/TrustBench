@@ -56,9 +56,33 @@ app.get('/rankings/paid', paymentMiddleware, async (c) => {
 });
 
 // MCP tools
-app.get('/mcp/tools', (c) => c.json({ success: true, tools: [...] })); // (kept as before)
+app.get('/mcp/tools', (c) => {
+  return c.json({
+    success: true,
+    tools: [
+      {
+        name: "trustbench_get_rankings",
+        description: "Get current TrustBench rankings for a capability",
+        parameters: {
+          type: "object",
+          properties: { capability: { type: "string", enum: ["search", "inference", "data"] } },
+          required: ["capability"]
+        }
+      },
+      {
+        name: "trustbench_route",
+        description: "Get the best recommended x402 provider with fallback",
+        parameters: {
+          type: "object",
+          properties: { capability: { type: "string", enum: ["search", "inference", "data"] } },
+          required: ["capability"]
+        }
+      }
+    ]
+  });
+});
 
-// NEW: Simple internal analytics dashboard
+// Analytics dashboard
 app.get('/analytics', async (c) => {
   const search = await getRankings('search');
   const inference = await getRankings('inference');
@@ -70,12 +94,12 @@ app.get('/analytics', async (c) => {
 <head>
   <title>TrustBench Analytics</title>
   <style>
-    body { font-family: system-ui, sans-serif; padding: 20px; background: #0f0f0f; color: #fff; }
+    body { font-family: system-ui, sans-serif; padding: 20px; background: #0f0f0f; color: #fff; margin: 0; }
     h1 { color: #22c55e; }
     table { width: 100%; border-collapse: collapse; margin: 20px 0; }
     th, td { padding: 12px; text-align: left; border-bottom: 1px solid #333; }
     th { background: #1f1f1f; }
-    .good { color: #22c55e; }
+    .good { color: #22c55e; font-weight: bold; }
   </style>
 </head>
 <body>
@@ -84,18 +108,14 @@ app.get('/analytics', async (c) => {
   
   <h2>Providers by Category</h2>
   <table>
-    <tr><th>Category</th><th>Providers</th><th>Top Score</th></tr>
+    <tr><th>Category</th><th>Count</th><th>Top Score</th></tr>
     <tr><td>Search</td><td>${search.length}</td><td class="good">${search[0]?.score || '—'}</td></tr>
     <tr><td>Inference</td><td>${inference.length}</td><td class="good">${inference[0]?.score || '—'}</td></tr>
     <tr><td>Data</td><td>${data.length}</td><td class="good">${data[0]?.score || '—'}</td></tr>
   </table>
 
   <h2>Current Top Providers</h2>
-  <pre>${JSON.stringify({
-    search: search.slice(0, 3),
-    inference: inference.slice(0, 3),
-    data: data.slice(0, 3)
-  }, null, 2)}</pre>
+  <pre>${JSON.stringify({ search: search.slice(0, 3), inference: inference.slice(0, 3), data: data.slice(0, 3) }, null, 2)}</pre>
 
   <p><a href="/health" style="color:#22c55e">Health Check</a> | 
      <a href="/route?capability=search" style="color:#22c55e">Router Test</a></p>

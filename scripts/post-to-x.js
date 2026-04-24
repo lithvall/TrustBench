@@ -1,8 +1,9 @@
-﻿import { TwitterApi } from 'twitter-api-v2';
+// scripts/post-to-x.js
+import { TwitterApi } from 'twitter-api-v2';
 
 (async () => {
   try {
-    // Fetch live rankings for the most popular category (search)
+    // Fetch live rankings
     const res = await fetch('https://trustbench-production.up.railway.app/rankings?capability=search');
     const json = await res.json();
 
@@ -10,19 +11,19 @@
       throw new Error('No data returned');
     }
 
-    // Sort by score descending and take top 3
+    // Top 3 by score
     const sorted = json.data
       .sort((a, b) => b.score - a.score)
       .slice(0, 3);
 
     const lines = sorted.map((p, i) => 
-      ${i+1}.  — 
+      `${i + 1}. ${p.provider_id.replace('-search', '')} - ${p.score}`
     ).join('\n');
 
-    const tweetText = TrustBench daily rankings are live!\n\n +
-      Search category:\n\n\n +
-      Full leaderboard → https://trustbench-production.up.railway.app/rankings?capability=search\n\n +
-      #x402 #AgenticMarket #AI;
+    const tweetText = `TrustBench daily rankings are live!\n\n` +
+      `Search category:\n${lines}\n\n` +
+      `Full leaderboard → https://trustbench-production.up.railway.app/rankings?capability=search\n\n` +
+      `#x402 #AgenticMarket #AI`;
 
     const client = new TwitterApi({
       appKey: process.env.X_CONSUMER_KEY,
@@ -35,7 +36,7 @@
     console.log('✅ Posted successfully:', tweet);
   } catch (err) {
     console.error('❌ Post failed:', err);
-    // Fallback static post if API is down
+    // Fallback static post
     const client = new TwitterApi({
       appKey: process.env.X_CONSUMER_KEY,
       appSecret: process.env.X_CONSUMER_SECRET,

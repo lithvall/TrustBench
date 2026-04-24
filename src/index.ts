@@ -22,24 +22,30 @@ app.get('/rankings', async (c) => {
   return c.json({ success: true, data, source: 'TrustBench' });
 });
 
-// Intelligent Router
+// Router v2 - Smart routing with fallback
 app.get('/route', async (c) => {
   const capability = c.req.query('capability') || 'search';
   const rankings = await getRankings(capability as any);
 
   if (!rankings || rankings.length === 0) {
-    return c.json({ success: false, error: 'No providers available' }, 404);
+    return c.json({ success: false, error: 'No providers available for this capability' }, 404);
   }
 
   const best = rankings[0];
+  const fallback = rankings.length > 1 ? rankings[1] : null;
+
   return c.json({
     success: true,
     capability,
     recommended_provider: best.provider_id,
     score: best.score,
     latency_p50: best.latency_p50,
-    message: `Best current provider for ${capability} is ${best.provider_id} (score: ${best.score})`,
-    full_rankings_url: `https://trustbench-production.up.railway.app/rankings?capability=${capability}`
+    fallback_provider: fallback ? fallback.provider_id : null,
+    fallback_score: fallback ? fallback.score : null,
+    message: `Best current provider for ${capability} is ${best.provider_id} (score: ${best.score}). ` +
+             (fallback ? `Fallback: ${fallback.provider_id} (score: ${fallback.score})` : ''),
+    full_rankings_url: `https://trustbench-production.up.railway.app/rankings?capability=${capability}`,
+    signed_scorecards: rankings.map(signScorecard)
   });
 });
 
@@ -47,35 +53,23 @@ app.get('/route', async (c) => {
 app.get('/rankings/paid', paymentMiddleware, async (c) => {
   const capability = c.req.query('capability') || 'search';
   const data = await getRankings(capability as any);
-  return c.json({ success: true, data, source: 'TrustBench', paid: true });
+  return c.json({ success: true, data: data.map(signScorecard), source: 'TrustBench', paid: true });
 });
 
-// NEW: MCP Tools endpoint (for agent discovery)
+// MCP tools
 app.get('/mcp/tools', (c) => {
   return c.json({
     success: true,
     tools: [
       {
         name: "trustbench_get_rankings",
-        description: "Get current TrustBench rankings for a capability (search, inference, data)",
-        parameters: {
-          type: "object",
-          properties: {
-            capability: { type: "string", enum: ["search", "inference", "data"] }
-          },
-          required: ["capability"]
-        }
+        description: "Get current TrustBench rankings for a capability",
+        parameters: { type: "object", properties: { capability: { type: "string", enum: ["search", "inference", "data"] } }, required: ["capability"] }
       },
       {
         name: "trustbench_route",
-        description: "Get the best recommended x402 provider for a given capability",
-        parameters: {
-          type: "object",
-          properties: {
-            capability: { type: "string", enum: ["search", "inference", "data"] }
-          },
-          required: ["capability"]
-        }
+        description: "Get the best recommended x402 provider + fallback",
+        parameters: { type: "object", properties: { capability: { type: "string", enum: ["search", "inference", "data"] } }, required: ["capability"] }
       }
     ]
   });

@@ -1,5 +1,4 @@
-// scripts/post-to-x.js
-const { TwitterApi } = require('twitter-api-v2');
+﻿const { TwitterApi } = require('twitter-api-v2');
 
 const client = new TwitterApi({
   appKey: process.env.X_CONSUMER_KEY,

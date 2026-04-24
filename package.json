@@ -4,14 +4,14 @@
   "description": "TrustBench - Reputation & Benchmark Layer for x402 / Agentic.Market",
   "main": "dist/index.js",
   "type": "module",
-"scripts": {
-  "dev": "tsx watch src/index.ts",
-  "build": "tsc",
-  "start": "tsx src/index.ts",
-  "crawl": "tsx src/crawler.ts",
-  "probe": "tsx src/prober.ts",
-  "pipeline": "tsx src/prober.ts"
-},
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "tsx src/index.ts",
+    "crawl": "tsx src/crawler.ts",
+    "probe": "tsx src/prober.ts",
+    "pipeline": "tsx src/prober.ts"
+  },
   "dependencies": {
     "@hono/node-server": "^1.11.0",
     "@supabase/supabase-js": "^2.43.4",
@@ -20,6 +20,7 @@
     "ethers": "^6.11.1",
     "hono": "^4.4.0",
     "ioredis": "^5.4.1",
+    "twitter-api-v2": "^1.29.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -27,5 +28,3 @@
     "typescript": "^5.4.5"
   }
 }
-
-

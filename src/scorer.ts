@@ -22,20 +22,43 @@ export async function getRankings(capability: string) {
   const cached = await redis.get(cacheKey);
   if (cached) return JSON.parse(cached);
 
+  // Get ALL seeded providers for this capability + their latest scorecard (if any)
   const { data } = await supabase
-    .from('scorecards')
-    .select('*')
-    .eq('capability', capability)
-    .order('score', { ascending: false });
+    .from('providers')
+    .select(`
+      provider_id,
+      capability,
+      name,
+      scorecards!left (
+        score,
+        latency_p50,
+        latency_p95,
+        uptime_7d,
+        last_updated
+      )
+    `)
+    .eq('capability', capability);
 
-  // Sign every scorecard for tamper-proofing
-  const signedData = data?.map(scorecard => signScorecard(scorecard)) || [];
+  const processed = data?.map(p => {
+    const scorecard = p.scorecards?.[0] || {};
+    return {
+      id: scorecard.id || null,
+      provider_id: p.provider_id,
+      capability: p.capability,
+      name: p.name,
+      score: scorecard.score ?? 40,           // default fallback score
+      latency_p50: scorecard.latency_p50 ?? 9999,
+      latency_p95: scorecard.latency_p95 ?? 9999,
+      uptime_7d: scorecard.uptime_7d ?? 50,
+      last_updated: scorecard.last_updated || new Date().toISOString(),
+      signature: scorecard.score ? signScorecard(scorecard).signature : null
+    };
+  }).sort((a, b) => b.score - a.score) || [];
 
-  await redis.set(cacheKey, JSON.stringify(signedData), 'EX', 300); // 5 min cache
-  return signedData;
+  await redis.set(cacheKey, JSON.stringify(processed), 'EX', 300); // 5 min cache
+  return processed;
 }
 
-// Simple HMAC signature for compliance / tamper-evidence
 export function signScorecard(scorecard: any) {
   const payload = JSON.stringify({
     provider_id: scorecard.provider_id,

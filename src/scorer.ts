@@ -22,36 +22,33 @@ export async function getRankings(capability: string) {
   const cached = await redis.get(cacheKey);
   if (cached) return JSON.parse(cached);
 
-  // Join ALL seeded providers with their latest scorecard (if any)
-  const { data } = await supabase
+  // Get all providers for this capability
+  const { data: providers } = await supabase
     .from('providers')
-    .select(`
-      provider_id,
-      capability,
-      name,
-      scorecards!left (
-        score,
-        latency_p50,
-        latency_p95,
-        uptime_7d,
-        last_updated
-      )
-    `)
+    .select('*')
     .eq('capability', capability);
 
-  const processed = data?.map(p => {
-    const scorecard = p.scorecards?.[0] || {};
+  // Get existing scorecards for this capability
+  const { data: scorecards } = await supabase
+    .from('scorecards')
+    .select('*')
+    .eq('capability', capability);
+
+  const scorecardMap = new Map(scorecards?.map(s => [s.provider_id, s]) || []);
+
+  const processed = providers?.map(p => {
+    const s = scorecardMap.get(p.provider_id) || {};
     return {
-      id: scorecard.id || null,
+      id: s.id || null,
       provider_id: p.provider_id,
       capability: p.capability,
-      name: p.name,
-      score: scorecard.score ?? 40,           // default fallback
-      latency_p50: scorecard.latency_p50 ?? 9999,
-      latency_p95: scorecard.latency_p95 ?? 9999,
-      uptime_7d: scorecard.uptime_7d ?? 50,
-      last_updated: scorecard.last_updated || new Date().toISOString(),
-      signature: scorecard.score ? signScorecard(scorecard).signature : null
+      name: p.name || p.provider_id,
+      score: s.score ?? 40,
+      latency_p50: s.latency_p50 ?? 9999,
+      latency_p95: s.latency_p95 ?? 9999,
+      uptime_7d: s.uptime_7d ?? 50,
+      last_updated: s.last_updated || new Date().toISOString(),
+      signature: s.score ? signScorecard(s).signature : null
     };
   }).sort((a, b) => b.score - a.score) || [];
 

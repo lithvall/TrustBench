@@ -11,5 +11,5 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Run directly with tsx (no build step needed)
-CMD ["tsx", "src/index.ts"]
+# Use npx to ensure tsx is found
+CMD ["npx", "tsx", "src/index.ts"]

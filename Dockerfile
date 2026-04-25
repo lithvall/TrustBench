@@ -1,19 +1,15 @@
-# TrustBench — Production Dockerfile (tsx for solo-founder simplicity)
 FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy package files first (better caching)
+# Copy package files first
 COPY package*.json ./
 
-# Install everything (devDependencies needed for tsx)
+# Install everything (including tsx)
 RUN npm ci
 
-# Copy source
+# Copy source code
 COPY . .
 
-# Expose port (Railway sets $PORT automatically)
-EXPOSE 3000
-
-# Run with tsx (same as local dev — no TS build headaches)
-CMD ["npm", "start"]
+# Run directly with tsx (no build step needed)
+CMD ["tsx", "src/index.ts"]

@@ -4,11 +4,9 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
-    "start": "node dist/server.js",
-    "crawl": "tsx src/crawler.ts",
-    "probe": "tsx src/prober.ts",
-    "pipeline": "tsx src/prober.ts"
+    "start": "tsx src/index.ts",
+    "pipeline": "tsx src/prober.ts",
+    "crawl": "tsx src/crawler.ts"
   },
   "dependencies": {
     "hono": "^4.4.0",

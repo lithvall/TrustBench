@@ -4,7 +4,6 @@ import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
-import { paymentMiddleware } from '@x402/hono';
 import { getRankings, signScorecard } from './scorer.js';
 
 const app = new Hono();
@@ -48,8 +47,8 @@ app.get('/route', async (c) => {
   });
 });
 
-// Paid route
-app.get('/rankings/paid', paymentMiddleware, async (c) => {
+// Paid route (x402 middleware removed for now - we can add it back later)
+app.get('/rankings/paid', async (c) => {
   const capability = c.req.query('capability') || 'search';
   const data = await getRankings(capability as any);
   return c.json({ success: true, data: data.map(signScorecard), source: 'TrustBench', paid: true });

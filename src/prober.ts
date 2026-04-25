@@ -71,11 +71,10 @@ async function runFullProbeAndScore() {
     // Store raw probe results
     await supabase.from('probe_results').insert(results);
 
-    // Improved realistic scoring
+    // Improved realistic scoring (40–98 range)
     const successRate = results.filter(r => r.success).length / results.length;
     const avgLatency = results.reduce((sum, r) => sum + r.latency_ms, 0) / results.length;
     
-    // Better formula: base 40–98, penalize high latency and low success
     let score = Math.max(40, Math.min(98, Math.round(98 - (avgLatency / 7) - (1 - successRate) * 45)));
 
     await supabase

@@ -25,6 +25,7 @@ const providers: Provider[] = [
   { provider_id: "duckduckgo-search", capability: "search", name: "DuckDuckGo Search", url: "https://api.duckduckgo.com" },
   { provider_id: "kagi-search", capability: "search", name: "Kagi Search", url: "https://kagi.com" },
   { provider_id: "phind-search", capability: "search", name: "Phind Search", url: "https://phind.com" },
+  { provider_id: "perplexity-search-pro", capability: "search", name: "Perplexity Pro", url: "https://api.perplexity.ai" },
 
   // Inference (25)
   { provider_id: "groq-inference", capability: "inference", name: "Groq Inference", url: "https://api.groq.com" },
@@ -42,6 +43,9 @@ const providers: Provider[] = [
   { provider_id: "vastai-inference", capability: "inference", name: "Vast.ai Inference", url: "https://vast.ai" },
   { provider_id: "modal-inference", capability: "inference", name: "Modal Inference", url: "https://modal.com" },
   { provider_id: "banana-inference", capability: "inference", name: "Banana Inference", url: "https://banana.dev" },
+  { provider_id: "cohere-inference", capability: "inference", name: "Cohere Inference", url: "https://api.cohere.ai" },
+  { provider_id: "mistral-inference", capability: "inference", name: "Mistral Inference", url: "https://api.mistral.ai" },
+  { provider_id: "claude-inference", capability: "inference", name: "Claude Inference", url: "https://api.anthropic.com" },
 
   // Data (20)
   { provider_id: "perplexity-data", capability: "data", name: "Perplexity Data", url: "https://api.perplexity.ai" },
@@ -57,12 +61,17 @@ const providers: Provider[] = [
   { provider_id: "twitter-data", capability: "data", name: "Twitter Data", url: "https://api.twitter.com" },
   { provider_id: "reddit-data", capability: "data", name: "Reddit Data", url: "https://reddit.com" },
 
-  // Media / Infrastructure / Others (15+)
+  // Media (10)
   { provider_id: "stability-media", capability: "media", name: "Stability Media", url: "https://api.stability.ai" },
   { provider_id: "replicate-media", capability: "media", name: "Replicate Media", url: "https://api.replicate.com" },
   { provider_id: "midjourney-media", capability: "media", name: "Midjourney Media", url: "https://midjourney.com" },
   { provider_id: "elevenlabs-media", capability: "media", name: "ElevenLabs Media", url: "https://elevenlabs.io" },
-  { provider_id: "cohere-inference", capability: "inference", name: "Cohere Inference", url: "https://api.cohere.ai" },
+  { provider_id: "runway-media", capability: "media", name: "Runway Media", url: "https://runwayml.com" },
+
+  // Infrastructure / Others (10)
+  { provider_id: "cloudflare-inference", capability: "inference", name: "Cloudflare Inference", url: "https://api.cloudflare.com" },
+  { provider_id: "vercel-inference", capability: "inference", name: "Vercel Inference", url: "https://vercel.com" },
+  { provider_id: "supabase-inference", capability: "inference", name: "Supabase Inference", url: "https://supabase.com" },
 ];
 
 async function crawlAndUpsertProviders() {

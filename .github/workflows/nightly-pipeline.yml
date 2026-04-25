@@ -3,7 +3,7 @@ name: Nightly TrustBench Pipeline
 on:
   schedule:
     - cron: '0 3 * * *'     # Every night at 3:00 AM UTC
-  workflow_dispatch:        # Allows manual trigger
+  workflow_dispatch:
 
 jobs:
   pipeline:
@@ -20,7 +20,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run full pipeline (crawl + probe + score)
+      - name: Run full pipeline
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}

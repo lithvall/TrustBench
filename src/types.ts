@@ -1,18 +1,19 @@
 export interface Provider {
-  id: string;
-  url: string;
-  capability: 'search' | 'inference' | 'data' | 'social' | 'infra';
+  provider_id: string;
+  capability: string;
   name: string;
+  url: string;
   description?: string;
+  pay_to?: string;
 }
 
 export interface ProbeResult {
   provider_id: string;
-  timestamp: string;
-  latency_ms: number;
-  status: 'success' | 'error' | 'timeout';
-  error?: string;
+  capability: string;
   region: string;
+  latency_ms: number;
+  success: boolean;
+  timestamp: string;
 }
 
 export interface Scorecard {

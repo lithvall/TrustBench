@@ -15,14 +15,20 @@ import { TwitterApi } from 'twitter-api-v2';
     const inference = (await inferenceRes.json()).data || [];
     const dataCat = (await dataRes.json()).data || [];
 
-    const topSearch = search.slice(0, 2).map((p, i) => `${i+1}. ${p.provider_id.replace('-search','')} (${p.score})`).join('\n');
-    const topInference = inference.slice(0, 2).map((p, i) => `${i+1}. ${p.provider_id.replace('-inference','')} (${p.score})`).join('\n');
-    const topData = dataCat.slice(0, 2).map((p, i) => `${i+1}. ${p.provider_id.replace('-data','')} (${p.score})`).join('\n');
+    // Top 3 per category
+    const topSearch = search.slice(0, 3).map((p, i) => `${i+1}. ${p.provider_id.replace('-search','')} (${p.score})`).join('\n');
+    const topInference = inference.slice(0, 3).map((p, i) => `${i+1}. ${p.provider_id.replace('-inference','')} (${p.score})`).join('\n');
+    const topData = dataCat.slice(0, 3).map((p, i) => `${i+1}. ${p.provider_id.replace('-data','')} (${p.score})`).join('\n');
+
+    // Best performer of the day
+    const allProviders = [...search, ...inference, ...dataCat];
+    const bestOverall = allProviders.sort((a, b) => b.score - a.score)[0];
 
     const tweetText = `TrustBench daily rankings are live!\n\n` +
-      `🔍 Search\n${topSearch || 'No data yet'}\n\n` +
-      `⚡ Inference\n${topInference || 'No data yet'}\n\n` +
-      `📊 Data\n${topData || 'No data yet'}\n\n` +
+      `🔍 Search\n${topSearch || '—'}\n\n` +
+      `⚡ Inference\n${topInference || '—'}\n\n` +
+      `📊 Data\n${topData || '—'}\n\n` +
+      `🏆 Best performer today: ${bestOverall ? `${bestOverall.provider_id} (${bestOverall.score})` : '—'}\n\n` +
       `Full leaderboard → https://trustbench-production.up.railway.app/rankings?capability=search\n\n` +
       `#x402 #AgenticMarket #AI`;
 
@@ -34,7 +40,7 @@ import { TwitterApi } from 'twitter-api-v2';
     });
 
     const tweet = await client.v2.tweet(tweetText);
-    console.log('✅ Dynamic multi-category post sent:', tweet);
+    console.log('✅ Enhanced multi-category daily post sent:', tweet);
   } catch (err) {
     console.error('❌ Post failed:', err);
     // Fallback

@@ -1,4 +1,4 @@
-// src/prober.ts - FINAL realistic scoring for x402
+// src/prober.ts - FINAL realistic x402 scoring (gives good spread)
 import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
 
@@ -78,10 +78,10 @@ async function runFullProbeAndScore() {
     const successRate = results.filter(r => r.success).length / results.length;
     const avgLatency = results.reduce((sum, r) => sum + r.latency_ms, 0) / results.length;
 
-    // More realistic x402 scoring (60 base + success bonus - light latency penalty)
+    // Realistic x402 scoring (60 base + success bonus - gentle latency penalty)
     let score = 60 
-      + (successRate - 0.8) * 30          // success bonus/penalty
-      - Math.min(25, avgLatency / 12);    // gentle latency penalty
+      + (successRate - 0.7) * 35          // success bonus/penalty
+      - Math.min(30, avgLatency / 15);    // gentle latency penalty
 
     score = Math.max(40, Math.min(98, Math.round(score)));
 

@@ -1,4 +1,4 @@
-// src/prober.ts - FINAL VERSION (realistic x402 scoring)
+// src/prober.ts - FINAL realistic scoring for x402
 import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
 
@@ -33,7 +33,6 @@ async function probeProvider(provider: any) {
       clearTimeout(timeout);
       const latency = Date.now() - start;
 
-      // Treat common x402 responses as SUCCESS
       const success = [200, 401, 402, 403, 404, 405].includes(res.status);
 
       results.push({
@@ -62,7 +61,7 @@ async function probeProvider(provider: any) {
 }
 
 async function runFullProbeAndScore() {
-  console.log('🚀 Starting final real-URL probe + scoring pipeline...');
+  console.log('🚀 Starting final x402 probe + scoring pipeline...');
 
   const { data: providers } = await supabase
     .from('providers')
@@ -79,7 +78,12 @@ async function runFullProbeAndScore() {
     const successRate = results.filter(r => r.success).length / results.length;
     const avgLatency = results.reduce((sum, r) => sum + r.latency_ms, 0) / results.length;
 
-    const score = Math.max(40, Math.min(98, Math.round(98 - (avgLatency / 7) - (1 - successRate) * 45)));
+    // More realistic x402 scoring (60 base + success bonus - light latency penalty)
+    let score = 60 
+      + (successRate - 0.8) * 30          // success bonus/penalty
+      - Math.min(25, avgLatency / 12);    // gentle latency penalty
+
+    score = Math.max(40, Math.min(98, Math.round(score)));
 
     await supabase.from('scorecards').upsert({
       provider_id: p.url,

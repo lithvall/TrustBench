@@ -2,6 +2,8 @@
 import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
 
+console.log('🚀 PROBER VERSION: v2-percentile-scoring');
+
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SECRET_KEY!,

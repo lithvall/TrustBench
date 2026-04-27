@@ -88,8 +88,13 @@ async function probeProvider(provider: any): Promise<ProbeSample[]> {
 
 function percentile(sorted: number[], p: number): number {
   if (sorted.length === 0) return 0;
-  const idx = Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * p));
-  return sorted[idx];
+  if (sorted.length === 1) return sorted[0];
+  const rank = (sorted.length - 1) * p;
+  const lo = Math.floor(rank);
+  const hi = Math.ceil(rank);
+  return lo === hi
+    ? sorted[lo]
+    : sorted[lo] + (sorted[hi] - sorted[lo]) * (rank - lo);
 }
 
 function stddev(values: number[]): number {

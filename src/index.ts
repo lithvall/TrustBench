@@ -1,4 +1,87 @@
-// Analytics dashboard with clear measurement note
+// src/index.ts - FULL CORRECT FILE
+import 'dotenv/config';
+import { Hono } from 'hono';
+import { serve } from '@hono/node-server';
+import { cors } from 'hono/cors';
+import { logger } from 'hono/logger';
+import { getRankings, signScorecard } from './scorer.js';
+
+const app = new Hono();
+
+app.use('*', cors());
+app.use('*', logger());
+
+// Health
+app.get('/health', (c) => c.json({ status: 'ok', project: 'TrustBench' }));
+
+// Public rankings
+app.get('/rankings', async (c) => {
+  const capability = c.req.query('capability') || 'search';
+  const data = await getRankings(capability as any);
+  return c.json({ success: true, data, source: 'TrustBench' });
+});
+
+// Router v2
+app.get('/route', async (c) => {
+  const capability = c.req.query('capability') || 'search';
+  const rankings = await getRankings(capability as any);
+
+  if (!rankings || rankings.length === 0) {
+    return c.json({ success: false, error: 'No providers available' }, 404);
+  }
+
+  const best = rankings[0];
+  const fallback = rankings.length > 1 ? rankings[1] : null;
+
+  return c.json({
+    success: true,
+    capability,
+    recommended_provider: best.provider_id,
+    score: best.score,
+    latency_p50: best.latency_p50,
+    fallback_provider: fallback ? fallback.provider_id : null,
+    fallback_score: fallback ? fallback.score : null,
+    message: `Best current provider for ${capability} is ${best.provider_id} (score: ${best.score}).`,
+    full_rankings_url: `https://trustbench-production.up.railway.app/rankings?capability=${capability}`,
+    signed_scorecards: rankings.map(signScorecard)
+  });
+});
+
+// Paid route (x402)
+app.get('/rankings/paid', async (c) => {
+  const capability = c.req.query('capability') || 'search';
+  const data = await getRankings(capability as any);
+  return c.json({ success: true, data: data.map(signScorecard), source: 'TrustBench', paid: true });
+});
+
+// MCP tools
+app.get('/mcp/tools', (c) => {
+  return c.json({
+    success: true,
+    tools: [
+      {
+        name: "trustbench_get_rankings",
+        description: "Get current TrustBench rankings for a capability",
+        parameters: {
+          type: "object",
+          properties: { capability: { type: "string", enum: ["search", "inference", "data"] } },
+          required: ["capability"]
+        }
+      },
+      {
+        name: "trustbench_route",
+        description: "Get the best recommended x402 provider with fallback",
+        parameters: {
+          type: "object",
+          properties: { capability: { type: "string", enum: ["search", "inference", "data"] } },
+          required: ["capability"]
+        }
+      }
+    ]
+  });
+});
+
+// Analytics dashboard with measurement note
 app.get('/analytics', async (c) => {
   const search = await getRankings('search');
   const inference = await getRankings('inference');
@@ -16,7 +99,7 @@ app.get('/analytics', async (c) => {
     th, td { padding: 12px; text-align: left; border-bottom: 1px solid #333; }
     th { background: #1f1f1f; }
     .good { color: #22c55e; font-weight: bold; }
-    .note { background: #1a1a1a; padding: 12px; border-radius: 6px; font-size: 0.95em; margin: 20px 0; }
+    .note { background: #1a1a1a; padding: 12px; border-radius: 6px; font-size: 0.95em; margin: 20px 0; line-height: 1.4; }
   </style>
 </head>
 <body>
@@ -24,8 +107,11 @@ app.get('/analytics', async (c) => {
   <p>Last updated: ${new Date().toLocaleString()}</p>
   
   <div class="note">
-    <strong>Measurement note:</strong> Latency and uptime are measured from 3 cloud regions (US-East, EU-West, Asia-Southeast). 
-    This is a zero-cost MVP approach. True global multi-region probing (South America, Africa, Australia, etc.) is planned for a future phase.
+    <strong>Measurement note:</strong> Latency and uptime are currently measured from 3 cloud regions (US-East, EU-West, Asia-Southeast). 
+    This is a deliberate zero-cost MVP choice that keeps TrustBench fully free and sustainable. 
+    <br><br>
+    True global multi-region probing (South America, Africa, Australia, etc.) is planned for a future phase. 
+    It would give agents and users even more accurate real-world performance data regardless of their location.
   </div>
 
   <h2>Providers by Category</h2>
@@ -46,3 +132,8 @@ app.get('/analytics', async (c) => {
 
   return c.html(html);
 });
+
+const port = Number(process.env.PORT) || 3000;
+serve({ fetch: app.fetch, port });
+
+console.log(`🚀 TrustBench server running on http://localhost:${port}`);

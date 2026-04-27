@@ -1,7 +1,6 @@
-// src/prober.ts
+// src/prober.ts - FIXED for current clean schema
 import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
-import { ProbeResult } from './types.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -11,16 +10,16 @@ const supabase = createClient(
 
 const REGIONS = ['us-east', 'eu-west', 'asia-southeast'];
 
-async function probeProvider(provider: any): Promise<ProbeResult[]> {
-  const results: ProbeResult[] = [];
+async function probeProvider(provider: any) {
+  const results = [];
   const targetUrl = provider.url;
 
   if (!targetUrl) {
-    console.log(`⚠️ Skipping ${provider.provider_id} — no URL`);
+    console.log(`⚠️ Skipping provider with no URL`);
     return results;
   }
 
-  console.log(`🔍 Probing ${provider.provider_id} (${provider.capability}) → ${targetUrl}`);
+  console.log(`🔍 Probing ${provider.name || 'Unknown'} (${provider.capability}) → ${targetUrl}`);
 
   for (const region of REGIONS) {
     const start = Date.now();
@@ -28,7 +27,6 @@ async function probeProvider(provider: any): Promise<ProbeResult[]> {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 8000);
 
-      // Use GET for most x402 providers (many return 402 on unauthenticated GET)
       const res = await fetch(targetUrl, {
         method: 'GET',
         signal: controller.signal,
@@ -38,12 +36,10 @@ async function probeProvider(provider: any): Promise<ProbeResult[]> {
       clearTimeout(timeout);
 
       const latency = Date.now() - start;
-
-      // Treat 200 or 402 as success (402 = working x402 provider)
-      const success = res.ok || res.status === 402;
+      const success = res.ok || res.status === 402 || res.status === 200;
 
       results.push({
-        provider_id: provider.provider_id,
+        provider_id: provider.url,   // use url as identifier
         capability: provider.capability,
         region,
         latency_ms: latency,
@@ -51,15 +47,10 @@ async function probeProvider(provider: any): Promise<ProbeResult[]> {
         timestamp: new Date().toISOString()
       });
 
-      if (success) {
-        console.log(`  ✅ ${region}: ${latency}ms (status ${res.status})`);
-      } else {
-        console.log(`  ❌ ${region}: ${latency}ms (status ${res.status})`);
-      }
-    } catch (err) {
-      const latency = Date.now() - start;
+      console.log(`  ${success ? '✅' : '❌'} ${region}: ${latency}ms (status ${res.status})`);
+    } catch {
       results.push({
-        provider_id: provider.provider_id,
+        provider_id: provider.url,
         capability: provider.capability,
         region,
         latency_ms: 9999,
@@ -77,7 +68,7 @@ async function runFullProbeAndScore() {
 
   const { data: providers } = await supabase
     .from('providers')
-    .select('*')
+    .select('url, name, capability')
     .order('last_crawled_at', { ascending: false });
 
   if (!providers || providers.length === 0) {
@@ -89,31 +80,23 @@ async function runFullProbeAndScore() {
 
   for (const p of providers) {
     const results = await probeProvider(p);
-
     if (results.length === 0) continue;
 
-    // Store raw probes
-    await supabase.from('probe_results').insert(results);
+    await supabase.from('probes').insert(results);
 
-    // Calculate score
     const successRate = results.filter(r => r.success).length / results.length;
     const avgLatency = results.reduce((sum, r) => sum + r.latency_ms, 0) / results.length;
 
-    let score = Math.max(40, Math.min(98,
-      Math.round(98 - (avgLatency / 7) - (1 - successRate) * 45)
-    ));
+    const score = Math.max(40, Math.min(98, Math.round(98 - (avgLatency / 7) - (1 - successRate) * 45)));
 
-    // Upsert scorecard
-    await supabase
-      .from('scorecards')
-      .upsert({
-        provider_id: p.provider_id,
-        capability: p.capability,
-        score,
-        latency_p50: Math.round(avgLatency),
-        latency_p95: Math.round(avgLatency * 1.2),
-        uptime_7d: Math.round(successRate * 100)
-      }, { onConflict: 'provider_id,capability' });
+    await supabase.from('scorecards').upsert({
+      provider_id: p.url,
+      capability: p.capability,
+      score,
+      latency_p50: Math.round(avgLatency),
+      latency_p95: Math.round(avgLatency * 1.2),
+      uptime_7d: Math.round(successRate * 100)
+    }, { onConflict: 'provider_id' });
   }
 
   console.log('✅ Full real-URL probe + scoring completed — rankings updated!');

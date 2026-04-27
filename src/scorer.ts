@@ -1,4 +1,4 @@
-// src/scorer.ts
+// src/scorer.ts - FIXED for current clean schema
 import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
 import { Redis } from 'ioredis';
@@ -24,7 +24,7 @@ export async function getRankings(capability: string) {
 
   const { data: providers } = await supabase
     .from('providers')
-    .select('provider_id, capability, name')
+    .select('url, name, capability')
     .eq('capability', capability);
 
   const { data: scorecards } = await supabase
@@ -35,18 +35,18 @@ export async function getRankings(capability: string) {
   const scorecardMap = new Map(scorecards?.map(s => [s.provider_id, s]) || []);
 
   const processed = providers?.map(p => {
-    const s = scorecardMap.get(p.provider_id) || {};
+    const s = scorecardMap.get(p.url) || {};
     return {
       id: s.id || null,
-      provider_id: p.provider_id,
+      provider_id: p.url,
       capability: p.capability,
-      name: p.name || p.provider_id,
+      name: p.name || 'Unknown',
       score: s.score ?? 40,
       latency_p50: s.latency_p50 ?? 9999,
       latency_p95: s.latency_p95 ?? 9999,
       uptime_7d: s.uptime_7d ?? 50,
       last_updated: s.last_updated || new Date().toISOString(),
-      signature: s.score ? signScorecard(s).signature : null
+      signature: s.signature || null
     };
   }).sort((a, b) => b.score - a.score) || [];
 

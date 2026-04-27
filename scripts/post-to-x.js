@@ -10,13 +10,18 @@ import { TwitterApi } from 'twitter-api-v2';
     accessSecret: process.env.X_ACCESS_TOKEN_SECRET,
   });
 
+  // Honest framing: we run liveness telemetry on x402-style endpoints, not a benchmark.
+  // Methodology page (/methodology) describes exactly what the probe does.
   try {
     await client.v2.tweet(
-      `TrustBench daily rankings are live! Check the best x402 providers right now 👇\n\n` +
-      `https://trustbench-production.up.railway.app/rankings?capability=search\n\n` +
-      `#x402 #AgenticMarket #AI`
+      `Nightly x402 telemetry is live. Public registry of x402-style endpoints + ` +
+      `liveness probes + signed scorecards. Honest about what we measure (it's a ` +
+      `liveness check, not a benchmark — yet).\n\n` +
+      `https://trustbench-production.up.railway.app/rankings?capability=search\n` +
+      `Methodology: https://trustbench-production.up.railway.app/methodology\n\n` +
+      `#x402 #AIagents`
     );
-    console.log('✅ Simple daily post sent successfully');
+    console.log('✅ Daily post sent successfully');
   } catch (err) {
     console.error('❌ Post failed:', err);
   }

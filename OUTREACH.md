@@ -146,6 +146,54 @@ A few rules that keep these posts from getting deleted or downvoted:
 >
 > Solo founder, no token, not raising. Just trying to design this right before I ship.
 
+## Draft X / Twitter post — the reframe
+
+One post, no thread. The aim is to get the right people to click through to
+the methodology page, and to give anyone already following @TrustBench
+an honest update on the direction.
+
+> Update on TrustBench.
+>
+> What started as "x402 benchmark" is, honestly, a registry with nightly
+> liveness telemetry — useful, but not a benchmark. New methodology page
+> spells out exactly what the probe measures, and what it doesn't.
+>
+> Next: non-custodial router for x402, Ed25519-signed receipts, policy
+> firewall. The registry stays as the front door while the router gets built.
+>
+> https://trustbench-production.up.railway.app/methodology
+
+A second tweet a few days later, framed as a question rather than a launch:
+
+> Building on x402? I'd like 15 min of your time. Trying to learn which
+> piece of payment plumbing actually hurts most in production —
+> discovery, signing, retries, spend limits, accounting. DMs open.
+
+## Draft Coinbase Developer Platform Discord intro
+
+Short, low-key, in the most relevant channel (#x402 or #agentkit, whichever
+is more active when you post). One link, one ask.
+
+> Hi all — solo founder building TrustBench, a public registry of x402-style
+> endpoints with nightly liveness telemetry and signed scorecards.
+>
+> I'm planning to extend it into a non-custodial smart router for agents
+> (agent authorizes + signs the x402 tx, TrustBench picks the provider and
+> returns a signed receipt — never custodial), and before I write a line of
+> router code I want to validate the design with people who are actually
+> shipping x402 integrations.
+>
+> If you're working on agents that pay for tools, I'd really value 15 min
+> of your time on three questions: which piece of x402 plumbing hurts most
+> right now, would you outsource it to a hosted router, and would 1-3% on
+> each call kill the economics. DM me anytime.
+>
+> Methodology + current registry: https://trustbench-production.up.railway.app/methodology
+
+If a maintainer reacts well, ask once whether the Discord has a #showcase
+or #builders channel where it's appropriate to post a short intro thread.
+Don't crosspost without permission.
+
 ## Outreach mini-checklist
 
 - [ ] Phase 0 deploy (this README + methodology page) live before any post goes up.

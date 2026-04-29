@@ -4,7 +4,7 @@ import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
-import { getRankings, signScorecard } from './scorer.js';
+import { getRankings, signScorecard, getPublicKeyPem, isPublicVerifiable } from './scorer.js';
 
 const app = new Hono();
 
@@ -81,6 +81,27 @@ app.get('/mcp/tools', (c) => {
   });
 });
 
+// Public Ed25519 key for verifying signed scorecards.
+// Anyone can fetch this and verify any TrustBench scorecard signature without
+// ever contacting us — that's the whole point of moving from HMAC to Ed25519.
+// Standard well-known path so it's discoverable without docs.
+app.get('/.well-known/trustbench-pubkey', (c) => {
+  const pem = getPublicKeyPem();
+  if (!pem) {
+    return c.text(
+      'No Ed25519 public key configured on this deployment.\n' +
+      'Scorecard signatures are currently HMAC-SHA256 (server-internal only).\n' +
+      'See /methodology for details.\n',
+      503,
+      { 'Content-Type': 'text/plain; charset=utf-8' }
+    );
+  }
+  return c.text(pem, 200, {
+    'Content-Type': 'application/x-pem-file',
+    'Cache-Control': 'public, max-age=86400'
+  });
+});
+
 // Public methodology page — required reading for anyone interpreting the data.
 // Phase 0 of the strategy doc says: name what the probe does and does NOT do, in plain
 // language, before any third party tries to cite the data.
@@ -101,66 +122,88 @@ app.get('/methodology', (c) => {
   </style>
 </head>
 <body>
-  <h1>How TrustBench measures providers</h1>
+  <h1>Methodology</h1>
   <p>
-    TrustBench is currently a <strong>registry with liveness telemetry</strong>, not a benchmark.
-    This page describes exactly what the nightly probe does, what the score means, and what it
-    does <em>not</em> mean. If you're considering citing this data anywhere, read this first.
+    TrustBench is a public registry of x402-style endpoints with nightly liveness telemetry
+    and signed scorecards. This page documents exactly how the data is collected, how scores
+    are computed, and what each metric represents — so anyone integrating against the registry
+    knows what they're working with.
   </p>
 
-  <h2>What we actually do</h2>
+  <h2>Data collection</h2>
   <ul>
-    <li>A GitHub Actions job runs once per day on a single Ubuntu runner.</li>
-    <li>For each provider URL in the registry, we send <strong>three sequential requests</strong>
-        per run. The three requests are tagged <code>us-east / eu-west / asia-southeast</code> for
-        variance bookkeeping, but they all originate from the same host. They are sample slots,
-        not real geographic regions.</li>
-    <li>Each request is a <code>HEAD</code> with an 8-second timeout, falling back to <code>GET</code>
-        if the server returns 405.</li>
-    <li>HTTP status codes <code>200, 201, 204, 401, 402, 403, 404, 405, 429</code> are treated as
-        "the endpoint is alive and reachable." Anything else, plus connection errors and timeouts,
-        counts as a failure.</li>
+    <li>A scheduled job runs once per day on a single cloud host.</li>
+    <li>For each provider URL, the prober sends <strong>three sequential requests</strong>
+        per run. The three samples are tagged <code>us-east / eu-west / asia-southeast</code>
+        for variance accounting; they all originate from the same host today. Multi-host
+        probing is on the roadmap.</li>
+    <li>Each request is a <code>HEAD</code> with an 8-second timeout, falling back to
+        <code>GET</code> if the server returns 405.</li>
+    <li>HTTP status codes <code>200, 201, 204, 401, 402, 403, 404, 405, 429</code> are
+        recorded as "endpoint is alive." Other statuses, connection errors, and timeouts
+        are recorded as failures.</li>
   </ul>
 
-  <h2>How the score is computed</h2>
+  <h2>Scoring</h2>
   <pre>score = 15
       + 45 · successRate
       + 35 · latencyHealth        // max(0, min(1, 1 - p50 / 2000))
       +  3 · consistencyBonus     // max(0, min(1, 1 - jitter))
 clamped to [40, 98]</pre>
   <p>
-    <code>p50</code> and <code>p95</code> latency are computed over <em>successful</em> probes only,
-    using linear-interpolation percentiles. Timeouts hit reliability (correctly), but they no longer
-    poison the latency number.
+    <code>p50</code> and <code>p95</code> latency are computed over successful probes only,
+    using linear-interpolation percentiles. Timeouts contribute to reliability but are
+    excluded from the latency calculation, so a single failure does not distort the latency
+    number.
   </p>
 
-  <h2>What the score does NOT mean</h2>
+  <h2>What each metric represents</h2>
   <div class="warn">
     <ul>
-      <li><strong>It is not proof the API works.</strong> 401/403/404/405/429 all count as "alive"
-          — they prove the server responded, not that the underlying capability is functional.</li>
-      <li><strong>It is not an x402 payment benchmark.</strong> We do not execute payments, do not
-          measure settlement latency, do not observe retry behavior under failed payments, and do
-          not check that paid responses contain anything useful.</li>
-      <li><strong>It is not multi-region.</strong> All probes originate from one GitHub Actions
-          runner. Real-world latency from your agent's location will differ.</li>
-      <li><strong>It is not a reputation oracle.</strong> Scorecards are signed today with
-          HMAC-SHA256 over a shared secret, which proves provenance to TrustBench but cannot be
-          independently verified by third parties. Migration to Ed25519 with a published public
-          key is the next foundation task.</li>
+      <li><strong>Score reflects reachability and response time, not capability quality.</strong>
+          A 4xx or 429 response confirms the endpoint is up and responding, but does not
+          confirm the underlying API behaves correctly when authenticated and paid.</li>
+      <li><strong>Latency is single-origin.</strong> All measurements come from one host
+          today, so real-world latency from an agent's location will differ. Multi-host
+          measurement is planned.</li>
+      <li><strong>Payment behavior is not yet measured.</strong> The current probe does not
+          execute x402 payments, observe settlement latency, or validate payment-gated
+          responses. A capability-aware paid-probe layer ships alongside the router.</li>
+      <li><strong>Scorecards are signed with Ed25519.</strong> The public key is served at
+          <a href="/.well-known/trustbench-pubkey">/.well-known/trustbench-pubkey</a> so any
+          third party can verify a TrustBench scorecard independently. See "Verifying a
+          scorecard" below.</li>
     </ul>
   </div>
 
-  <h2>Why we're up-front about this</h2>
+  <h2>Verifying a scorecard</h2>
+  <p>
+    Each entry returned by <code>/rankings/paid</code> includes
+    <code>signed_payload</code>, <code>signature</code>, and <code>signature_alg</code>
+    (<code>ed25519</code> when the deployment has a published public key,
+    <code>hmac-sha256</code> as a fallback). The Ed25519 public key is served at
+    <a href="/.well-known/trustbench-pubkey">/.well-known/trustbench-pubkey</a>
+    and can be used by anyone to verify a scorecard without contacting TrustBench:
+  </p>
+  <pre>// Reference verifier (Node) — also in scripts/verify-scorecard.js
+const pubPem = await (await fetch(BASE + '/.well-known/trustbench-pubkey')).text();
+const publicKey = crypto.createPublicKey({ key: pubPem, format: 'pem' });
+
+const valid = crypto.verify(
+  null,
+  Buffer.from(sc.signed_payload),
+  publicKey,
+  Buffer.from(sc.signature, 'base64')
+);</pre>
+
+  <h2>Roadmap</h2>
   <p>
     TrustBench is evolving from a public registry into a non-custodial smart router and
-    payment-plumbing layer for agent commerce. The registry is a useful front door while we build,
-    but it would not survive being framed as an authoritative benchmark. Honest framing now is
-    cheaper than a credibility hit later.
-  </p>
-  <p>
-    Full strategy and roadmap:
-    <a href="https://github.com/">TrustBench-strategy.md</a> in the repo.
+    payment-plumbing layer for agent commerce. The registry will continue to publish
+    liveness telemetry; the next milestones are a capability-aware paid-probe layer
+    and a non-custodial <code>/route</code> endpoint that constructs x402 transactions
+    for agents to sign and returns a signed receipt. Full plan in
+    <code>TrustBench-strategy.md</code>.
   </p>
 
   <p><a href="/analytics">Analytics dashboard</a> · <a href="/rankings?capability=search">Sample rankings</a> · <a href="/health">Health</a></p>
@@ -195,16 +238,14 @@ app.get('/analytics', async (c) => {
   <p>Last updated: ${new Date().toLocaleString()}</p>
   
   <div class="note">
-    <strong>Measurement note (be honest with yourself):</strong>
-    Latency and uptime here come from a nightly probe that runs from <em>one</em> cloud host
-    (GitHub Actions, Ubuntu) and sends three sequential <code>HEAD</code> requests per provider
-    (with <code>GET</code> fallback on 405). HTTP status codes
-    <code>200/201/204/401/402/403/404/405/429</code> are treated as "endpoint is alive."
-    This is a liveness check, not a benchmark — it does not execute payments, validate that
-    the API returns useful results, or characterize behavior under real load. The three
-    sample slots are labeled <code>us-east / eu-west / asia-southeast</code> for variance,
-    but they all run from the same host. See <a href="/methodology" style="color:#22c55e">/methodology</a>
-    for the full description.
+    <strong>How this data is collected:</strong>
+    Latency and uptime are measured by a nightly probe that sends three sequential
+    <code>HEAD</code> requests per provider from a single cloud host (with a <code>GET</code>
+    fallback on 405). HTTP status codes <code>200/201/204/401/402/403/404/405/429</code> are
+    treated as "endpoint is alive." This is a liveness check — it confirms the endpoint is
+    reachable and responding, but does not execute payments or validate response quality.
+    A capability-aware paid-probe layer is on the roadmap. Full methodology:
+    <a href="/methodology" style="color:#22c55e">/methodology</a>.
   </div>
 
   <h2>Providers by Category</h2>

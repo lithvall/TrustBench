@@ -6,7 +6,9 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "pipeline": "tsx src/prober.ts",
-    "crawl": "tsx src/crawler.ts"
+    "crawl": "tsx src/crawler.ts",
+    "keygen": "node scripts/keygen.js",
+    "verify-scorecard": "node scripts/verify-scorecard.js"
   },
   "dependencies": {
     "hono": "^4.4.0",

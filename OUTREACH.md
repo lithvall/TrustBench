@@ -3,6 +3,168 @@
 Goal of Phase 2: three real conversations with people building on x402. One written
 expression of interest before any router code gets written.
 
+---
+
+## Send-tomorrow plan (the actual sequence)
+
+Phase 1 is verifiable in production. The first thing that should hit the world tomorrow
+is the X reframe; DMs follow over the next 2–3 days so each conversation gets your full
+attention as it lands. Concrete cadence at the bottom of this section.
+
+### The X post — tweet 1 (the announcement)
+
+Paste exactly. 270 characters before X auto-shortens the URL.
+
+> Reframed TrustBench publicly.
+>
+> What I called an "x402 benchmark" was overclaiming — what we actually run is
+> nightly liveness telemetry. New methodology page is honest about it.
+>
+> Scorecards are now Ed25519-signed; anyone can verify them against the public key.
+>
+> https://trustbench-production.up.railway.app/methodology
+
+### The X post — tweet 2 (post as a reply to tweet 1, same hour)
+
+> Building toward a non-custodial router for x402 next — agent authorizes,
+> signs the tx, TrustBench routes + emits a signed receipt.
+>
+> Before I write a line of router code: which piece of x402 plumbing actually
+> hurts most for you? Discovery, signing, retries, spend limits, accounting?
+
+The reply structure matters. Tweet 1 is what you'd want a stranger to find via search;
+tweet 2 is what gets replies. Quote-retweet anyone who answers, even briefly.
+
+### DM templates — five recipient types
+
+Each is under ~120 words. **Personalize the bracketed bits before sending.** Don't
+send all five in one day — pace them so you can have a real reply thread with each.
+
+#### Template A — "saw your x402 demo / repo"
+For: someone who recently shipped or demoed an x402 integration in public.
+
+> Hi [name] — saw [the demo / your repo / your tweet about X]. Nice work on
+> [specific thing they shipped].
+>
+> I'm building TrustBench, a registry of x402-style endpoints with nightly
+> liveness telemetry and Ed25519-signed scorecards. Trying to validate
+> whether a non-custodial router (you authorize + sign, I route + emit
+> signed receipt) is actually a thing builders would pay 1–3% for, before
+> I write any router code.
+>
+> Would you have 15 min sometime this week? I'd really value your honest
+> read on which piece of payment plumbing actually hurts in production.
+>
+> Methodology + the verifier:
+> https://trustbench-production.up.railway.app/methodology
+
+#### Template B — coinbase/x402 contributor
+For: someone whose name shows up as an issue author or PR author on the spec/SDK.
+
+> Hi [name] — saw your [issue/PR] on coinbase/x402 about [topic]. The
+> [specific point they made] matched something I keep hitting.
+>
+> I run TrustBench (registry + signed liveness telemetry for x402-style
+> endpoints, evolving toward a non-custodial router for agents). Before
+> I commit to building the router, I'm trying to learn from people closer
+> to the spec than me — which integration friction would a hosted router
+> actually relieve, and which is just intrinsic to x402?
+>
+> Open to a quick 15 min call this week if you can spare it. No pitch,
+> just want your read. https://trustbench-production.up.railway.app/methodology
+
+#### Template C — agent-framework maintainer (LangChain / CrewAI / agent SDK)
+For: people who maintain agent toolkits where x402 is starting to land.
+
+> Hi [name] — building TrustBench, a registry + signed-telemetry layer
+> for x402 endpoints, evolving toward a non-custodial router for agents.
+>
+> The reason I'm DMing: agent frameworks are the layer where payment
+> plumbing actually shows up as developer pain. Before I ship a router
+> primitive, I want to know whether the right shape for [their framework]
+> users is "an MCP-style tool" or "a transparent proxy" or something else
+> entirely.
+>
+> Would 15 min this week work? https://trustbench-production.up.railway.app/methodology
+
+#### Template D — Coinbase Developer Platform community
+For: someone active in the CDP Discord / replying under @CoinbaseDev launches.
+
+> Hi [name] — saw you've been active around x402 in the CDP community.
+> I'm a solo founder building TrustBench (registry + signed liveness
+> telemetry for x402 endpoints, planning to extend with a non-custodial
+> router).
+>
+> Before writing the router, I want to validate the shape with people
+> who are actually integrating x402 in production. Three quick questions
+> if you have 15 min: which piece of plumbing hurts most, would you
+> outsource to a hosted router, would 1–3% per call kill your economics?
+>
+> https://trustbench-production.up.railway.app/methodology
+
+#### Template E — agent builder shipping a paid agent
+For: someone who has a public agent product that calls paid APIs (x402 or otherwise).
+
+> Hi [name] — your [agent / product] is one of the few I've seen that
+> actually moves money on behalf of users. That's the audience I'm trying
+> to reach.
+>
+> Building TrustBench: a non-custodial router for x402 (and eventually
+> p402) where the agent authorizes + signs and we route to the best
+> provider with a signed receipt. Before I build it, I want to know
+> whether something like this would actually save you time vs. integrating
+> providers directly.
+>
+> 15 min this week? https://trustbench-production.up.railway.app/methodology
+
+### How to find the right people (so the templates have someone to send to)
+
+In rough order of speed, do these on the same day you post the X tweets:
+
+1. **GitHub.** Open https://github.com/coinbase/x402, click Issues + Pull Requests,
+   sort by recent. Note the 5–10 names you see most often. Click their profiles —
+   many have a Twitter/X handle on the bio. → Template B.
+2. **X search**, paste each into search:
+   - `"x402" "shipped"` (people announcing a launch)
+   - `"x402" "agent" min_faves:5` (more signal than noise)
+   - `from:CoinbaseDev x402` then read replies (people who care enough to engage)
+   → Template A or D.
+3. **Coinbase Developer Platform Discord.** Find the most active x402 channel.
+   Lurk for ten minutes to read tone, then drop the intro from the previous
+   section. DM anyone who replies meaningfully. → Template D.
+4. **Agent framework Discords / GitHubs.** LangChain, CrewAI, AutoGen. Search
+   their issues for "x402" or "payment." → Template C.
+5. **AgentPay / a2a-x402 / similar GitHub orgs** (showed up in our research).
+   Look at contributors. → Template B.
+
+### One-week cadence
+
+Aim for *quality over quantity*. Three real conversations beat thirty cold sends.
+
+| Day | Action |
+|-----|--------|
+| **Tue** (tomorrow) | Post X tweet 1 + tweet 2 (reply). Spend 30 min collecting 10 candidate names from the channels above into a notes file (name, where you found them, link, suggested template letter). |
+| **Wed** | Send 2 DMs (your two strongest leads). Drop the Discord intro from the earlier section in #x402. Reply to anyone who has commented on the X post. |
+| **Thu** | Send 2 more DMs. If anyone replied yes, send a calendar link or agree on a time. |
+| **Fri** | Send 1–2 more DMs to round out 5–6 sent total. Check Discord activity. |
+| **Sat–Sun** | Read every reply slowly. Take 30 min each call. Write the answers in your tracker. |
+| **Mon** | If you have ≥1 written "yes, I'd pay for this," start the Phase 3 router scaffolding. If not, send another batch of 5 and reassess Friday. |
+
+### What "phase 2 done" actually looks like
+
+A spreadsheet (or Notion table) with at least 6 rows of real builders contacted, of
+which:
+
+- 3 had a 15-min conversation,
+- 1 said in writing some version of "yes, I'd use a non-custodial x402 router and 1–3% is acceptable" with a specific use case,
+- and 1 specified which sub-piece (signing / spend limits / accounting / discovery) is their *most* painful right now.
+
+That last one shapes the order Phase 3 builds — the router is non-negotiable, but
+the order of the policy + receipt features should follow whatever they said hurts
+most.
+
+
+
 You don't need to know anyone personally. The x402 community is small enough that
 showing up where it lives, with an honest question, is enough. Rough order of best fit.
 

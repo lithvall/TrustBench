@@ -625,6 +625,46 @@ In our raw `accepts[0]` packet, Infopunks noticed `resource.url` was emitted as 
 
 ---
 
+## 2026-05-06 — P4-1b SHIPPED (full session retrospective)
+
+**Ship state:**
+- Public Railway-issued receipt: `rcpt_01KQY7C44GAPSXZPFQYRZ1D10C` at `https://trustbench-production.up.railway.app/receipts/rcpt_01KQY7C44GAPSXZPFQYRZ1D10C`.
+- On-chain: tx `0x3e6d6078c092f6a1f7be95bbb387b9dbfdc3d9471f21bad7859514fab1997a41` settled at Base block 45633871, payer `0x547C2c615b227800D56b5ed24021C2CbCa0a3057` → payee `0xe4E8908308a86aB43E5dEb6C0fd0F006786104c3`, 0.01 USDC.
+- Verifier output: `✅ SIGNATURE VALID — receipt is authentic.` + `✅ ON-CHAIN VERIFIED — the receipt matches the actual transaction.` No overrides needed; default `verify-receipt.js` against the Railway URL works out of the box.
+- Local-issued precursor receipt (before BASE_URL flip): `rcpt_01KQY629W1HWJW19E87ECR4ZTR`, tx `0x706d3f16df8490785855cabb1ff9b9ba5673e2d154a9e253d5b3210b9541bb6e` block 45633185. Has `public_key_url: "https://trustbench.io/.well-known/trustbench-pubkey"` (DNS not wired); verifies with `--pubkey-url` override pointing at Railway. Stays valid as historical artifact.
+- Orphan tx (no receipt): `0xe77c9af41042253c1c2851ec34036a764f0425155c43fc1fbb592bd02e5934b2`, ~0.01 USDC. Issued during diagnostics: the 6,444-byte X-PAYMENT envelope reached Render's header-size limit (431) on the first hop, but the on-chain settlement still landed via the CDP facilitator's async path. We can backfill a receipt for this tx via a one-shot script later if symmetry matters; for now it stays as proof that the architecture works even when the audit trail breaks.
+
+**Five-fix retrospective (in order discovered + landed):**
+
+1. **Legacy `x402@1.2.0` package was the wrong SDK.** Targets x402 v1, throws `Unsupported network` on CAIP-form `eip155:8453`. Replaced with the modular v2 packages (`@x402/core` + `@x402/evm` at 2.11.0). 440 transitive packages dropped, 2 added. `viem` bumped from `^2.21.0` to `^2.39.3` to match @x402/evm peer dep.
+2. **Normalization layer was solving a phantom problem.** `normalizeForSDK` (CAIP→base, amount→maxAmountRequired, object→string resource) existed because v1 zod rejected the merchant's raw shape. v2 SDK accepts the raw `accepts[0]` directly. Removed the entire normalization helper plus `patchEnvelopeForCoinbaseV2` and the two env-flag toggles.
+3. **Slim `accepted` before encoding.** Infopunks's `accepts[0]` includes ~5.9 KB of OpenAPI input/output schemas embedded in `resource`. Spreading the raw value into `PaymentPayload.accepted` produces a ~6.4 KB X-PAYMENT envelope that Render rejects with HTTP 431 *before the facilitator sees the request*. Fix: build `accepted` with only the 7 spec PaymentRequirements fields plus a string-form `resource.url`. Envelope drops to ~1 KB raw (~1.4 KB base64). 8x reduction.
+4. **Async-settlement merchants don't emit `X-PAYMENT-RESPONSE`.** Coinbase CDP-mediated providers (Infopunks specifically) verify the X-PAYMENT with the facilitator, return 200 with their domain response synchronously, and let the actual `transferWithAuthorization` settle on-chain a few seconds later. The tx_hash is never in the merchant's HTTP response. Fix: in `settleHandler`, when `parseTxHashFromResponse` returns null, fall back to a Base RPC `getLogs` query for `AuthorizationUsed(authorizer, nonce)` keyed off the EIP-3009 nonce we already have in the X-PAYMENT envelope. 4 retries at 1.5s intervals covers the typical async-settle window. Architecturally cleaner than trusting merchant claims because the chain is the source of truth.
+5. **Railway was on pre-Phase-3 code.** `git status` revealed every Phase 3 source file, every Phase 4 doc, every script and design sketch was untracked. The "stale Phase 3 code on Railway" memory entry from earlier was understated; Railway was actually on whatever was in git before Phase 3 started. One ~13K-insertion commit landed all of Phase 3 + Phase 4 publishable work. After Railway redeployed, the receipt that local-server had issued was already publicly fetchable because Railway and local share the same Supabase project.
+
+**Engineering decisions worth keeping:**
+
+- **Trust the chain, not the merchant.** The chain-lookup fallback isn't a workaround for Infopunks; it's the architecturally correct settlement-observation pattern for non-custodial routing. A merchant claiming a tx happened that didn't would just produce no log match → null → 502, no receipt. If we ever ship our own merchant-side x402 layer (P4-bazaar), it should still emit `X-PAYMENT-RESPONSE` for the fast path, but consumers should treat it as advisory and chain-verify when audit matters.
+- **Detached signature on receipts is load-bearing.** The same Ed25519 receipt verifies under any TrustBench instance because `public_key_url` isn't part of the signed bytes. Saved us from having to re-sign existing receipts when the BASE_URL env flip changed embedded URLs. Also makes future infrastructure migrations (custom domain, multi-region) painless.
+- **Slim envelope is more than a Render workaround.** Even merchants without 431 limits would prefer ~1 KB envelopes over ~6 KB ones. The slim is now baseline.
+
+**Operational notes worth keeping:**
+
+- **Stale `.git/index.lock` is most often VSCode's source-control panel.** Close VSCode (or SourceTree, GitHub Desktop) before any committing-via-CLI work. `Remove-Item .git\index.lock` is the recovery; safe as long as no other git process is actually running (`Get-Process git -ErrorAction SilentlyContinue` to confirm empty).
+- **PowerShell + multi-line `git commit -m "..."` doesn't always close cleanly.** Use `Out-File commit-msg.txt -Encoding utf8` + `git commit -F commit-msg.txt` for any commit with linebreaks, code blocks, or special chars. Removes the heredoc-quoting fragility.
+- **PowerShell treats `<` as a redirect operator.** Don't paste shell commands with `<placeholder>` literals — substitute first or wrap in single quotes.
+
+**Carry-forward state:**
+
+- Wallet `0x547C2c615b227800D56b5ed24021C2CbCa0a3057` at ~29.97 USDC (started 30.00, three on-chain settles at 0.01 each).
+- Railway `BASE_URL` env now `https://trustbench-production.up.railway.app`. trustbench.io DNS still not wired; future polish item. Once DNS lands, can flip BASE_URL back to canonical brand URL and old receipts (the local-issued one) become verifiable without override too.
+- Diagnostic logs in `settleHandler` (response headers + body dump) should be removed before any public traffic — they're useful for partner-debug rounds but bloat prod logs. Tracked as a small Phase 4 polish.
+- Two registry-quality follow-ups still parked: stripping template URLs (`{task-id}`, `{chainNetwork}`) from the crawler output, and pruning rows that didn't show up in the latest Agentic Market crawl.
+
+**Next sprint item per `phase4-kickoff.md`:** P4-7 — Strict reservation-based spend caps. Two-signal validation (Infopunks + CLU_AGENT) bumped this up from the deferred bottom. Design sketch already in `phase4-spend-caps-reservation.md`. Estimated ~1 day of focused work; smoke plan C1-C4 is the load-bearing test.
+
+---
+
 ## 2026-05-06 — CLU_AGENT external signal → P4-7 priority bump
 
 **Trigger:** CLU_AGENT (automated by @Logik185) replied to the 2026-05-05 X post about /route + spend caps + Ed25519 receipts. Captured in `phase4-clu-agent-handoff.md`. The substantive line:

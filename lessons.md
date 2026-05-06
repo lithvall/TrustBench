@@ -4,6 +4,29 @@ A living log of patterns, surprises, and corrections worth remembering across se
 
 ---
 
+## 2026-05-06 — `/rankings` Tailwind polish implemented (P4-2 second delivery)
+
+Same-day pickup after receipt HTML rendering. Per the Zauth-complementarity strategic read, structural parity with their UI without competing on data breadth — TrustBench has the registry it has; making it look credible compounds every share, every link unfurl, every partner inspection.
+
+**What shipped:**
+- `src/rankings-html.ts` (new, ~330 lines incl. inline CSS + ~30 lines of vanilla JS for filter/search). Renders capability tabs (5-cat: search/inference/data/media/infra), filter pills (All / Verified x402 / Coinbase 1P / Coinbase 3P), search input, sortable table with score color-coding and verified badges, mobile-responsive layout.
+- `src/index.ts` — `/rankings` handler now does Accept-header content negotiation. JSON contract unchanged. Cache-Control set to 300s (rankings change once per nightly probe pass; aligns with Redis TTL in scorer.ts).
+- `phase4-rankings-html-smoke.md` (new) — R1-R8 smoke runbook covering JSON regression, HTML render, capability tabs, filter pill toggles, search, format overrides, empty state, and dependent-route regression (`/analytics`, `/route` legacy GET, `/rankings/paid`).
+
+**Engineering decisions worth keeping:**
+- **`preferHtml()` is shared between `/rankings` and `/receipts/:id` via function-declaration hoisting.** Defined once at file scope in `src/index.ts` (right above /receipts/:id), used from both routes. No helpers module yet — extract only when a third route adopts the pattern.
+- **Server-side capability tabs, client-side filter pills.** Tabs are real `<a>` links that re-fetch with `?capability=X` — bookmarkable, shareable per capability. Filter pills are client-side JS toggles that hide rows in-page — no round-trip on filter changes. Right boundary: tab semantics imply server-state; pill semantics are pure client-side UI.
+- **Filter row visibility via `style.display`, not CSS classes.** Each row has independent visibility from the active pill AND the search box. Combining via classes gets fiddly when both filters are simultaneously active. Direct style is cleanest for the compose case.
+- **Static sort, no click-to-sort.** Default sort is score-desc (matches JSON order); click-to-sort would add JS complexity for low marginal value at current data volume. Easy to add later if real users ask.
+- **Mobile-responsive table via CSS-only re-layout.** Below 720px, the table renders as stacked cards with `:before` pseudo-elements showing field labels. No JS, no separate mobile component.
+
+**Carry-forward state:**
+- `/rankings?capability=search` (and the four sibling capabilities) now serve a polished HTML page when opened in a browser. Same URL serves JSON to programmatic clients via Accept header.
+- The two HTML pages now live in prod: `/receipts/:id` and `/rankings`. Both share visual aesthetic with `/methodology`. Eventually worth extracting a shared style fragment / template; not yet justified.
+- Next sprint piece per re-ranked agenda: Heurist Solana mesh crawler addition (~½ day). Then Mindshare outreach after Infopunks amplifies.
+
+---
+
 ## 2026-05-06 — Receipt HTML rendering implemented (P4-2 first delivery)
 
 Same-day pickup after P4-7 shipped. Per the parallel-convo re-rank ("rcpt_01KQY7C44GAPSXZPFQYRZ1D10C is already public; making it credible compounds every share"), receipt HTML rendering was the next sprint piece.

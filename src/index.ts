@@ -15,6 +15,7 @@ import { quoteHandler, settleHandler } from './route-handlers.js';
 import { startPendingSweep } from './pending-sweep.js';
 import { renderReceiptHtml, getOrComputeVerifyResults } from './receipt-html.js';
 import type { SignedReceipt } from './receipt-generator.js';
+import { renderRankingsHtml, type RankingRow } from './rankings-html.js';
 
 // ---------------------------------------------------------------------------
 // Agent-discovery static assets (P4-skill, P4-llmstxt, P4-wellknown).
@@ -57,10 +58,34 @@ app.use('*', logger());
 // Health
 app.get('/health', (c) => c.json({ status: 'ok', project: 'TrustBench' }));
 
-// Public rankings
+// Public rankings.
+//
+// Content negotiation (P4-2 rankings polish, 2026-05-06):
+//   - Default behavior unchanged: returns the canonical JSON array.
+//   - Browser-preferred (`Accept: text/html` or `?format=html`): renders a
+//     polished HTML page with capability tabs (search / inference / data /
+//     media / infra), filter pills (verified / 1P / 3P), search input, and
+//     a sortable table. JSON contract is byte-identical for every existing
+//     programmatic client (paid-probe, MCP tools, /rankings/paid, etc.).
+//   - `?format=json` and `?format=html` are explicit overrides.
+//
+// preferHtml() is defined further down (function declaration, hoisted) and
+// shared with /receipts/:id — same content-negotiation rule both routes.
 app.get('/rankings', async (c) => {
   const capability = c.req.query('capability') || 'search';
   const data = await getRankings(capability as any);
+
+  const wantsHtml = preferHtml(c.req.header('Accept'), c.req.query('format') ?? null);
+  if (wantsHtml) {
+    const html = renderRankingsHtml(data as RankingRow[], capability);
+    return c.html(html, 200, {
+      // Rankings change once per nightly probe pass; aggressive caching is
+      // safe inside that window. Clients hitting between probes get fresh
+      // data via Redis cache invalidation in scorer.ts (5-min TTL).
+      'Cache-Control': 'public, max-age=300',
+    });
+  }
+
   return c.json({ success: true, data, source: 'TrustBench' });
 });
 

@@ -72,12 +72,17 @@ function loadKeys(): SigningMethod {
 // ---------------------------------------------------------------------------
 // Public API
 export async function getRankings(capability: string) {
-  // Cache key bumped to v3 (2026-05-05) to add `integration_type` per row
-  // (Coinbase Agentic Market 1P/3P signal, alongside our existing x402_verified
-  // empirical bit). The v2 keys age out within 5 minutes; harmless orphan data.
-  // Bumping the version on schema additions avoids stale-shape rows leaking
-  // into clients that expect the new fields.
-  const cacheKey = `rankings:v3:${capability}`;
+  // Cache key bumped to v4 (2026-05-06) to bust cached results that may have
+  // contained Solana-mistagged-as-Base rows from Agentic Market (the Heurist
+  // mesh.heurist.xyz/x402/solana/* URLs). v3 keys age out within 5 minutes;
+  // harmless orphan data. Bumping the version on filter changes ensures
+  // immediate effect rather than waiting on TTL expiry.
+  //
+  // Earlier history: v3 (2026-05-05) added `integration_type` per row
+  // (Coinbase Agentic Market 1P/3P signal, alongside x402_verified). v2
+  // was the original Phase 4 shape. Bumping the version on schema or
+  // filter changes avoids stale-shape rows leaking into clients.
+  const cacheKey = `rankings:v4:${capability}`;
   const cached = await redis.get(cacheKey);
   if (cached) return JSON.parse(cached);
 
@@ -106,11 +111,25 @@ export async function getRankings(capability: string) {
   // metadata key are treated as Base (the default before this filter
   // existed), preserving backward compat with everything Agentic Market
   // and the verified seed have inserted to date.
+  //
+  // Defensive secondary check (added 2026-05-06 after diagnostic surfaced
+  // 92 mistagged rows): Agentic Market lists some Heurist Mesh endpoints
+  // (URL: mesh.heurist.xyz/x402/solana/agents/...) tagged as Base instead
+  // of Solana. Trusting the URL path over upstream metadata catches those.
+  // The /x402/solana/ segment is unambiguous — it's part of Heurist's URL
+  // design and only appears on actually-Solana endpoints. Routing to one
+  // would 502 at quote time anyway (validateChallenge in route-handlers.ts
+  // rejects non-Base challenges), but filtering them here is honest UX —
+  // they shouldn't appear in the public rankings as Base.
   const filteredProviders = (providers || []).filter(p => {
     const meta = (p.metadata && typeof p.metadata === 'object' && !Array.isArray(p.metadata))
       ? (p.metadata as Record<string, unknown>)
       : {};
     const network = typeof meta.network === 'string' ? meta.network : null;
+    if (network === 'solana') return false;
+    if (typeof p.url === 'string' && p.url.includes('/x402/solana/')) return false;
+    // network is null OR === 'base' OR any other value (defensive — only
+    // explicit 'solana' or known-Solana URL paths get dropped today).
     return !network || network === 'base';
   });
 

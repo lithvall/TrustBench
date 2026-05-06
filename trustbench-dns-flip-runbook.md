@@ -1,6 +1,6 @@
 # trustbench.io DNS + BASE_URL flip — runbook
 
-**Status:** parked, ~30 min total, do once P4-7 deploys cleanly. Independent of the P4-7 deploy.
+**Status:** ✅ completed 2026-05-06. Domain registered at Cloudflare (proxy ON via Railway↔Cloudflare integration), `TRUSTBENCH_BASE_URL` flipped, both milestone receipts verify clean against `https://trustbench.io` with no `--pubkey-url` override. Railway hostname (`trustbench-production.up.railway.app`) kept alive permanently for backward compat with receipts that embed it. See memory `project_dns_flip_2026_05_06.md` for the full record. Tier 3 URL sweep (`OUTREACH.md`, phase docs, this runbook's self-references, `lessons.md`, `scripts/post-to-x.js`) intentionally deferred. Original runbook below preserved as historical record.
 
 ## Why
 

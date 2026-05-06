@@ -97,7 +97,24 @@ export async function getRankings(capability: string) {
 
   const scorecardMap = new Map(scorecards?.map(s => [s.provider_id, s]) || []);
 
-  const processed = providers?.map(p => {
+  // Phase 4 P4-1d-heurist (2026-05-06): Solana-network rows are stored in
+  // providers (Heurist Mesh crawler) but filtered out of /rankings and
+  // /route until P4-3 (Solana settlement) ships. Filtering at projection
+  // time means rows live in the DB ready for P4-3 — removing this filter
+  // is the only step needed to expose them all at that point. No
+  // re-crawl, no data migration. Legacy rows without an explicit network
+  // metadata key are treated as Base (the default before this filter
+  // existed), preserving backward compat with everything Agentic Market
+  // and the verified seed have inserted to date.
+  const filteredProviders = (providers || []).filter(p => {
+    const meta = (p.metadata && typeof p.metadata === 'object' && !Array.isArray(p.metadata))
+      ? (p.metadata as Record<string, unknown>)
+      : {};
+    const network = typeof meta.network === 'string' ? meta.network : null;
+    return !network || network === 'base';
+  });
+
+  const processed = filteredProviders.map(p => {
     const s = scorecardMap.get(p.url) || {};
     // Defensive coercion — metadata might be null, an array, or have a
     // non-boolean x402_verified. Only `=== true` qualifies as verified.
@@ -133,7 +150,7 @@ export async function getRankings(capability: string) {
       x402_verified,
       integration_type,
     };
-  }).sort((a, b) => b.score - a.score) || [];
+  }).sort((a, b) => b.score - a.score);
 
   await redis.set(cacheKey, JSON.stringify(processed), 'EX', 300);
   return processed;

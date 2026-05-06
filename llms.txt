@@ -2,7 +2,7 @@
 
 > Non-custodial routing + verification layer for agentic x402 payments. Agents call TrustBench, TrustBench picks the best provider (live telemetry), constructs the x402 challenge, the agent signs, the provider settles on-chain, and TrustBench returns a signed receipt. Today: public registry of x402-style endpoints with nightly liveness telemetry, plus a live non-custodial routing surface (`POST /route` and `POST /route/settle`) with idempotency keys, hard spend caps, and Ed25519-signed receipts. Phase 3 closed 2026-05-04. Phase 4 in flight: agent-discovery surfaces (skill.md, manifest, llms.txt route) and first paid receipts against real x402 providers.
 
-This file is intended for AI agents, agent builders, and other automated consumers. Humans should start at the [README](https://github.com/lithvall88/TrustBench/blob/main/README.md) and the live [methodology page](https://trustbench-production.up.railway.app/methodology).
+This file is intended for AI agents, agent builders, and other automated consumers. Humans should start at the [README](https://github.com/lithvall88/TrustBench/blob/main/README.md) and the live [methodology page](https://trustbench.io/methodology).
 
 ## What TrustBench does and does not do
 
@@ -12,19 +12,19 @@ This file is intended for AI agents, agent builders, and other automated consume
 
 ## Public read endpoints (no auth)
 
-- [GET /health](https://trustbench-production.up.railway.app/health) — liveness check for the API itself.
-- [GET /rankings?capability=search](https://trustbench-production.up.railway.app/rankings?capability=search) — current ranked providers for a capability (`search`, `inference`, `data`, `media`, `infra`).
-- [GET /rankings/paid?capability=search](https://trustbench-production.up.railway.app/rankings/paid?capability=search) — same payload, with each provider's signed scorecard included.
-- [GET /route?capability=search](https://trustbench-production.up.railway.app/route?capability=search) — current best provider + fallback for a capability. **This is the legacy read-only route. The Phase 3 authenticated `POST /route` is the routing surface for agents — see below.**
-- [GET /mcp/tools](https://trustbench-production.up.railway.app/mcp/tools) — MCP tool descriptors for agent integrations.
-- [GET /methodology](https://trustbench-production.up.railway.app/methodology) — full description of what the probe measures.
-- [GET /.well-known/trustbench-pubkey](https://trustbench-production.up.railway.app/.well-known/trustbench-pubkey) — Ed25519 public key (PEM) used to sign scorecards and receipts. Returns 503 with a plaintext explanation if the deployment is still on the HMAC-SHA256 fallback.
+- [GET /health](https://trustbench.io/health) — liveness check for the API itself.
+- [GET /rankings?capability=search](https://trustbench.io/rankings?capability=search) — current ranked providers for a capability (`search`, `inference`, `data`, `media`, `infra`).
+- [GET /rankings/paid?capability=search](https://trustbench.io/rankings/paid?capability=search) — same payload, with each provider's signed scorecard included.
+- [GET /route?capability=search](https://trustbench.io/route?capability=search) — current best provider + fallback for a capability. **This is the legacy read-only route. The Phase 3 authenticated `POST /route` is the routing surface for agents — see below.**
+- [GET /mcp/tools](https://trustbench.io/mcp/tools) — MCP tool descriptors for agent integrations.
+- [GET /methodology](https://trustbench.io/methodology) — full description of what the probe measures.
+- [GET /.well-known/trustbench-pubkey](https://trustbench.io/.well-known/trustbench-pubkey) — Ed25519 public key (PEM) used to sign scorecards and receipts. Returns 503 with a plaintext explanation if the deployment is still on the HMAC-SHA256 fallback.
 
 ## Agent-discovery surfaces (Phase 4)
 
-- [GET /skill.md](https://trustbench-production.up.railway.app/skill.md) — agent skill file in the agentic.market/skill.md format. Paste into Claude Code, Codex CLI, Gemini CLI, Hermes, Cursor, Claude Desktop, Cherry Studio, or ChatGPT to teach the agent the TrustBench quote/settle flow as an additive policy + receipt layer on top of an existing Coinbase Agentic Wallet setup.
-- [GET /.well-known/trustbench.json](https://trustbench-production.up.railway.app/.well-known/trustbench.json) — machine-readable manifest of TrustBench's public surfaces, capability tags, signing scheme, networks supported, and discovery references. Designed for agents and crawlers that read `.well-known/` after a 402 challenge.
-- [GET /llms.txt](https://trustbench-production.up.railway.app/llms.txt) — this file. Designed for LLM-grounded agent research.
+- [GET /skill.md](https://trustbench.io/skill.md) — agent skill file in the agentic.market/skill.md format. Paste into Claude Code, Codex CLI, Gemini CLI, Hermes, Cursor, Claude Desktop, Cherry Studio, or ChatGPT to teach the agent the TrustBench quote/settle flow as an additive policy + receipt layer on top of an existing Coinbase Agentic Wallet setup.
+- [GET /.well-known/trustbench.json](https://trustbench.io/.well-known/trustbench.json) — machine-readable manifest of TrustBench's public surfaces, capability tags, signing scheme, networks supported, and discovery references. Designed for agents and crawlers that read `.well-known/` after a 402 challenge.
+- [GET /llms.txt](https://trustbench.io/llms.txt) — this file. Designed for LLM-grounded agent research.
 
 ## Authenticated routing (Phase 3, live; Phase 4 invite-only)
 

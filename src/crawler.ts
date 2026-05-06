@@ -1,4 +1,4 @@
-// src/crawler.ts - Agentic Market discovery + verified-x402 seed
+// src/crawler.ts - Agentic Market discovery + Heurist Solana mesh + verified-x402 seed
 //
 // Phase 4 P4-1d (2026-05-05): replaced the CDP discovery API
 // (api.cdp.coinbase.com/platform/v2/x402/discovery/resources, which returned
@@ -9,20 +9,30 @@
 // as alive, so an OpenAI/Anthropic/Perplexity root scored highly without ever
 // emitting a real 402 challenge).
 //
-// Two sources, in increasing trust:
+// Phase 4 P4-1d-heurist (2026-05-06): added Heurist Mesh API as a 3rd source.
+// `mesh.heurist.xyz/x402/solana/agents` lists ~27 agents × ~5-7 tools = ~150
+// Solana x402 endpoints (forensics, search, inference, video gen, etc.).
+// These rows are STORED but EXCLUDED from /rankings + /route by a filter in
+// scorer.ts getRankings() — Solana settlement is P4-3, separate larger
+// sprint. When P4-3 ships, removing the network filter exposes them all
+// without re-crawling. Pre-built registry, instant transition.
+//
+// Three sources, in increasing trust:
 //   1. Agentic Market - curated catalog at api.agentic.market/v1/services
 //      with structured schema (category, networks, integrationType=1P|3P,
 //      endpoints[].pricing, etc.). One provider row per (service, endpoint)
 //      pair. Network filter: Base only for Phase 4 (Polygon/Solana skipped
 //      until we ship cross-chain settlement).
-//   2. seedKnownX402Endpoints() - small, manually-verified list of endpoints
+//   2. Heurist Mesh - mesh.heurist.xyz/x402/solana/agents. Solana-only;
+//      stored but filtered from rankings until P4-3.
+//   3. seedKnownX402Endpoints() - small, manually-verified list of endpoints
 //      we have live-probed and confirmed return a valid x402 402 challenge.
 //      Always runs LAST so its rows win on URL conflict, preserving probe
 //      method/body metadata we would not get from Agentic Market alone.
 //
-// Failure mode: if Agentic Market is unreachable, the seed still runs so the
-// registry is not fully empty. Logged as a warning. New entries to the seed
-// list should always include `x402_verified: true` in metadata.
+// Failure mode: if Agentic Market or Heurist is unreachable, the seed still
+// runs so the registry is not fully empty. Logged as a warning. New entries
+// to the seed list should always include `x402_verified: true` in metadata.
 
 import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
@@ -33,6 +43,7 @@ const supabase = createClient(
 );
 
 const AGENTIC_MARKET_URL = 'https://api.agentic.market/v1/services';
+const HEURIST_SOLANA_URL = 'https://mesh.heurist.xyz/x402/solana/agents';
 const PAGE_LIMIT = 50;
 const PAGE_DELAY_MS = 100;
 
@@ -182,7 +193,152 @@ async function crawlAgenticMarket(): Promise<number> {
 }
 
 // -----------------------------------------------------------------------------
-// Step 2: seedKnownX402Endpoints (manually verified, runs last)
+// Step 2: Heurist Mesh API (Solana, stored but filtered until P4-3)
+// -----------------------------------------------------------------------------
+// mesh.heurist.xyz/x402/solana/agents returns a flat list of ~27 agents,
+// each with ~5-7 tools. Each tool is its own x402 endpoint. We map per-tool
+// to the 5-cat capability taxonomy via inferCapabilityForHeuristTool().
+//
+// Network: 'solana'. These rows live in providers but are filtered out of
+// /rankings + /route by scorer.ts getRankings() until P4-3 (Solana
+// settlement) ships. Removing that filter is the only step needed to
+// expose them all when settlement is ready — no re-crawl required.
+//
+// Pricing: Heurist quotes USD ($0.001-$0.25 per call). We convert to USDC
+// atomic units (6 decimals) for storage, even though Solana settlement
+// uses SOL/SPL-USDC and the conversion is approximate. Stored as observed
+// signal; the live 402 probe at quote time will be the authoritative
+// source for the actual payment requirements when P4-3 ships.
+
+type HeuristTool = {
+  name: string;
+  description: string;
+  resourceUrl: string;
+  priceUsd: string;
+  network: string;
+};
+type HeuristAgent = {
+  agentId: string;
+  tools: HeuristTool[];
+};
+type HeuristResponse = {
+  count: number;
+  agents: HeuristAgent[];
+};
+
+// Per-tool capability inference. Heuristics from agent name + tool name.
+// Anything that doesn't match a more specific lane defaults to 'data',
+// which is correct for the bulk of Heurist's agents (forensics, market data,
+// project knowledge, on-chain analytics).
+function inferCapabilityForHeuristTool(agentId: string, toolName: string): 'search' | 'inference' | 'data' | 'media' | 'infra' {
+  const id = agentId.toLowerCase();
+  const t = toolName.toLowerCase();
+
+  // Media — video / image generation tools.
+  if (id.includes('videogen') || t.includes('text_to_video') || t.includes('image_to_video') || t.includes('video_status')) {
+    return 'media';
+  }
+
+  // Search — web/twitter/news/discovery search.
+  if (id.includes('twitter') || id.includes('search') || id.includes('news')) return 'search';
+  if (t.includes('search') || t === 'user_timeline' || t === 'tweet_detail') return 'search';
+
+  // Inference — Q&A, advice, research.
+  if (id.includes('ask') || id.includes('research') || id.includes('health')) return 'inference';
+
+  // Default: data (analytics, on-chain, financial, project metadata).
+  return 'data';
+}
+
+// USD → USDC atomic. USDC has 6 decimals. "0.001" → "1000". Returns null
+// when the input isn't a positive finite number — caller stores null in
+// metadata.price_atomic_observed in that case.
+function usdToAtomicUsdc(usdString: string): string | null {
+  const usd = parseFloat(usdString);
+  if (!Number.isFinite(usd) || usd <= 0) return null;
+  // Math.round handles fractional pennies (e.g. "0.0025" → 2500).
+  const atomic = Math.round(usd * 1_000_000);
+  return atomic.toString();
+}
+
+async function crawlHeurist(): Promise<number> {
+  let inserted = 0;
+  let res: Response;
+  try {
+    res = await fetch(HEURIST_SOLANA_URL, { headers: { Accept: 'application/json' } });
+  } catch (e: any) {
+    console.warn(`[crawler] Heurist Mesh fetch failed: ${e.message}`);
+    return 0;
+  }
+  if (!res.ok) {
+    console.warn(`[crawler] Heurist Mesh HTTP ${res.status}; skipping`);
+    return 0;
+  }
+
+  let body: HeuristResponse;
+  try {
+    body = (await res.json()) as HeuristResponse;
+  } catch (e: any) {
+    console.warn(`[crawler] Heurist Mesh body parse failed: ${e.message}`);
+    return 0;
+  }
+  if (!body || !Array.isArray(body.agents)) {
+    console.warn('[crawler] Heurist Mesh response missing agents[]; skipping');
+    return 0;
+  }
+
+  console.log(`[crawler] Heurist Mesh: ${body.count} agents, processing tools...`);
+
+  for (const agent of body.agents) {
+    if (!agent || !Array.isArray(agent.tools)) continue;
+    for (const tool of agent.tools) {
+      if (!tool || !tool.resourceUrl) continue;
+
+      const capability = inferCapabilityForHeuristTool(agent.agentId || '', tool.name || '');
+      const priceAtomic = usdToAtomicUsdc(tool.priceUsd);
+      // Network normalized to lowercase; almost always 'solana' but defensive
+      // in case Heurist later expands to multi-chain on the same endpoint.
+      const network = (tool.network || 'solana').toLowerCase();
+
+      const row = {
+        url: tool.resourceUrl,
+        // Display name combines agentId and tool name for human-readability
+        // in the rankings UI when Solana support eventually unlocks.
+        name: `${agent.agentId} - ${tool.name}`,
+        capability,
+        description: tool.description || '',
+        // Heurist API doesn't expose pay_to on the catalog; the live 402
+        // probe at quote time would be the source of truth (P4-3+).
+        pay_to: null,
+        metadata: {
+          source: 'heurist_solana_mesh',
+          network,
+          // Stored even when filtered from rankings; P4-3 transition will
+          // surface these as the price signal.
+          price_usd_observed: tool.priceUsd || null,
+          price_atomic_observed: priceAtomic,
+          heurist_agent_id: agent.agentId || null,
+          heurist_tool_name: tool.name || null,
+        },
+        last_crawled_at: new Date().toISOString(),
+      };
+
+      const { error } = await supabase
+        .from('providers')
+        .upsert(row, { onConflict: 'url' });
+      if (!error) inserted++;
+    }
+  }
+
+  console.log(
+    `[crawler] Heurist Mesh done: ${inserted} provider rows stored ` +
+    `(network=solana; filtered from /rankings + /route until P4-3 settlement ships)`,
+  );
+  return inserted;
+}
+
+// -----------------------------------------------------------------------------
+// Step 3: seedKnownX402Endpoints (manually verified, runs last)
 // -----------------------------------------------------------------------------
 // Each entry has been hit with curl and confirmed to return a valid x402 402
 // challenge body (scheme=exact, network=base, asset=USDC on Base, valid
@@ -283,14 +439,20 @@ async function insertProviders(resources: any[]) {
 // Main entry
 // -----------------------------------------------------------------------------
 async function crawlBazaar() {
-  console.log('[crawler] Starting x402 provider crawl (Phase 4: Agentic Market)...');
+  console.log('[crawler] Starting x402 provider crawl (Phase 4: Agentic Market + Heurist Mesh)...');
   const amInserted = await crawlAgenticMarket();
   if (amInserted === 0) {
-    console.warn('[crawler] Agentic Market returned no usable rows; running seed only.');
+    console.warn('[crawler] Agentic Market returned no usable rows; continuing with Heurist + seed.');
+  }
+  const heuristInserted = await crawlHeurist();
+  if (heuristInserted === 0) {
+    console.warn('[crawler] Heurist Mesh returned no usable rows; continuing with seed.');
   }
   await seedKnownX402Endpoints();
   console.log(
-    `[crawler] Crawl complete. Agentic Market: ${amInserted} rows; verified seed: 3 (Infopunks).`,
+    `[crawler] Crawl complete. Agentic Market: ${amInserted} rows (base); ` +
+    `Heurist Mesh: ${heuristInserted} rows (solana, filtered from rankings); ` +
+    `verified seed: 3 (Infopunks).`,
   );
 }
 

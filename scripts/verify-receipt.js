@@ -18,7 +18,7 @@
 //   node scripts/verify-receipt.js ./my-receipt.json
 //   node scripts/verify-receipt.js rcpt_01HV3K8M5C9X2ZBFYR4QWP8ND1
 //   node scripts/verify-receipt.js rcpt_01HV3K8M5C9X2ZBFYR4QWP8ND1 \
-//       https://trustbench-production.up.railway.app
+//       https://trustbench.io
 //
 // Use --pubkey-url to override signature.public_key_url. Useful when verifying
 // locally-issued receipts whose public_key_url points at a public domain that
@@ -41,7 +41,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
-const DEFAULT_BASE = 'https://trustbench-production.up.railway.app';
+const DEFAULT_BASE = 'https://trustbench.io';
 
 // ---------------------------------------------------------------------------
 // Constants — chain verification

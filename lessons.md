@@ -4,6 +4,31 @@ A living log of patterns, surprises, and corrections worth remembering across se
 
 ---
 
+## 2026-05-06 — Heurist Solana mesh crawler implemented (registry coverage, P4-3 prep)
+
+Same-day pickup. Per re-ranked agenda (`project_zauth_and_post_p4_7_agenda.md`), Heurist Mesh as 4th crawler source after Agentic Market + verified seed (Paddock import is still pending). Adds ~150 Solana x402 endpoints to the registry as pre-work for P4-3 (Solana settlement) — store now, expose when settlement ships.
+
+**What shipped:**
+- `src/crawler.ts` — new `crawlHeurist()` function that fetches `https://mesh.heurist.xyz/x402/solana/agents` and stores one row per (agent, tool) pair. Capability mapping helper `inferCapabilityForHeuristTool()` classifies via agent + tool keywords (video → media, twitter/news/search → search, ask/research/health → inference, default data). USD prices converted to USDC atomic units for `metadata.price_atomic_observed`. Wired into `crawlBazaar()` between Agentic Market and verified seed.
+- `src/scorer.ts` — Solana network filter in `getRankings()` projection. `filteredProviders = providers.filter(p => !p.metadata.network || p.metadata.network === 'base')`. Drops Solana entries from /rankings AND from /route (via `selectProvider` calling `getRankings`). Legacy rows without explicit `network` metadata are treated as Base — backward-compat with everything Agentic Market and verified seed have inserted.
+- `phase4-heurist-crawler-smoke.md` — E1-E7 smoke runbook covering crawler success, DB row population, /rankings filtering, /route filtering, P4-3 simulation by temporarily removing the filter, capability mapping spot-checks, USD → atomic conversion sanity.
+
+**Engineering decisions worth keeping:**
+- **Filter at projection time, not at insert time.** Heurist rows live in the DB; one filter line in `scorer.ts` hides them. When P4-3 ships Solana settlement, removing that filter exposes ~150 endpoints instantly with no re-crawl, no data migration. The pre-built registry is itself a partnership / Mindshare-outreach signal ("we have N Solana endpoints indexed; routing comes with P4-3").
+- **Per-tool capability classification, not per-agent.** A single Heurist agent can have tools across multiple capabilities (e.g. TokenResolverAgent has both search-style lookup tools and data-style profile tools). Classifying per-tool keeps each row's `capability` accurate. Heuristic falls back to `data` for the bulk — correct for Heurist's analytics-heavy catalog.
+- **Network treated case-insensitively, default 'solana'.** Heurist always emits `"network": "solana"` today; lowercase normalization + default-to-solana is defensive against future shape changes.
+- **Pricing stored even though Solana settlement not live.** Heurist quotes USD ($0.001-$0.25); convert to USDC atomic (6 decimals) for consistency with Base entries. Rough approximation — Solana actual settlement uses SPL-USDC and the conversion may differ slightly. Stored as observed signal; live 402 probe at quote time will be authoritative when P4-3 ships.
+
+**Carry-forward state:**
+- `npm run crawl` will now populate ~150 Heurist endpoints alongside Agentic Market + seed. Nightly cron (`.github/workflows/nightly-pipeline.yml`) picks it up automatically.
+- The Solana filter in scorer.ts is a one-line remove when P4-3 lands — search for "P4-1d-heurist" comment.
+- Net impact on `/rankings` and `/route` is **zero** — Heurist rows are filtered out. Prod registry inventory just grew by ~150 rows quietly.
+- The `/rankings` page doesn't surface "network" today, so even if Solana filtering were removed, there'd be no visible network distinction. Future polish: add a network badge to the rankings table when P4-3 ships.
+
+**Next sprint piece per re-ranked agenda:** Bankless Mindshare outreach (after Infopunks amplifies), DNS + BASE_URL flip (ops, ~30 min), Paddock DM (comms, draft ready).
+
+---
+
 ## 2026-05-06 — `/rankings` Tailwind polish implemented (P4-2 second delivery)
 
 Same-day pickup after receipt HTML rendering. Per the Zauth-complementarity strategic read, structural parity with their UI without competing on data breadth — TrustBench has the registry it has; making it look credible compounds every share, every link unfurl, every partner inspection.

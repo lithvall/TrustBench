@@ -110,7 +110,7 @@ app.get('/route', async (c) => {
     fallback_provider: fallback ? fallback.provider_id : null,
     fallback_score: fallback ? fallback.score : null,
     message: `Best current provider for ${capability} is ${best.provider_id} (score: ${best.score}).`,
-    full_rankings_url: `https://trustbench-production.up.railway.app/rankings?capability=${capability}`,
+    full_rankings_url: `https://trustbench.io/rankings?capability=${capability}`,
     signed_scorecards: rankings.map(signScorecard)
   });
 });

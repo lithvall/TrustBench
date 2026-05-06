@@ -5,11 +5,11 @@
 //
 // Usage:
 //   node scripts/verify-scorecard.js [base_url]
-//   # default base_url is https://trustbench-production.up.railway.app
+//   # default base_url is https://trustbench.io
 
 import crypto from 'crypto';
 
-const BASE = process.argv[2] || 'https://trustbench-production.up.railway.app';
+const BASE = process.argv[2] || 'https://trustbench.io';
 
 async function main() {
   // 1. Fetch the published public key.

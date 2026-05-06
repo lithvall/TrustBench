@@ -13,6 +13,8 @@ import { withIdempotency } from './idempotency.js';
 import { requireWithinSpendCap } from './spend-caps.js';
 import { quoteHandler, settleHandler } from './route-handlers.js';
 import { startPendingSweep } from './pending-sweep.js';
+import { renderReceiptHtml, getOrComputeVerifyResults } from './receipt-html.js';
+import type { SignedReceipt } from './receipt-generator.js';
 
 // ---------------------------------------------------------------------------
 // Agent-discovery static assets (P4-skill, P4-llmstxt, P4-wellknown).
@@ -263,8 +265,32 @@ app.get('/.well-known/trustbench.json', (c) => {
 // Returns the exact signed receipt envelope stored in the DB.
 // Id is ULID (unguessable). Receipts are immutable → aggressive caching.
 // No auth required (RLS already handles public-read-by-id).
+//
+// Content negotiation (P4-2, 2026-05-06):
+//   - Default behavior unchanged: returns the canonical signed JSON envelope.
+//   - Browser-preferred (`Accept: text/html` or `?format=html`): renders a
+//     polished HTML page with verified-signature + on-chain badges, basescan
+//     link, and a copy-paste verifier command. JSON contract is byte-identical
+//     for every existing programmatic client (curl with no Accept, the
+//     reference verifier in scripts/verify-receipt.js, the paid-probe, etc.).
+//   - `?format=json` overrides Accept and forces JSON. `?format=html` does
+//     the inverse. Unambiguous escape hatches.
 // ---------------------------------------------------------------------------
 const RECEIPT_ID_RE = /^rcpt_[0-9A-HJKMNP-TV-Z]{26}$/;
+
+// Decide whether the client wants HTML or JSON. Strict rule designed to keep
+// every existing programmatic client unchanged: HTML only when explicitly
+// requested via `?format=html`, OR when the Accept header lists text/html
+// AND does NOT list application/json. `*/*` and absent Accept = JSON.
+function preferHtml(accept: string | undefined, formatQuery: string | null): boolean {
+  if (formatQuery === 'html') return true;
+  if (formatQuery === 'json') return false;
+  if (!accept) return false;
+  const lower = accept.toLowerCase();
+  if (lower.includes('application/json')) return false;
+  if (lower.includes('text/html')) return true;
+  return false;
+}
 
 app.get('/receipts/:id', async (c) => {
   const id = c.req.param('id');
@@ -284,6 +310,19 @@ app.get('/receipts/:id', async (c) => {
   }
   if (!data || !data.receipt_json) {
     return c.json({ error: 'receipt_not_found' }, 404);
+  }
+
+  // Content negotiation. Defaults to JSON for every existing client.
+  const wantsHtml = preferHtml(c.req.header('Accept'), c.req.query('format') ?? null);
+  if (wantsHtml) {
+    // Receipts are immutable; verify-result cache makes subsequent renders
+    // ~5ms even when the first render did chain RPC. See receipt-html.ts.
+    const envelope = data.receipt_json as SignedReceipt;
+    const verify = await getOrComputeVerifyResults(envelope);
+    const html = renderReceiptHtml(envelope, verify);
+    return c.html(html, 200, {
+      'Cache-Control': 'public, max-age=86400, immutable',
+    });
   }
 
   return c.json(data.receipt_json, 200, {

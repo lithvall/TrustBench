@@ -4,6 +4,58 @@ A living log of patterns, surprises, and corrections worth remembering across se
 
 ---
 
+## 2026-05-06 — Receipt HTML rendering implemented (P4-2 first delivery)
+
+Same-day pickup after P4-7 shipped. Per the parallel-convo re-rank ("rcpt_01KQY7C44GAPSXZPFQYRZ1D10C is already public; making it credible compounds every share"), receipt HTML rendering was the next sprint piece.
+
+**What shipped:**
+- `src/receipt-html.ts` (new, ~280 lines) — in-process Ed25519 signature verify (mirrors `scripts/verify-receipt.js verifyEnvelope` but uses `getPublicKeyPem()` directly, no HTTP round-trip), in-process on-chain verify (mirrors `verify-receipt.js verifyOnChain` against Base RPC), per-receipt-id verification cache (immutable receipts → cache forever), full HTML renderer with dark theme matching `/methodology`.
+- `src/index.ts` — `/receipts/:id` handler now does content negotiation. `Accept: text/html` (+ `?format=html`) → polished HTML. `Accept: application/json` (default) → unchanged JSON. JSON contract is byte-identical for every existing programmatic client.
+- `phase4-receipt-html-smoke.md` (new) — H1-H6 smoke runbook covering JSON regression, HTML render, query-param overrides, on-chain badge, tampered-receipt red badge, pre-closeout-#3 backward compat.
+
+**Engineering decisions worth keeping:**
+- **Use the in-memory public key, not HTTP self-fetch.** `getPublicKeyPem()` returns the PEM in-process. Fetching `signature.public_key_url` from our own server is a self-loop with DNS dependency for no benefit. The third-party verifier in `verify-receipt.js` round-trips because it doesn't trust us; we do.
+- **Cache verification results by receipt_id forever.** Receipts are immutable per `receipt-generator.ts` (signed at issue time, never re-signed). Once verified valid, the verdict can't change. Process-lifetime in-memory `Map` is sufficient; restart re-verifies on demand. ~5ms subsequent renders vs ~200-500ms first render with chain RPC.
+- **Strict content negotiation.** HTML only when `Accept` lists `text/html` AND does NOT list `application/json`. `*/*` and absent Accept default to JSON. Preserves every existing programmatic client byte-for-byte. `?format=html` and `?format=json` are unambiguous escape hatches.
+- **Three-state badges (green/red/amber).** Green = verified. Red = active mismatch (tampered or chain-mismatch). Amber = unavailable/transient (HMAC fallback mode, RPC unreachable). Page renders even when chain RPC is down — soft failure.
+- **Defensive HTML escape on every dynamic field.** `capability` and `idempotency_key` come from agent input. Static labels and addresses don't strictly need it but the helper is cheap.
+
+**Operational notes worth keeping:**
+- **Cache invalidation requires server restart.** The tamper-test smoke (H5) needs a dev-server restart between tamper and reload, otherwise the previous green verdict is still cached. This is correct behavior — production receipts are immutable, no invalidation needed in normal operation.
+- **File-tools-vs-bash gotcha bit again.** Running `npx tsc --noEmit` from the bash sandbox returned "Unterminated template literal" at line 470 of `src/index.ts`. The bash mount was on a stale 09:20 version (truncated mid-file); the Windows-side file is complete. Verification must use PowerShell `npm run typecheck`. Lesson re-confirmed: **do not trust bash-side tsc for verification on freshly-edited files**.
+- **OG/Twitter card tags included.** Receipt page emits `<meta property="og:type">`, `og:title`, `og:description`, `twitter:card` — so when the URL is shared in a social platform that does unfurling, the card carries TrustBench branding + a factual one-liner ("$0.01 USDC settlement for search routed by TrustBench. Signature verified. On-chain confirmed."). Distribution-positive.
+
+**Carry-forward state:**
+- The receipt URL `https://trustbench-production.up.railway.app/receipts/rcpt_01KQY7C44GAPSXZPFQYRZ1D10C` will render the polished HTML page once this code deploys. Same URL, same id; existing `verify-receipt.js` script unaffected.
+- Next sprint piece per re-ranked agenda: `/rankings` Tailwind-style polish with content negotiation (P4-2's sister piece). Same single-file Hono pattern; structural alignment with Zauth.inc's UI without competing on data breadth.
+- Then: Heurist Solana mesh crawler addition + Mindshare outreach.
+
+---
+
+## 2026-05-06 — P4-7 reservation caps SHIPPED IN PROD (smoke green, flag flipped)
+
+**Update later same day:** smoke C1-C4 + B1 + B4 ran live against the dev server + mock provider, all green. Highlights:
+
+- **C1 PASS** — pending debited to 10000 (max_price), not 1000 (merchant quote). Conservative pre-check rule preserved.
+- **C2 PASS** — pending → 0 at settle, `pending_released_at` marker set, receipt records actual settled amount (1000), not reservation amount.
+- **C3 PASS (load-bearing)** — 3 concurrent quotes against `2 × max_price` cap → exactly 2 succeed + 1 `rolling_cap_exceeded`. **Phase 3 race is closed.**
+- **C4 PASS** — manual sweep call released 1 expired quote, decremented pending. Plus the autonomous in-process sweep timer caught a separately-expired quote during B4 setup at the 60s tick boundary — bonus real-data validation that the timer runs as designed.
+- **B1 PASS** — replay returned same `route_id` with `x-idempotent-replay: true` header AND pending stayed at 10000 (no double-debit). The idempotency layer correctly skips the spend-cap middleware on replay, which is the load-bearing reservation/idempotency contract.
+- **B4 PASS** — expired-quote settle returned 410 `route_id_expired`.
+- **Boot-time bonus**: when the dev server first started with the flag on, the sweep released 36 stale quotes from prior runs. Smoke pass on real-shaped data without hand-priming.
+
+**Railway flag flip:** `SPEND_CAP_RESERVATION_ENABLED=true` added to Railway Variables (was missing — Railway only auto-imports env vars at first repo connect, not on later `.env.example` additions; no commit needed for env vars). Boot log confirmed:
+```
+2026-05-06T10:03:49Z  [pending-sweep] starting (interval=60000ms)
+```
+P4-7 is the active code path in production from this moment. Documented Phase 3 race is closed in prod.
+
+**External signal in same log window:** several HEAD requests on `/receipts/rcpt_01KQY7C44GAPSXZPFQYRZ1D10C` at ~10:05. Possible Infopunks amplification, possible crawler, possible link-checker. Worth checking partner channels before launching receipt-HTML-rendering — if amplification is live, the polished render compounds every share.
+
+**Next sprint per re-ranked agenda (Zauth intel + parallel-convo follow-ups):** Receipt HTML rendering with content negotiation on `/receipts/:id` — `Accept: text/html` returns polished HTML, `Accept: application/json` unchanged. Same single-file Hono + inline CSS pattern as `/methodology`. Highest-leverage post-P4-7 polish item per the strategic re-rank.
+
+---
+
 ## 2026-05-06 — P4-7 reservation caps landed (code-only; smoke deferred to next live session)
 
 **What shipped:** strict reservation-based spend caps (P4-7). Atomic `claim_spend_reservation` RPC at quote time, `release_spend_reservation` at settle, `sweep_expired_reservations` on a 60s in-process timer, `refund_pending_reservation` for compensating refunds when quoteHandler aborts after pending was debited, `reconcile_pending_spend` for daily ground-truth recompute. Behind `SPEND_CAP_RESERVATION_ENABLED` env flag for canary.

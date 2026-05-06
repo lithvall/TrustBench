@@ -2,3 +2,28 @@
 dist
 .env
 .DS_Store
+
+# Office app lock files (machine-local)
+.~lock.*
+
+# Ad-hoc probe/settle/receipt test fixtures from local dev runs.
+# These contain wallet addresses, EIP-712 signatures, EIP-3009 nonces,
+# and raw X-PAYMENT envelopes from past probe sessions. Not sensitive
+# in the secret sense (the wallet address is public), but not useful
+# in a public repo either — Supabase is the canonical source for
+# real receipts and `scripts/mock-provider.ts` is the canonical fixture
+# source for tests. Keep these local.
+body*.json
+settle*.json
+receipt.json
+receipt-tampered.json
+rcpt_*.json
+
+# Local dev notes / scratch
+devlog.txt
+
+# Internal tactical research briefs (X / partnership scouting playbook).
+# References to the briefing in CLAUDE.md / lessons.md / phase4-kickoff.md
+# are method statements only and are safe to publish; the briefing content
+# itself is internal-only.
+grok-x-research-briefing.md

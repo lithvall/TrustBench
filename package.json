@@ -8,17 +8,29 @@
     "pipeline": "tsx src/prober.ts",
     "crawl": "tsx src/crawler.ts",
     "keygen": "node scripts/keygen.js",
-    "verify-scorecard": "node scripts/verify-scorecard.js"
+    "verify-scorecard": "node scripts/verify-scorecard.js",
+    "create-agent": "tsx scripts/create-agent.ts",
+    "typecheck": "tsc --noEmit",
+    "verify-receipt": "node scripts/verify-receipt.js",
+    "mock-provider": "tsx scripts/mock-provider.ts",
+    "paid-probe": "tsx scripts/paid-probe.ts",
+    "export-7-night": "tsx scripts/export-7-night.ts",
+    "import-paddock-bazaar": "tsx scripts/import-paddock-bazaar.ts"
   },
   "dependencies": {
-    "hono": "^4.4.0",
     "@hono/node-server": "^1.11.0",
+    "@node-rs/argon2": "^2.0.2",
     "@supabase/supabase-js": "^2.43.4",
+    "@x402/core": "^2.11.0",
+    "@x402/evm": "^2.11.0",
+    "dotenv": "^16.4.5",
+    "hono": "^4.4.0",
     "ioredis": "^5.4.1",
-    "dotenv": "^16.4.5"
+    "ulid": "^3.0.2"
   },
   "devDependencies": {
     "tsx": "^4.15.6",
-    "typescript": "^5.4.5"
+    "typescript": "^5.4.5",
+    "viem": "^2.39.3"
   }
 }

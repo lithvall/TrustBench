@@ -1,10 +1,50 @@
-// src/index.ts - FULL CORRECT FILE
+// src/index.ts — Phase 3 server: auth + idempotency + spend-caps + x402 + receipts.
 import 'dotenv/config';
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
-import { getRankings, signScorecard, getPublicKeyPem, isPublicVerifiable } from './scorer.js';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { createClient } from '@supabase/supabase-js';
+import { getRankings, signScorecard, getPublicKeyPem } from './scorer.js';
+import { requireAgent } from './auth.js';
+import { withIdempotency } from './idempotency.js';
+import { requireWithinSpendCap } from './spend-caps.js';
+import { quoteHandler, settleHandler } from './route-handlers.js';
+
+// ---------------------------------------------------------------------------
+// Agent-discovery static assets (P4-skill, P4-llmstxt, P4-wellknown).
+// These three files live at the repo root and are served as-is over HTTP for
+// agents and crawlers that look in the standard places (skill.md, llms.txt,
+// .well-known/<manifest>.json). Read once at boot to avoid disk I/O on the
+// hot path; restart picks up content edits. A missing file at boot is logged
+// and the corresponding route serves 503 — does NOT crash boot, so a partial
+// deploy still serves the rest of the API.
+//
+// Failure mode: if the file is missing, the route returns 503 with a plain
+// text explanation. No security implications (these are public, static).
+function loadStatic(relPath: string): string | null {
+  try {
+    return readFileSync(path.resolve(process.cwd(), relPath), 'utf-8');
+  } catch (err: any) {
+    console.warn(`[boot] static asset ${relPath} not loaded: ${err.message}; route will serve 503`);
+    return null;
+  }
+}
+const SKILL_MD_BODY = loadStatic('skill.md');
+const LLMS_TXT_BODY = loadStatic('llms.txt');
+const WELL_KNOWN_TRUSTBENCH_JSON_BODY = loadStatic('.well-known/trustbench.json');
+
+// Top-level Supabase client for the public-facing endpoints in this file
+// (currently /receipts/:id). Other modules own their own clients to keep
+// boot lazy. Same env-var convention as the rest of the codebase:
+// SUPABASE_SECRET_KEY (the service-role key under Supabase's 2026 key system).
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SECRET_KEY!,
+  { auth: { persistSession: false, autoRefreshToken: false } }
+);
 
 const app = new Hono();
 
@@ -21,7 +61,7 @@ app.get('/rankings', async (c) => {
   return c.json({ success: true, data, source: 'TrustBench' });
 });
 
-// Router v2
+// Router v1 (public GET kept for backward compatibility — score-only readout)
 app.get('/route', async (c) => {
   const capability = c.req.query('capability') || 'search';
   const rankings = await getRankings(capability as any);
@@ -47,6 +87,26 @@ app.get('/route', async (c) => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// POST /route — Phase 3 authenticated + idempotent + spend-capped quote.
+// Chain order is locked by phase3-spend-caps.md: cap check goes AFTER the
+// idempotency claim (so retries replay through the cache without re-evaluating
+// caps) and BEFORE any x402 / provider work (so we don't burn an upstream
+// round-trip on a request we were always going to reject).
+//
+// Step 1 of the two-step x402 protocol — see phase3-x402-construction.md.
+// Returns a route_id + payment_required challenge for the agent to sign.
+// ---------------------------------------------------------------------------
+app.post('/route', requireAgent, withIdempotency, requireWithinSpendCap, quoteHandler);
+
+// ---------------------------------------------------------------------------
+// POST /route/settle — Phase 3 settle (Step 2).
+// Server-enforced dedup on route_id (no withIdempotency middleware mounted
+// here; deduplication happens inside settleHandler with key '_settle:'+route_id).
+// Spend cap is NOT re-checked — the quote is the contract.
+// ---------------------------------------------------------------------------
+app.post('/route/settle', requireAgent, settleHandler);
+
 // Paid route (x402)
 app.get('/rankings/paid', async (c) => {
   const capability = c.req.query('capability') || 'search';
@@ -54,7 +114,12 @@ app.get('/rankings/paid', async (c) => {
   return c.json({ success: true, data: data.map(signScorecard), source: 'TrustBench', paid: true });
 });
 
-// MCP tools
+// ---------------------------------------------------------------------------
+// MCP tools manifest — describes the public agent-facing endpoints.
+// trustbench_get_rankings is the existing public reads; the two route_*
+// tools describe the Phase 3 paid-routing flow (will be live once Step 10's
+// helper functions are filled in).
+// ---------------------------------------------------------------------------
 app.get('/mcp/tools', (c) => {
   return c.json({
     success: true,
@@ -64,27 +129,61 @@ app.get('/mcp/tools', (c) => {
         description: "Get current TrustBench rankings for a capability",
         parameters: {
           type: "object",
-          properties: { capability: { type: "string", enum: ["search", "inference", "data"] } },
+          properties: { capability: { type: "string", enum: ["search", "inference", "data", "media", "infra"] } },
           required: ["capability"]
         }
       },
       {
-        name: "trustbench_route",
-        description: "Get the best recommended x402 provider with fallback",
+        name: "trustbench_route_quote",
+        description: "Request a payment quote for a capability. Returns a route_id and an x402 payment challenge that the agent's wallet must sign with EIP-3009 transferWithAuthorization. Phase 3 supports Base mainnet + USDC only.",
         parameters: {
           type: "object",
-          properties: { capability: { type: "string", enum: ["search", "inference", "data"] } },
-          required: ["capability"]
+          properties: {
+            capability: { type: "string", enum: ["search", "inference", "data", "media", "infra"] },
+            max_price: {
+              type: "string",
+              description: "Maximum the agent will pay for this call, in atomic units of USDC (6 decimals). Example: '10000' = $0.01."
+            },
+            payer_address: {
+              type: "string",
+              pattern: "^0x[0-9a-fA-F]{40}$",
+              description: "The agent's wallet address (EOA) that will sign the EIP-3009 authorization."
+            },
+            idempotency_key: {
+              type: "string",
+              minLength: 16,
+              maxLength: 128,
+              description: "Unique per logical request, supplied as the Idempotency-Key header. Retries with the same key replay the cached quote."
+            }
+          },
+          required: ["capability", "max_price", "payer_address", "idempotency_key"]
+        }
+      },
+      {
+        name: "trustbench_route_settle",
+        description: "Submit the agent's signed EIP-3009 transferWithAuthorization to settle a previously quoted route. Returns the provider's response plus a signed Ed25519 receipt (verifiable at /receipts/:id).",
+        parameters: {
+          type: "object",
+          properties: {
+            route_id: {
+              type: "string",
+              pattern: "^qt_[0-9A-HJKMNP-TV-Z]{26}$",
+              description: "The route_id returned from trustbench_route_quote."
+            },
+            signature: {
+              type: "string",
+              pattern: "^0x[0-9a-fA-F]{130}$",
+              description: "65-byte ECDSA signature (r || s || v) over the EIP-3009 authorization payload."
+            }
+          },
+          required: ["route_id", "signature"]
         }
       }
     ]
   });
 });
 
-// Public Ed25519 key for verifying signed scorecards.
-// Anyone can fetch this and verify any TrustBench scorecard signature without
-// ever contacting us — that's the whole point of moving from HMAC to Ed25519.
-// Standard well-known path so it's discoverable without docs.
+// Public Ed25519 key
 app.get('/.well-known/trustbench-pubkey', (c) => {
   const pem = getPublicKeyPem();
   if (!pem) {
@@ -102,9 +201,98 @@ app.get('/.well-known/trustbench-pubkey', (c) => {
   });
 });
 
-// Public methodology page — required reading for anyone interpreting the data.
-// Phase 0 of the strategy doc says: name what the probe does and does NOT do, in plain
-// language, before any third party tries to cite the data.
+// ---------------------------------------------------------------------------
+// Agent-discovery surfaces (P4-skill, P4-llmstxt, P4-wellknown).
+//
+// These three routes serve TrustBench's static discovery files. They're the
+// surfaces an agent or crawler looks for first when introduced to a new
+// service:
+//   - /skill.md is the agent skill file (agentic.market/skill.md format).
+//     Pasted into Claude Code / Codex CLI / Gemini CLI / Hermes / Cursor,
+//     it teaches the agent the TrustBench quote/settle flow on top of an
+//     existing Coinbase Agentic Wallet setup.
+//   - /llms.txt is the LLM-grounded research summary (llmstxt.org format).
+//     Useful for agents that use an LLM to research "agent payment routing"
+//     or "x402 receipts" before integrating.
+//   - /.well-known/trustbench.json is the machine-readable manifest of all
+//     of TrustBench's public surfaces, capabilities, and signing scheme.
+//
+// All three are read at boot from the repo root (see loadStatic above) and
+// served with a 1-hour cache so iterative content updates take effect quickly
+// while still giving CDN edges a useful caching window.
+// ---------------------------------------------------------------------------
+app.get('/skill.md', (c) => {
+  if (!SKILL_MD_BODY) {
+    return c.text('skill.md is not deployed on this instance.\n', 503, {
+      'Content-Type': 'text/plain; charset=utf-8',
+    });
+  }
+  return c.text(SKILL_MD_BODY, 200, {
+    'Content-Type': 'text/markdown; charset=utf-8',
+    'Cache-Control': 'public, max-age=3600',
+  });
+});
+
+app.get('/llms.txt', (c) => {
+  if (!LLMS_TXT_BODY) {
+    return c.text('llms.txt is not deployed on this instance.\n', 503, {
+      'Content-Type': 'text/plain; charset=utf-8',
+    });
+  }
+  return c.text(LLMS_TXT_BODY, 200, {
+    'Content-Type': 'text/plain; charset=utf-8',
+    'Cache-Control': 'public, max-age=3600',
+  });
+});
+
+app.get('/.well-known/trustbench.json', (c) => {
+  if (!WELL_KNOWN_TRUSTBENCH_JSON_BODY) {
+    return c.text('manifest is not deployed on this instance.\n', 503, {
+      'Content-Type': 'text/plain; charset=utf-8',
+    });
+  }
+  return c.text(WELL_KNOWN_TRUSTBENCH_JSON_BODY, 200, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'public, max-age=3600',
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /receipts/:id — public, cache-friendly audit endpoint.
+// Returns the exact signed receipt envelope stored in the DB.
+// Id is ULID (unguessable). Receipts are immutable → aggressive caching.
+// No auth required (RLS already handles public-read-by-id).
+// ---------------------------------------------------------------------------
+const RECEIPT_ID_RE = /^rcpt_[0-9A-HJKMNP-TV-Z]{26}$/;
+
+app.get('/receipts/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!RECEIPT_ID_RE.test(id)) {
+    return c.json({ error: 'receipt_id_invalid' }, 400);
+  }
+
+  const { data, error } = await supabase
+    .from('receipts')
+    .select('receipt_json')
+    .eq('id', id)
+    .maybeSingle<{ receipt_json: unknown }>();
+
+  if (error) {
+    console.error('[receipts] lookup failed:', error.message);
+    return c.json({ error: 'receipt_unavailable' }, 503);
+  }
+  if (!data || !data.receipt_json) {
+    return c.json({ error: 'receipt_not_found' }, 404);
+  }
+
+  return c.json(data.receipt_json, 200, {
+    'Cache-Control': 'public, max-age=86400, immutable',
+  });
+});
+
+// Methodology page — required reading for anyone interpreting the data.
+// Phase 0 of the strategy doc says: name what the probe does and does NOT do,
+// in plain language, before any third party tries to cite the data.
 app.get('/methodology', (c) => {
   const html = `
 <!DOCTYPE html>
@@ -206,6 +394,16 @@ const valid = crypto.verify(
     <code>TrustBench-strategy.md</code>.
   </p>
 
+  <h2>Phase 3 router (in build)</h2>
+  <p>The router is currently in active development. When live it will provide the following primitives:</p>
+  <ul>
+    <li><strong>Authenticated quoting</strong> (<code>POST /route</code>) with argon2id API keys, idempotency keys, and hard spend caps</li>
+    <li><strong>Non-custodial settlement</strong> (<code>POST /route/settle</code>) that forwards agent-signed EIP-3009 authorizations</li>
+    <li><strong>Signed receipts</strong> with Ed25519 signatures and public audit endpoint at <code>/receipts/:id</code></li>
+    <li><strong>Queryable audit trail</strong> — any third party can verify receipts without trusting TrustBench</li>
+  </ul>
+  <p><em>TrustBench never holds funds, never submits transactions, and never acts as a facilitator.</em></p>
+
   <p><a href="/analytics">Analytics dashboard</a> · <a href="/rankings?capability=search">Sample rankings</a> · <a href="/health">Health</a></p>
 </body>
 </html>`;
@@ -236,7 +434,7 @@ app.get('/analytics', async (c) => {
 <body>
   <h1>TrustBench Analytics</h1>
   <p>Last updated: ${new Date().toLocaleString()}</p>
-  
+
   <div class="note">
     <strong>How this data is collected:</strong>
     Latency and uptime are measured by a nightly probe that sends three sequential

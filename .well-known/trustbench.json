@@ -1,0 +1,110 @@
+{
+  "name": "TrustBench",
+  "description": "Non-custodial routing and policy layer for x402 paid agent calls. Wraps x402-conforming providers with idempotency keys, hard spend caps, Ed25519-signed audit receipts, and a queryable receipt endpoint. Agents sign their own EIP-3009 transferWithAuthorization with their own wallet (Coinbase Agentic Wallet recommended); TrustBench constructs the quote, routes to a probed and scored provider, observes the on-chain settlement, and emits a receipt that any third party can verify offline against the published public key.",
+  "version": "0.1.0",
+  "phase": "phase-4",
+  "homepage": "https://trustbench.io",
+  "documentation": {
+    "methodology": "https://trustbench.io/methodology",
+    "skill": "https://trustbench.io/skill.md",
+    "llmsTxt": "https://trustbench.io/llms.txt",
+    "readme": "https://github.com/lithvall88/TrustBench/blob/main/README.md",
+    "strategy": "https://github.com/lithvall88/TrustBench/blob/main/TrustBench-strategy.md",
+    "receiptSpec": "https://github.com/lithvall88/TrustBench/blob/main/receipt-spec-v1.md"
+  },
+  "publicEndpoints": {
+    "health": "https://trustbench.io/health",
+    "rankings": "https://trustbench.io/rankings",
+    "rankingsPaid": "https://trustbench.io/rankings/paid",
+    "routeRead": "https://trustbench.io/route",
+    "receipt": "https://trustbench.io/receipts/:id",
+    "analytics": "https://trustbench.io/analytics",
+    "methodology": "https://trustbench.io/methodology",
+    "mcpTools": "https://trustbench.io/mcp/tools"
+  },
+  "authenticatedEndpoints": {
+    "routeQuote": {
+      "url": "https://trustbench.io/route",
+      "method": "POST",
+      "auth": "Bearer tb_live_<key>",
+      "requiredHeaders": ["Idempotency-Key"],
+      "body": {
+        "capability": "search | inference | data | media | infra",
+        "max_price": "atomic USDC integer string (6 decimals; 10000 = $0.01)",
+        "payer_address": "0x prefixed 40-hex EOA"
+      },
+      "returns": {
+        "route_id": "qt_<26-char ULID>",
+        "payment_required": "legacy v0.x flat shape",
+        "payment_requirements_v2": "raw merchant accepts[0] when present (null for v0.x merchants)",
+        "expires_at": "ISO 8601, 5-minute validity window",
+        "fallback_provider": "secondary choice with score_at_decision"
+      }
+    },
+    "routeSettle": {
+      "url": "https://trustbench.io/route/settle",
+      "method": "POST",
+      "auth": "Bearer tb_live_<key>",
+      "body": "Either {route_id, signature} (legacy v0.x) or {route_id, x_payment} (SDK-built X-PAYMENT base64). Mutually exclusive.",
+      "returns": "{response, receipt} plus X-Receipt-Id header. Idempotent on (route_id, payment); replays return x-idempotent-replay: true.",
+      "failureModes": {
+        "410": "route_id_expired (5-minute window closed)",
+        "409": "idempotency_key_reused_with_different_body",
+        "502": "provider_settlement_missing (no tx_hash recoverable from merchant; no receipt issued)"
+      }
+    },
+    "receipt": {
+      "url": "https://trustbench.io/receipts/:id",
+      "method": "GET",
+      "auth": "none (public, ULID acts as audit token)",
+      "cache": "public, max-age=86400, immutable"
+    }
+  },
+  "capabilities": ["search", "inference", "data", "media", "infra"],
+  "capabilitiesNote": "Aligned with Coinbase Agentic Market's 5-category taxonomy as of Phase 4 (2026-05-05). The crawler stores other categories it observes (e.g. Travel, Social, Storage, Trading) in the providers table but does not route them until they graduate into the canonical 5 above.",
+  "networks": ["base"],
+  "settlementAssets": ["USDC"],
+  "signing": {
+    "algorithm": "Ed25519",
+    "publicKeyUrl": "https://trustbench.io/.well-known/trustbench-pubkey",
+    "publicKeyFormat": "PEM",
+    "canonicalization": "JCS (RFC 8785)",
+    "fallbackAlgorithm": "HMAC-SHA256 (server-internal only; publicKeyUrl returns 503 in fallback mode)",
+    "verifierScripts": {
+      "scorecard": "https://github.com/lithvall88/TrustBench/blob/main/scripts/verify-scorecard.js",
+      "receipt": "https://github.com/lithvall88/TrustBench/blob/main/scripts/verify-receipt.js"
+    }
+  },
+  "custody": {
+    "model": "non-custodial",
+    "claim": "TrustBench never holds funds, never signs payments, and never broadcasts transactions. The agent signs an EIP-3009 transferWithAuthorization with its own wallet; the merchant submits the on-chain transaction with its own gas wallet; TrustBench observes the resulting tx_hash and emits a signed receipt."
+  },
+  "pricing": {
+    "model": "flat-per-tx",
+    "policySubscription": "optional, Phase 4 follow-up",
+    "providerVerificationBond": "refundable, pay-to-list, never pay-to-rank",
+    "phase4Status": "invite-only during the build; access via direct message to @TrustBench on X"
+  },
+  "policyPrimitives": {
+    "idempotencyKeys": "16-128 char header on every POST /route. Same key + same body = cached replay. Same key + different body = 409.",
+    "hardSpendCaps": "Per-call cap and rolling-window daily cap, both enforced server-side, both denominated in atomic USDC.",
+    "signedReceipts": "Ed25519 over JCS-canonical receipt body. Detached signature so public_key_url can be overridden at verification time.",
+    "queryableAudit": "GET /receipts/:id returns the exact signed envelope. ULID-keyed, immutable, public, cache-friendly."
+  },
+  "discoveryReferences": {
+    "agenticMarketServices": "https://api.agentic.market/v1/services",
+    "agenticMarketSkill": "https://agentic.market/skill.md",
+    "x402Spec": "https://x402.org",
+    "cdpDocs": "https://docs.cdp.coinbase.com/llms.txt"
+  },
+  "phases": {
+    "phase3ClosedOn": "2026-05-04",
+    "phase3Surfaces": "Authenticated POST /route + POST /route/settle, GET /receipts/:id, scripts/verify-receipt.js, paid-probe.ts. Smoke A1-A5 / B1-B4 green against the local mock provider.",
+    "phase4InProgress": "Discovery surfaces (skill.md, manifest, llms.txt route), registry refresh against x402.org/ecosystem, taxonomy alignment to 5-cat (Search / Inference / Data / Media / Infra), Agentic Market crawler integration. First paid receipt against a real x402 provider in flight pending facilitator clarification.",
+    "phase5Planned": "p402, KYB and identity attestations, settlement-finality semantics across protocols, Canton coverage."
+  },
+  "contact": {
+    "x": "https://x.com/TrustBench",
+    "github": "https://github.com/lithvall88/TrustBench"
+  }
+}

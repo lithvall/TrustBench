@@ -33,8 +33,6 @@ redis.on('error', () => console.log('⚠️ Redis connection lost – falling ba
 // ---------------------------------------------------------------------------
 // Key loading — lazy, runs once on first sign call so a missing key doesn't
 // crash boot for unrelated routes (e.g. /health) on a fresh deployment.
-// ---------------------------------------------------------------------------
-
 type SigningMethod = 'ed25519' | 'hmac';
 let _privateKey: crypto.KeyObject | null = null;
 let _publicKeyPem: string | null = null;
@@ -73,16 +71,23 @@ function loadKeys(): SigningMethod {
 
 // ---------------------------------------------------------------------------
 // Public API
-// ---------------------------------------------------------------------------
-
 export async function getRankings(capability: string) {
-  const cacheKey = `rankings:${capability}`;
+  // Cache key bumped to v3 (2026-05-05) to add `integration_type` per row
+  // (Coinbase Agentic Market 1P/3P signal, alongside our existing x402_verified
+  // empirical bit). The v2 keys age out within 5 minutes; harmless orphan data.
+  // Bumping the version on schema additions avoids stale-shape rows leaking
+  // into clients that expect the new fields.
+  const cacheKey = `rankings:v3:${capability}`;
   const cached = await redis.get(cacheKey);
   if (cached) return JSON.parse(cached);
 
+  // Pull metadata so we can derive x402_verified (the bit set by
+  // crawler.ts seedKnownX402Endpoints() for providers we've live-confirmed
+  // emit a v2 x402 challenge body). The router's selectProvider prefers
+  // verified providers over unverified ones at routing time.
   const { data: providers } = await supabase
     .from('providers')
-    .select('url, name, capability')
+    .select('url, name, capability, metadata')
     .eq('capability', capability);
 
   const { data: scorecards } = await supabase
@@ -94,6 +99,26 @@ export async function getRankings(capability: string) {
 
   const processed = providers?.map(p => {
     const s = scorecardMap.get(p.url) || {};
+    // Defensive coercion — metadata might be null, an array, or have a
+    // non-boolean x402_verified. Only `=== true` qualifies as verified.
+    const meta = (p.metadata && typeof p.metadata === 'object' && !Array.isArray(p.metadata))
+      ? (p.metadata as Record<string, unknown>)
+      : {};
+    const x402_verified = meta.x402_verified === true;
+    // P4-verify-tier (2026-05-05): two-bit verification stack.
+    //   x402_verified — empirical: TrustBench probed the endpoint and it
+    //     emitted a valid x402 challenge.
+    //   integration_type — curatorial: Coinbase Agentic Market certified the
+    //     service as '1P' (first-party native x402) or '3P' (proxied).
+    // Both signals together are stronger than either alone; clients can
+    // surface them independently. Neither field is part of the signed
+    // scorecard payload (signScorecard()) — those stable signed bytes still
+    // cover only {provider_id, capability, score, latency_p50, last_updated}.
+    const rawIntegrationType = meta.integration_type;
+    const integration_type =
+      rawIntegrationType === '1P' || rawIntegrationType === '3P'
+        ? (rawIntegrationType as '1P' | '3P')
+        : null;
     return {
       id: s.id || null,
       provider_id: p.url,
@@ -104,7 +129,9 @@ export async function getRankings(capability: string) {
       latency_p95: s.latency_p95 ?? 9999,
       uptime_7d: s.uptime_7d ?? 50,
       last_updated: s.last_updated || new Date().toISOString(),
-      signature: s.signature || null
+      signature: s.signature || null,
+      x402_verified,
+      integration_type,
     };
   }).sort((a, b) => b.score - a.score) || [];
 
@@ -172,4 +199,43 @@ export function getPublicKeyPem(): string | null {
  */
 export function isPublicVerifiable(): boolean {
   return loadKeys() === 'ed25519';
+}
+
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Phase 3 receipt-generator helpers
+// ---------------------------------------------------------------------------
+// src/receipt-generator.ts uses signWithEd25519() to sign canonical receipt
+// JSON. The Ed25519 keypair is the SAME one loaded by signScorecard() —
+// single keypair, single public-key endpoint at /.well-known/trustbench-pubkey.
+
+/**
+ * Sign a payload with the Ed25519 private key. Returns base64-encoded
+ * signature string, or null if Ed25519 keys aren't configured.
+ *
+ * Strict policy — this function does NOT fall back to HMAC. Receipts must
+ * be third-party verifiable, and HMAC requires sharing the secret with
+ * verifiers, which defeats the purpose. The caller (issueReceipt in
+ * receipt-generator.ts) treats null as "refuse to issue receipt with
+ * a `signing_unavailable` error" rather than emitting an HMAC-signed
+ * receipt that can't be independently verified.
+ *
+ * Failure mode if this is wrong:
+ *   - returns null when keys ARE configured: caller refuses to issue a
+ *     receipt that should have been issued. Surface as `signing_unavailable`
+ *     in /route/settle response. Recoverable by fixing the env vars.
+ *   - returns a non-base64 string: verifier-side decode fails, audit
+ *     reports "signature invalid". No money-loss path.
+ *   - returns a signature over the wrong bytes: same as above; verifier
+ *     fails on hash mismatch.
+ */
+export function signWithEd25519(payload: Buffer): string | null {
+  const method = loadKeys();
+  if (method !== 'ed25519' || !_privateKey) {
+    return null;
+  }
+  const sig = crypto.sign(null, payload, _privateKey);
+  return sig.toString('base64');
 }

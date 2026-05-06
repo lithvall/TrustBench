@@ -1,0 +1,69 @@
+name: Paid Probe
+
+# Closeout #7 / phase3-paid-probing.md
+# ----------------------------------------------------------------------------
+# Hits /route + /route/settle on the production deployment with a budget-capped
+# probe agent. Every 4 hours; ~24 probes/day across 20 providers at $0.005 avg.
+#
+# The script is non-custodial: TrustBench never holds the probe wallet's funds;
+# the wallet signs an EIP-3009 authorization, the merchant submits on-chain.
+#
+# Required GitHub Secrets (set in repo Settings → Secrets → Actions):
+#   - SCRIPTS_PROBE_API_KEY    tb_live_… key for probe@trustbench.io
+#   - SCRIPTS_PROBE_WALLET_PK  0x-prefixed 64-hex-char private key (probe-only EOA)
+#   - TRUSTBENCH_BASE_URL      production deployment URL
+#   - SUPABASE_URL             optional; used for soft monthly cap pre-check
+#   - SUPABASE_SECRET_KEY      optional; service-role key for receipts query
+
+on:
+  schedule:
+    # Six runs per day at 4-hour intervals starting from 01:00 UTC.
+    # Distributing across the day catches providers that are up-some-of-the-time
+    # and prevents the daily cap firing in one early window.
+    - cron: '0 1,5,9,13,17,21 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Skip /route/settle (no money moved)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+      max_providers:
+        description: 'Max providers per run (default 4)'
+        required: false
+        default: '4'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run paid probe
+        env:
+          # Live config
+          TRUSTBENCH_BASE_URL: ${{ secrets.TRUSTBENCH_BASE_URL }}
+          SCRIPTS_PROBE_API_KEY: ${{ secrets.SCRIPTS_PROBE_API_KEY }}
+          SCRIPTS_PROBE_WALLET_PK: ${{ secrets.SCRIPTS_PROBE_WALLET_PK }}
+          # Soft monthly cap pre-check (optional — server enforces hard cap)
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          # Manual-dispatch overrides (cron runs use defaults)
+          SCRIPTS_PROBE_DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          SCRIPTS_PROBE_MAX_PROVIDERS: ${{ github.event.inputs.max_providers || '4' }}
+          SCRIPTS_PROBE_CAPABILITIES: 'search,inference,data'
+          SCRIPTS_PROBE_AGENT_EMAIL: 'probe@trustbench.io'
+        run: npm run paid-probe

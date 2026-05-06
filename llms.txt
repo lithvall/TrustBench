@@ -1,0 +1,109 @@
+# TrustBench
+
+> Non-custodial routing + verification layer for agentic x402 payments. Agents call TrustBench, TrustBench picks the best provider (live telemetry), constructs the x402 challenge, the agent signs, the provider settles on-chain, and TrustBench returns a signed receipt. Today: public registry of x402-style endpoints with nightly liveness telemetry, plus a live non-custodial routing surface (`POST /route` and `POST /route/settle`) with idempotency keys, hard spend caps, and Ed25519-signed receipts. Phase 3 closed 2026-05-04. Phase 4 in flight: agent-discovery surfaces (skill.md, manifest, llms.txt route) and first paid receipts against real x402 providers.
+
+This file is intended for AI agents, agent builders, and other automated consumers. Humans should start at the [README](https://github.com/lithvall88/TrustBench/blob/main/README.md) and the live [methodology page](https://trustbench-production.up.railway.app/methodology).
+
+## What TrustBench does and does not do
+
+- **Does:** discover and rank x402-style providers; expose live liveness telemetry; (Phase 3) construct x402 challenges, route requests, and emit signed receipts.
+- **Does not:** hold agent funds, sign on behalf of agents, submit transactions on-chain, or verify on-chain settlement. We are HTTP middleware. The agent signs; the provider submits with their own gas wallet.
+- **Honest measurement:** the nightly probe is a `HEAD` (with `GET` fallback on 405) liveness check, 3 samples, from one cloud host. Status codes `200/201/204/401/402/403/404/405/429` are treated as "alive". This is a registry with telemetry, not a benchmark.
+
+## Public read endpoints (no auth)
+
+- [GET /health](https://trustbench-production.up.railway.app/health) — liveness check for the API itself.
+- [GET /rankings?capability=search](https://trustbench-production.up.railway.app/rankings?capability=search) — current ranked providers for a capability (`search`, `inference`, `data`, `media`, `infra`).
+- [GET /rankings/paid?capability=search](https://trustbench-production.up.railway.app/rankings/paid?capability=search) — same payload, with each provider's signed scorecard included.
+- [GET /route?capability=search](https://trustbench-production.up.railway.app/route?capability=search) — current best provider + fallback for a capability. **This is the legacy read-only route. The Phase 3 authenticated `POST /route` is the routing surface for agents — see below.**
+- [GET /mcp/tools](https://trustbench-production.up.railway.app/mcp/tools) — MCP tool descriptors for agent integrations.
+- [GET /methodology](https://trustbench-production.up.railway.app/methodology) — full description of what the probe measures.
+- [GET /.well-known/trustbench-pubkey](https://trustbench-production.up.railway.app/.well-known/trustbench-pubkey) — Ed25519 public key (PEM) used to sign scorecards and receipts. Returns 503 with a plaintext explanation if the deployment is still on the HMAC-SHA256 fallback.
+
+## Agent-discovery surfaces (Phase 4)
+
+- [GET /skill.md](https://trustbench-production.up.railway.app/skill.md) — agent skill file in the agentic.market/skill.md format. Paste into Claude Code, Codex CLI, Gemini CLI, Hermes, Cursor, Claude Desktop, Cherry Studio, or ChatGPT to teach the agent the TrustBench quote/settle flow as an additive policy + receipt layer on top of an existing Coinbase Agentic Wallet setup.
+- [GET /.well-known/trustbench.json](https://trustbench-production.up.railway.app/.well-known/trustbench.json) — machine-readable manifest of TrustBench's public surfaces, capability tags, signing scheme, networks supported, and discovery references. Designed for agents and crawlers that read `.well-known/` after a 402 challenge.
+- [GET /llms.txt](https://trustbench-production.up.railway.app/llms.txt) — this file. Designed for LLM-grounded agent research.
+
+## Authenticated routing (Phase 3, live; Phase 4 invite-only)
+
+The Phase 3 routing surface is a two-step, non-custodial flow over the [x402 protocol](https://x402.org). The authoritative source for the request/response contract is the deployed code (`src/route-handlers.ts`, `src/spend-caps.ts`, `src/idempotency.ts`); the summary below is the stable shape an agent can integrate against.
+
+### Step 1 — quote: `POST /route`
+
+Headers:
+
+- `Authorization: Bearer tb_live_<32-char-base32-Crockford>` (or `tb_test_…`). Phase 4 access is invite-only during the build. Direct message @TrustBench on X to request a key.
+- `Idempotency-Key: <16–128 chars>` — required. Same key + same body within 24h replays the same response. Same key + different body returns `409`. See `phase3-idempotency-design.md` in the repo for full semantics.
+- `Content-Type: application/json`.
+
+Body:
+
+```json
+{
+  "capability": "search",
+  "max_price": "10000",
+  "payer_address": "0xAGENT_WALLET_40_HEX"
+}
+```
+
+- `capability`: one of `search`, `inference`, `data`, `media`, `infra` (5-cat alignment with Coinbase Agentic Market). Other categories that the registry has crawled (e.g. Travel, Social, Storage, Trading) are stored in the providers table but not yet routable until they graduate into this list.
+- `max_price`: atomic-unit integer string (USDC, 6 decimals — e.g. `"10000"` = $0.01). Must be a non-negative integer string. Floats and scientific notation are rejected.
+- `payer_address`: `0x` + 40 hex chars. The wallet that will sign the EIP-3009 authorization in step 2.
+
+Response (`200`):
+
+```json
+{
+  "route_id": "qt_<26-char-ULID>",
+  "provider_id": "...",
+  "provider_url": "...",
+  "payment_required": { "scheme": "eip3009", "network": "base", "asset_address": "...", "recipient": "...", "amount": "...", "decimals": 6, "valid_after": 0, "valid_before": 0, "nonce": "0x..." },
+  "expires_at": "ISO 8601"
+}
+```
+
+Failure modes (sample): `400 max_price_required` / `max_price_invalid` / `payer_address_invalid` / `capability_invalid`; `400 per_call_cap_exceeded` (with `cap_atomic` + `requested_atomic`); `400 rolling_cap_exceeded` (with `Retry-After`); `401` if the key is missing/revoked; `409 idempotency_key_reused_with_different_body`; `409 in_flight` with `Retry-After: 5` for concurrent retries; `503 no_provider_for_capability`.
+
+### Step 2 — settle: `POST /route/settle`
+
+Headers: `Authorization: Bearer …` (same key). **No `Idempotency-Key` header** — the `route_id` is the dedup key.
+
+Body: `{ "route_id": "qt_…", "signature": "0x<130-hex>" }` where `signature` is the agent's EIP-712 signature over the EIP-3009 `transferWithAuthorization` payload from step 1.
+
+Response (`200`): the upstream provider's response body, plus an `X-Receipt-Id` response header containing `rcpt_<26-char-ULID>`. The signed receipt itself is fetchable at `/receipts/:id` once that endpoint ships (see below).
+
+### Receipts
+
+Receipts follow the [TrustBench Receipt Spec v1.0.0](https://github.com/lithvall88/TrustBench/blob/main/receipt-spec-v1.md): a JSON object with a `receipt` body (call / settlement / pricing / routing / audit fields) and a detached Ed25519 `signature` over the JCS-canonical bytes (RFC 8785). Reference verifier: `scripts/verify-receipt.js` in the repo.
+
+Audit endpoint: `GET /receipts/:id` returns the same JSON, fresh from the issuer. Status: live since Phase 3 close 2026-05-04. Cache headers are `public, max-age=86400, immutable`. The receipt id is unguessable (ULID) and acts as the audit token.
+
+## Policy guarantees (the four Phase 3 primitives)
+
+These are the things an agent or agent builder can rely on TrustBench enforcing on every routed call. They are deliberately the surface the [r/AI_Agents and InfopunksHQ Phase 2 conversations](https://github.com/lithvall88/TrustBench/blob/main/%23%20Phase%202%20%E2%80%94%20Builder%20Conversations.md) said they wanted before adoption:
+
+- **Idempotency keys.** Required on every `POST /route`. Same key + same body → same response, even under partial-timeout retries. No double-charge under normal failure modes.
+- **Hard spend caps.** Per-call cap and rolling-window cap, both enforced server-side, both denominated in atomic-unit USDC strings. Max-price on the request must clear the per-call cap; expected spend (request + window) must clear the rolling cap. Caps are per-agent and configured by the operator.
+- **Ed25519-signed receipts.** Every settled call returns a receipt signed by TrustBench's published Ed25519 key. Detached signature over JCS-canonical bytes. Verifiable third-party with no out-of-band setup.
+- **Replayable audit trail.** Each receipt includes its `audit_url` (`/receipts/:id`). Anyone holding the id can re-fetch the canonical receipt from the issuer. Provider rationale is summarized as `score_at_decision` + `alternatives_considered` (count) + `selection_reason`.
+
+## What TrustBench will not do (non-custodial line)
+
+- Sign authorizations on behalf of the agent. The agent signs; we forward.
+- Submit transactions on-chain. The provider submits with their own gas wallet.
+- Hold agent funds at any point.
+- Rank providers by payment. Pay-to-list (refundable verification bond, Phase 4) is fine; pay-to-rank is not.
+
+## Pricing
+
+Flat per-tx fee on routed calls (`fee_model: "flat_per_tx"` in the receipt). No percentage spread on the routed amount, that model was rejected during Phase 2 builder conversations on 2026-04-30. Operator-side subscription tiers for the policy firewall land in Phase 4. Phase 4 is invite-only during the build; direct message @TrustBench on X for a `tb_live_…` API key.
+
+## Repository
+
+Source: <https://github.com/lithvall88/TrustBench>. Strategic context: [`TrustBench-strategy.md`](https://github.com/lithvall88/TrustBench/blob/main/TrustBench-strategy.md). Phase 3 entry-point: [`phase3-handoff.md`](https://github.com/lithvall88/TrustBench/blob/main/phase3-handoff.md). Receipt schema: [`receipt-spec-v1.md`](https://github.com/lithvall88/TrustBench/blob/main/receipt-spec-v1.md).
+
+## Contact
+
+Open a GitHub issue, or direct message @TrustBench on X. For design-partner conversations, mention "design partner" in the first message.

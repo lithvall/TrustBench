@@ -1,24 +1,32 @@
 # TrustBench
 
-A public **registry of x402-style endpoints with nightly liveness telemetry and signed scorecards** — and the foundation for a non-custodial smart router and payment-plumbing layer for agents.
+A non-custodial smart router and payment-plumbing layer for x402 agents.
 
-Built and maintained by a solo founder. Everything in this repo is designed to be run by one person with zero manual daily work.
+## What's live today
+- Public registry of x402 endpoints (~20 providers across search/inference/data)
+- Nightly liveness probe (HEAD requests from a single cloud host, 3 samples per
+  provider, statuses 200/201/204/401/402/403/404/405/429 treated as alive)
+- Score derivation: 15 + 45·successRate + 35·latencyHealth + 3·consistency,
+  clamped to [40, 98], via linear-interpolation percentiles
+- Ed25519-signed scorecards, public key at /.well-known/trustbench-pubkey
+- Methodology disclosure at /methodology
 
-## What this is (and what it isn't)
+## What's in Phase 3 build (not yet live)
+- Authenticated POST /route endpoint with API-key auth (argon2id), idempotency
+  keys, hard spend caps, and Ed25519-signed receipts
+- /route/settle endpoint forwarding agent-signed EIP-3009 authorizations
+- Queryable audit at /receipts/:id
 
-**Today, TrustBench is a registry with telemetry, not a benchmark.**
+## What we don't do
+- We never hold agent funds, never submit transactions on-chain, never act as
+  a payment facilitator. Agents sign EIP-3009 transferWithAuthorization
+  payloads; providers submit them on-chain and pay gas. TrustBench observes
+  the resulting tx_hash and records it in a signed receipt.
 
-What we actually measure:
-
-- A nightly probe runs from one cloud host (GitHub Actions) and sends three sequential requests per provider.
-- Each request is a `HEAD` (with `GET` fallback on 405) with an 8-second timeout.
-- Status codes `200, 201, 204, 401, 402, 403, 404, 405, 429` are treated as "endpoint is alive."
-- We compute reliability (success rate over the three samples), p50/p95 latency over successful samples only, and a small consistency bonus from inter-sample jitter.
-- Scores are clamped to the range 40–98 and signed.
-
-This is essentially a liveness check. It does **not** execute payments, validate that the API returns useful results, or characterize behavior under load. We're up-front about that — see `/methodology` on the live deployment for the full breakdown.
-
-What's coming next: a hosted, non-custodial `/route` endpoint where an agent authorizes a payment, TrustBench constructs the x402 transaction, the agent signs it, TrustBench routes to the best provider, and a signed receipt is returned. Think "OpenRouter for x402, protocol-agnostic across x402 and p402." See `TrustBench-strategy.md` for the full plan.
+## Pricing model
+- Flat per-tx fee on routed calls (Phase 3+; exact value TBD)
+- Optional policy subscription (Phase 4+)
+- Refundable provider verification bond — pay-to-list, never pay-to-rank
 
 ## Stack
 
@@ -35,32 +43,75 @@ npm run dev            # run the API locally
 
 ## Endpoints
 
+Public (no auth):
+
 - `GET /health` — liveness check for the API itself
-- `GET /rankings?capability=search` — ranked providers for a capability (search, inference, data)
-- `GET /route?capability=search` — current best provider + fallback (router endpoint will accept payment authorizations in a future phase)
-- `GET /rankings/paid?capability=search` — same as `/rankings` but with signed scorecards
+- `GET /rankings?capability=search` — ranked providers for a capability (`search`, `inference`, `data`)
+- `GET /rankings/paid?capability=search` — same as `/rankings` but with each provider's signed scorecard
+- `GET /route?capability=search` — current best provider + fallback (legacy read-only — the Phase 3 routing surface is `POST /route`)
 - `GET /mcp/tools` — MCP tool descriptors for agent integrations
 - `GET /analytics` — plain HTML dashboard
 - `GET /methodology` — full description of what the probe does and does not measure
+- `GET /skill.md` — agent skill file in the [agentic.market/skill.md](https://agentic.market/skill.md) format. Paste into Claude Code, Codex, Gemini CLI, Hermes, Cursor, Claude Desktop, Cherry Studio, or ChatGPT to teach the agent the TrustBench quote/settle flow as an additive policy + receipt layer on top of Coinbase Agentic Wallet.
+- `GET /llms.txt` — LLM-grounded research summary in [llmstxt.org](https://llmstxt.org) format
+- `GET /.well-known/trustbench.json` — machine-readable manifest of TrustBench's public surfaces, capabilities, signing scheme, and discovery references
+- `GET /.well-known/trustbench-pubkey` — Ed25519 public key (PEM) for verifying scorecards and receipts
 
-## Status (April 2026)
+Authenticated (Phase 3, in build):
 
-- Roughly 20 known x402-style endpoints seeded and probed nightly.
-- Scoring formula: `15 + 45·successRate + 35·latencyHealth + 3·consistencyBonus`, clamped 40–98.
-- Latency percentiles use linear interpolation over successful probes only (timeouts hit reliability, not latency).
-- Scorecards are currently signed with HMAC-SHA256 (internal-integrity only). Migration to Ed25519 with a published public key is the next foundation task — that's the point at which third parties will be able to verify signatures independently.
+- `POST /route` — quote step. `Authorization: Bearer tb_…`, `Idempotency-Key: <16–128 chars>`, body `{capability, max_price (atomic-unit string), payer_address}`. Returns `{route_id, payment_required, expires_at, fallback_provider}`. Quote validity is 5 minutes; settling after that returns 410.
+- `POST /route/settle` — settle step. Body `{route_id, signature}` where `signature` is the agent's EIP-3009 `transferWithAuthorization` signature. Returns `{response, receipt}` plus `X-Receipt-Id` header. Idempotent on `(route_id, signature)`: replays return `x-idempotent-replay: true` with the cached receipt and never re-call the merchant.
+- `GET /receipts/:id` — public, no-auth, immutable. Returns the exact signed envelope (`{receipt, signature}`) that was issued. `Cache-Control: public, max-age=86400, immutable`.
 
-## Roadmap
+## Verifying a receipt
 
-The full plan, including the honest reassessment of what the data does and doesn't support, lives in [`TrustBench-strategy.md`](./TrustBench-strategy.md). Short version:
+Receipts are Ed25519-signed over the JCS-canonicalized form of `envelope.receipt`. The `signature` block (including `public_key_url`) is detached and not part of the signed bytes, so it can be overridden at verification time without invalidating the chain of trust.
 
-1. **Phase 0** — honest public framing (this README, methodology page).
-2. **Phase 1** — Ed25519 signing, percentile fix (done), end-to-end scorecard validation.
-3. **Phase 2** — talk to real x402 builders before writing router code.
-4. **Phase 3** — minimal non-custodial `/route` for one capability, returning a signed receipt.
-5. **Phase 4** — policy firewall, refundable provider verification bond, receipt/accounting export.
-6. **Phase 5** — p402 / Canton expansion.
+Reference verifier: `scripts/verify-receipt.js`.
+
+```bash
+# By id, against a deployed instance
+npm run verify-receipt -- rcpt_01HV3K8M5C9X2ZBFYR4QWP8ND1 https://your.trustbench.deployment
+
+# From a saved JSON file
+node scripts/verify-receipt.js ./receipt.json
+
+# Override pubkey URL when the receipt's public_key_url isn't reachable
+# from your network (useful for local-dev verification of locally-issued receipts)
+node scripts/verify-receipt.js ./receipt.json --pubkey-url http://localhost:3000/.well-known/trustbench-pubkey
+```
+
+## Failure semantics
+
+**TrustBench down ≠ payments down.** This is an architectural property, not a feature flag.
+
+The agent's payment authorization is an EIP-3009 signature it produces with its own key. The merchant accepts that signature and submits the on-chain transaction. TrustBench sits between them as a router and audit layer — it constructs the quote and records the result, but it never holds funds, never signs the payment, and never broadcasts the transaction.
+
+If the TrustBench API is unavailable, an agent can still:
+- Transact directly with any x402 provider it already knows about, using the same EIP-3009 signing flow.
+- Submit and verify receipts after the fact (the verifier is a standalone script and the public key is served from `/.well-known/trustbench-pubkey`).
+
+What it temporarily loses while the API is down:
+- Routing decision (which provider scored best at this moment).
+- Server-enforced spend caps (the agent must enforce caps locally if it cares).
+- Signed receipts for any calls made during the outage.
+
+Existing receipts remain verifiable — the public key and JCS canonicalization rules are stable, and the receipt's `audit_url` is a hint, not a dependency.
+
+## What Phase 3 deliberately does not do
+
+These are limits in the current implementation, called out so consumers don't infer behavior the system doesn't actually deliver:
+
+- **Single-merchant routing.** `POST /route` serves one capability against one selected provider per call. Multi-merchant fan-out (one intent → multiple paid APIs → one envelope) is Phase 4.
+- **Spend caps are approximately enforced under concurrency.** The check reads the rolling-window total at quote time; under N concurrent in-flight quotes for the same agent, total spend can overshoot by up to `(N − 1) × max_price`. Strict reservation-based caps that atomically debit a pending-spend counter are Phase 4.
+- **Receipt content is not yet on-chain anchored.** Receipts are Ed25519-signed by TrustBench. They are not Merkle-batched into a public blockchain. On-chain anchoring is a Phase 5 consideration if real demand surfaces.
+
+## Methodology disclosure
+
+The probe is a HEAD-request liveness check from a single host, three samples per provider per night. Status codes 200, 201, 204, 401, 402, 403, 404, 405, and 429 are treated as alive (the provider is responding; only the auth/payment gate is closed).
+
+This is not a benchmark in the rigorous sense. Latency is wall-clock from a single network vantage. Score `latencyHealth` is derived from linear-interpolation percentiles across the cohort — useful as a relative signal, not as a service-level claim. Full description at `/methodology`.
 
 ## License
 
-Source-available, license TBD. If you want to use any of this in something serious, open an issue first.
+MIT.

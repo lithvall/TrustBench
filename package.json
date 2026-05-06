@@ -15,7 +15,8 @@
     "mock-provider": "tsx scripts/mock-provider.ts",
     "paid-probe": "tsx scripts/paid-probe.ts",
     "export-7-night": "tsx scripts/export-7-night.ts",
-    "import-paddock-bazaar": "tsx scripts/import-paddock-bazaar.ts"
+    "import-paddock-bazaar": "tsx scripts/import-paddock-bazaar.ts",
+    "smoke:c3": "tsx scripts/smoke-c3-concurrency.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.11.0",

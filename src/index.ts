@@ -12,6 +12,7 @@ import { requireAgent } from './auth.js';
 import { withIdempotency } from './idempotency.js';
 import { requireWithinSpendCap } from './spend-caps.js';
 import { quoteHandler, settleHandler } from './route-handlers.js';
+import { startPendingSweep } from './pending-sweep.js';
 
 // ---------------------------------------------------------------------------
 // Agent-discovery static assets (P4-skill, P4-llmstxt, P4-wellknown).
@@ -469,3 +470,7 @@ const port = Number(process.env.PORT) || 3000;
 serve({ fetch: app.fetch, port });
 
 console.log(`🚀 TrustBench server running on http://localhost:${port}`);
+
+// P4-7: start the in-process pending-reservation sweep timer. No-op when
+// SPEND_CAP_RESERVATION_ENABLED!=true. See src/pending-sweep.ts for design.
+startPendingSweep();

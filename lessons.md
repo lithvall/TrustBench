@@ -4,6 +4,50 @@ A living log of patterns, surprises, and corrections worth remembering across se
 
 ---
 
+## 2026-05-06 — P4-7 reservation caps landed (code-only; smoke deferred to next live session)
+
+**What shipped:** strict reservation-based spend caps (P4-7). Atomic `claim_spend_reservation` RPC at quote time, `release_spend_reservation` at settle, `sweep_expired_reservations` on a 60s in-process timer, `refund_pending_reservation` for compensating refunds when quoteHandler aborts after pending was debited, `reconcile_pending_spend` for daily ground-truth recompute. Behind `SPEND_CAP_RESERVATION_ENABLED` env flag for canary.
+
+**Two-signal validation that bumped this from deferred-bottom (recap):** Infopunks's "audit tail is where teams slip" framing + CLU_AGENT's "per-call timeout reversion" reply on 2026-05-06.
+
+**Files touched:**
+- `phase4-schema-spend-cap-reservation.sql` (new, standalone migration for Supabase SQL editor)
+- `phase3-schema.sql` (+migration block + 5 functions appended; cumulative source of truth)
+- `src/spend-caps.ts` (rolling-cap branch now calls `claim_spend_reservation` RPC; legacy JS check kept as fallback when flag is off OR when RPC errors)
+- `src/route-handlers.ts` (refund helper + 6 error-path refund calls in quoteHandler; release call in settleHandler before merchant fetch; diagnostic-log cleanup from P4-1b debug session bundled in same diff)
+- `src/pending-sweep.ts` (new, 60s self-rescheduling timer; no-op when flag is off)
+- `src/index.ts` (mounts `startPendingSweep()` after server boot)
+- `.env.example` (`SPEND_CAP_RESERVATION_ENABLED=false` default)
+- `phase4-smoke-c1-c4.md` (new, runbook in phase3-closeout.md A1-A5/B1-B4 format)
+- `scripts/smoke-c3-concurrency.ts` (new, dedicated harness for the load-bearing concurrency case; `npm run smoke:c3`)
+- `package.json` (smoke:c3 script)
+
+**Engineering decisions worth keeping:**
+
+- **Type mismatch is intentional.** Cap columns (`spend_cap_*_atomic`) are TEXT — read once into JS BigInt, never SQL-arithmetic'd. `pending_spend_atomic` is NUMERIC(78, 0) because the reservation logic NEEDS atomic SQL-side arithmetic in the conditional UPDATE WHERE clause. Future-me: do not "normalize" by changing one or the other.
+- **The conditional UPDATE is the load-bearing piece.** Postgres serializes UPDATEs on the same row, so two concurrent quotes at the cap edge can't both pass — the first commit raises pending, the second's WHERE evaluates against the new pending and rejects. C3 smoke is the test that proves this.
+- **Refund-on-abort vs reconciliation-only.** Picked refund-on-abort in quoteHandler (compensating UPDATE on every error path that runs after the middleware debit). Daily reconciliation is the backstop, not the primary path. Reasoning: leak window goes from ≤24h to near-zero in the common case; the 6 inline `refund_pending_reservation` calls are cheap and explicit.
+- **Release before merchant fetch, not after.** Trade-off: pending under-counts spend during the merchant-call window (cap briefly over-allocated). Accepted because the alternative — slow merchants holding reservation budget across 30s timeouts — is worse for tight caps. Documented in `phase4-spend-caps-reservation.md` § Failure-mode analysis and in the failure-mode comment at the top of `src/spend-caps.ts`.
+- **RPC-error fallback to JS check.** When `claim_spend_reservation` errors (function not deployed, DB unreachable, etc.), spend-caps.ts logs loud and falls through to the legacy JS check rather than 503'ing every quote. Soft-failure beats hard-failure for the canary deploy.
+- **Sweep is in-process, not a separate cron.** Solo-founder lens: zero new infrastructure, no extra workers. Self-rescheduling setTimeout (not setInterval) so a slow sweep doesn't overlap itself. If Railway restarts, the next boot picks up on the same 60s cadence.
+- **No new spend_log table, no new receipt fields.** The receipts table stays the source of truth for settled spend. `pending_spend_atomic` is internal bookkeeping. `receipt-spec-v1.md` does not change → existing scorecard / receipt signatures stay valid forever. This was the most important constraint to honor.
+
+**Operational notes worth keeping:**
+
+- **Smoke deferred to next live session.** This session implemented + tsc-verified the code; live C1-C4 against running dev server + mock provider was not run because the smoke environment isn't booted in the implementation session. Runbook is in `phase4-smoke-c1-c4.md`. C3 (concurrency) is the load-bearing test — green = race fixed, red = WHERE clause too loose. Run before flipping `SPEND_CAP_RESERVATION_ENABLED=true` in Railway prod.
+- **Apply order:** schema first (Supabase SQL editor: paste `phase4-schema-spend-cap-reservation.sql`), then deploy code, then flip the env flag. Reverse order = old code calling new functions = log noise but not a breach (RPC fallback to JS check). Forward order = clean canary.
+- **`tsc --noEmit` carry-forward errors persist.** 3 `@supabase/realtime-js` → `@supabase/phoenix` errors and the stub `src/server.ts` default-import error from earlier sessions. P4-7 added zero new typecheck errors.
+
+**Carry-forward state:**
+
+- All P4-7 code lives behind `SPEND_CAP_RESERVATION_ENABLED=false` by default, so a deploy without the flag is a strict no-op. Flip from Railway dashboard once schema is applied + smoke runs green.
+- Daily `reconcile_pending_spend()` cron not yet wired — currently a manual call. P4-7-cron is a small follow-up after the canary stabilizes.
+- The diagnostic logs in `settleHandler` (X-PAYMENT envelope dump, response headers/body dump, 402 rejection body) from the P4-1b debug session were removed in the same commit. The lighter `[settle] →` and `[settle] ← status=` lines stayed.
+
+**Next sprint:** trustbench.io DNS CNAME + flip BASE_URL back to canonical (independent deploy, ≤30 min); then refine + send the Paddock DM (now unblocked — Reddit thread context loaded, matrix-axes captured); then P4-7 daily-cron wiring (small) before P4-2 receipt explorer.
+
+---
+
 ## 2026-05-04 — Phase 3 closed
 
 **What shipped (verified end-to-end against the local mock x402 provider):**

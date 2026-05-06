@@ -1,6 +1,7 @@
 // src/spend-caps.ts — Phase 3 spend-cap enforcement middleware.
 //
 // Full design + locked decisions: phase3-spend-caps.md.
+// Phase 4 P4-7 reservation pattern: phase4-spend-caps-reservation.md.
 //
 // Position in the chain:
 //   app.post('/route', requireAgent, withIdempotency, requireWithinSpendCap, handler)
@@ -17,11 +18,39 @@
 //
 // Source of truth for "what has the agent spent" is the receipts table —
 // no spend_log. Aggregation is done in JS (BigInt) over receipts in the
-// rolling window; ok at Phase 3 traffic levels, switch to a Postgres RPC
+// rolling window; ok at Phase 4 traffic levels, switch to a Postgres RPC
 // later if any agent's per-window receipt count exceeds ~1k.
 //
 // Atomic-unit strings everywhere; never floats. USDC has 6 decimals so
 // "1000000" = $1.00. Strings on the wire and in Postgres, BigInt in math.
+//
+// ============================================================================
+// P4-7 reservation pattern (high-risk surface — failure-mode paragraph)
+// ============================================================================
+// Behind SPEND_CAP_RESERVATION_ENABLED env flag. When 'true', the rolling-cap
+// section calls the claim_spend_reservation Postgres function to atomically
+// (a) check `spent + pending + requested <= cap` and (b) debit the agent's
+// pending_spend_atomic counter — both inside a single conditional UPDATE.
+// Concurrent /route quotes serialize on the agents row, so two quotes at the
+// cap edge can't both pass. This closes the documented Phase 3 race where
+// `(parallelism − 1) × max_price` could overshoot the cap.
+//
+// Failure modes:
+//   (a) Function not deployed or RPC errors → fall through to legacy JS-side
+//       check, log-loud. Today's behavior preserved.
+//   (b) Conditional UPDATE WHERE clause too loose → cap breached under
+//       concurrency. Detectable via observed receipts. C3 smoke test catches
+//       this directly (3 concurrent quotes against 2x cap → exactly 2 succeed).
+//   (c) Agent's pending debited but the quote insert in handler fails →
+//       compensating refund issued by quoteHandler; if THAT fails (e.g. crash
+//       between debit and compensate), pending leaks until daily reconciliation
+//       cron picks it up (worst case ≤24h). Cap is over-allocated, never
+//       breached.
+//   (d) Settle credit-back fires before merchant call returns → for the
+//       merchant-call window, pending under-counts actual spend. Same window
+//       the user already accepts under non-custodial semantics. Bounded by
+//       merchant response time; documented in design doc § Failure-mode
+//       analysis.
 
 import { createMiddleware } from 'hono/factory';
 import { createClient } from '@supabase/supabase-js';
@@ -41,6 +70,16 @@ const PHASE_3_CURRENCY = 'USDC';
 // Default Retry-After (seconds) when we can't compute a precise hint
 // (e.g. rolling cap exceeded but no in-window receipts somehow).
 const DEFAULT_RETRY_AFTER_SECONDS = 60;
+
+// P4-7 reservation pattern feature flag. When 'true', the rolling-cap section
+// uses the claim_spend_reservation Postgres function for atomic cap-check +
+// pending debit. When unset/false, falls through to the legacy JS-side check
+// (preserves Phase 3 behavior for canary). Read once per request because env
+// reads are cheap and lets ops flip the flag without restart on Railway's
+// hot-reload deploys.
+function reservationEnabled(): boolean {
+  return process.env.SPEND_CAP_RESERVATION_ENABLED === 'true';
+}
 
 // Receipts table projection for the rolling-window query. Index
 // idx_receipts_agent_issued (agent_id, issued_at desc) covers this scan.
@@ -145,14 +184,22 @@ export const requireWithinSpendCap = createMiddleware<AgentContext>(async (c, ne
   // so agents may be rejected slightly earlier than strictly necessary, but
   // the cap is never breached on a single-request basis.
   //
-  // Race trade-off (locked Phase 3 decision): under high concurrency, N
-  // parallel calls may all pass this check before any of them write a
-  // receipt. Documented in phase3-spend-caps.md "Race 1".
+  // P4-7 reservation pattern (when SPEND_CAP_RESERVATION_ENABLED='true'):
+  // the JS-side `if (spent + maxPrice > cap)` check below is replaced by a
+  // single conditional UPDATE on agents that atomically (a) verifies
+  // `spent + pending + maxPrice <= cap` and (b) debits pending_spend_atomic.
+  // Concurrent quotes serialize on the agents row → cap honored to the byte
+  // even under high parallelism. The corresponding credit-back lives in
+  // settleHandler (phase4-spend-caps-reservation.md § "At settle"). When the
+  // flag is unset/false we fall through to the legacy JS-side path, which is
+  // approximately enforced under concurrency (the documented Phase 3 race).
   if (caps.rolling_atomic !== null) {
     const rollingCap = BigInt(caps.rolling_atomic);
     const windowMinutes = caps.rolling_window_minutes;
     const windowStartIso = new Date(Date.now() - windowMinutes * 60_000).toISOString();
 
+    // Read receipts in window. Needed for spent_recent (both paths) AND for
+    // the Retry-After hint (rejection branch). Same query both paths.
     const { data: rows, error: queryErr } = await supabase
       .from('receipts')
       .select('total_paid_atomic, issued_at')
@@ -171,7 +218,56 @@ export const requireWithinSpendCap = createMiddleware<AgentContext>(async (c, ne
       0n
     );
 
-    if (spent + maxPrice > rollingCap) {
+    let capBreached = false;
+
+    if (reservationEnabled()) {
+      // P4-7 path: atomic cap-check + pending debit via Postgres function.
+      // Returns the new pending_spend_atomic on success, NULL when the WHERE
+      // clause rejected the UPDATE (cap would be breached).
+      //
+      // numeric() in Postgres accepts string-of-digits — passing maxPrice.toString()
+      // / spent.toString() / caps.rolling_atomic preserves arbitrary precision
+      // through the wire (PostgREST coerces param types based on the function
+      // signature). Same precision contract as the rest of the codebase.
+      const { data: rpcResult, error: rpcErr } = await supabase.rpc(
+        'claim_spend_reservation',
+        {
+          p_agent_id: agentId,
+          p_max_price: maxPrice.toString(),
+          p_rolling_cap: caps.rolling_atomic,    // string of digits, NUMERIC on the function side
+          p_spent_recent: spent.toString(),
+        }
+      );
+
+      if (rpcErr) {
+        // Function-deploy failures, RPC layer errors, or DB unreachable.
+        // Loud log + fall through to legacy JS check. We prefer "approximate
+        // enforcement" (today's behavior) over "everyone gets 503" when the
+        // reservation infra is misbehaving.
+        console.error(
+          '[spend-caps] claim_spend_reservation RPC failed; falling back to JS check:',
+          rpcErr.message
+        );
+        capBreached = spent + maxPrice > rollingCap;
+      } else {
+        // rpcResult is the new pending value, or null when WHERE rejected.
+        capBreached = rpcResult === null;
+        if (!capBreached) {
+          // Stash the route_id-bound debit amount for downstream — the
+          // handler doesn't need to know about pending, but the failure-mode
+          // doc says "if quote insert fails, refund pending" so the handler
+          // needs the amount to compensate. max_price_atomic is already on
+          // the context; no extra carry needed.
+          // (Compensation logic lives in quoteHandler; see phase4-spend-caps-
+          // reservation.md § "Decision 2".)
+        }
+      }
+    } else {
+      // Legacy Phase 3 path (approximate enforcement under concurrency).
+      capBreached = spent + maxPrice > rollingCap;
+    }
+
+    if (capBreached) {
       // Retry-After hint: time until the OLDEST in-window receipt rolls out.
       // Best-effort — the agent might still need to wait longer if multiple
       // receipts must roll out before there's room for max_price. The exact

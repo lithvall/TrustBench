@@ -236,6 +236,11 @@ export const quoteHandler = createMiddleware<AgentContext>(async (c) => {
   // Other categories the crawler may have stored (Travel/Social/Storage/Trading/etc.)
   // are not yet picked here.
   if (!capability || !ROUTABLE_CAPABILITIES.has(capability as Capability)) {
+    // P4-7: refund the spend-cap reservation before returning. Pending was
+    // debited by requireWithinSpendCap; this request will not produce a
+    // quote row, so release the hold proactively. (Same comment applies at
+    // every error return below; not repeated.)
+    await refundReservationIfDebited(agentId, maxPriceAtomic);
     return c.json({
       error: 'capability_invalid',
       detail: 'capability must be one of: search, inference, data, media, infra',
@@ -244,12 +249,14 @@ export const quoteHandler = createMiddleware<AgentContext>(async (c) => {
   }
 
   if (!payerAddress) {
+    await refundReservationIfDebited(agentId, maxPriceAtomic);
     return c.json({
       error: 'payer_address_required',
       detail: 'payer_address (0x + 40 hex chars) is required on POST /route',
     }, 400);
   }
   if (!ETHEREUM_ADDRESS_RE.test(payerAddress)) {
+    await refundReservationIfDebited(agentId, maxPriceAtomic);
     return c.json({
       error: 'payer_address_invalid',
       detail: 'payer_address must be 0x followed by 40 hex characters',
@@ -260,6 +267,7 @@ export const quoteHandler = createMiddleware<AgentContext>(async (c) => {
   // ---- Provider selection -------------------------------------------------
   const selection = await selectProvider(capability as Capability, c.get('agent_mode'));
   if (!selection.ok) {
+    await refundReservationIfDebited(agentId, maxPriceAtomic);
     if (selection.reason === 'no_provider_for_capability') {
       return c.json({ error: 'no_provider_for_capability' }, 503);
     }
@@ -321,6 +329,7 @@ export const quoteHandler = createMiddleware<AgentContext>(async (c) => {
   }
 
   if (!validated.ok) {
+    await refundReservationIfDebited(agentId, maxPriceAtomic);
     return c.json({
       error: probeReject?.error || validated.err.error,
       detail: probeReject?.detail || validated.err.detail,
@@ -366,6 +375,7 @@ export const quoteHandler = createMiddleware<AgentContext>(async (c) => {
 
   if (insertErr) {
     console.error('[quote] insert quote failed:', insertErr.message);
+    await refundReservationIfDebited(agentId, maxPriceAtomic);
     return c.json({ error: 'quote_unavailable', detail: insertErr.message }, 503);
   }
 
@@ -602,25 +612,19 @@ export const settleHandler = createMiddleware<AgentContext>(async (c) => {
       (settleInit.headers as Record<string, string>)['Content-Type'] = 'application/json';
       settleInit.body = JSON.stringify(settleProbeConfig.body ?? {});
     }
-    // Debug instrumentation (added 2026-05-05 during P4-1b v2-envelope debug).
-    // Logs the X-PAYMENT envelope shape we send + the response status.
-    // Remove once first paid receipt lands and v2 envelope is stable.
-    try {
-      const decodedEnvelope = Buffer.from(xPaymentHeader, 'base64').toString('utf8');
-      console.log(`[settle] → ${(settleInit.method as string)} ${quote.provider_url}`);
-      console.log(`[settle] X-PAYMENT envelope (${decodedEnvelope.length} bytes): ${decodedEnvelope}`);
-    } catch (_e) {
-      // ignore — instrumentation only
-    }
+
+    // P4-7: credit-back the reservation before the merchant fetch. After this
+    // line, agents.pending_spend_atomic no longer reflects this in-flight
+    // quote; receipt write below will (re)account for the actual settled
+    // amount via the next rolling-window scan. No-op when reservation flag
+    // is unset/false. Idempotent against the periodic sweep.
+    await releaseReservationIfEnabled(route_id);
+
+    console.log(`[settle] → ${(settleInit.method as string)} ${quote.provider_url}`);
     const providerResp = await fetch(quote.provider_url, settleInit);
     console.log(`[settle] ← status=${providerResp.status}`);
 
     if (providerResp.status === 402) {
-      // Log the actual rejection body so we can see what the facilitator said.
-      // Cloning so we can read the body once for logging and the original
-      // remains available if anything else needs it (it doesn't, but defensive).
-      const body402 = await providerResp.clone().text().catch(() => '(unable to read body)');
-      console.log(`[settle] 402 rejection body (${body402.length} bytes): ${body402}`);
       // Provider rejected our signature.
       const errBody = { error: 'provider_signature_rejected' };
       responseStatus = 502;
@@ -637,27 +641,6 @@ export const settleHandler = createMiddleware<AgentContext>(async (c) => {
       responseBody = errBody;
       await persistSettleResult(agentId, settleKey, 'errored', responseStatus, responseBody, null);
       return c.json(errBody, 502);
-    }
-
-    // Diagnostic logging (P4-1b 2026-05-06): merchant response shape varies
-    // across x402 implementations — header vs body, snake_case vs camelCase,
-    // header name spelling. Dump everything we received so we can see where
-    // the tx_hash actually lives. Cloning the response preserves the body
-    // for the json() call below. Remove these two console.logs once first
-    // paid receipt lands and parseTxHashFromResponse is proven against
-    // every working v2 provider we care about.
-    try {
-      const headerDump: Record<string, string> = {};
-      providerResp.headers.forEach((v, k) => {
-        headerDump[k] = v;
-      });
-      console.log(`[settle] DEBUG response headers: ${JSON.stringify(headerDump)}`);
-      const bodyPreview = await providerResp.clone().text().catch(() => '(body read failed)');
-      console.log(
-        `[settle] DEBUG response body (${bodyPreview.length} bytes, first 800): ${bodyPreview.slice(0, 800)}`,
-      );
-    } catch (debugErr: any) {
-      console.warn(`[settle] DEBUG dump failed: ${debugErr.message}`);
     }
 
     // Extract tx_hash + block_number from the provider's X-PAYMENT-RESPONSE
@@ -798,6 +781,59 @@ export const settleHandler = createMiddleware<AgentContext>(async (c) => {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// P4-7 reservation compensating refund.
+// ---------------------------------------------------------------------------
+// requireWithinSpendCap (when SPEND_CAP_RESERVATION_ENABLED='true') debits
+// agents.pending_spend_atomic atomically. If quoteHandler then fails to land
+// a quote row (capability invalid, provider unreachable, insert error,
+// anything before the row commits), pending leaks until the daily
+// reconciliation cron runs (≤24h). Refund proactively to close the leak
+// window in the common case.
+//
+// No-op when the flag is unset/false — pending was never debited, nothing
+// to refund. Errors in the RPC are logged but not surfaced to the agent —
+// the agent's error response is already determined by the failure that
+// triggered this refund. Daily reconciliation backstops if this RPC fails.
+async function refundReservationIfDebited(agentId: string, maxPriceAtomic: string): Promise<void> {
+  if (process.env.SPEND_CAP_RESERVATION_ENABLED !== 'true') return;
+  const { error } = await supabase.rpc('refund_pending_reservation', {
+    p_agent_id: agentId,
+    p_max_price: maxPriceAtomic,
+  });
+  if (error) {
+    console.error(
+      '[quote] refund_pending_reservation failed (daily reconciliation will recover):',
+      error.message,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// P4-7 reservation release at settle (credit-back before merchant call).
+// ---------------------------------------------------------------------------
+// Idempotent — release_spend_reservation marks pending_released_at = now()
+// only when still null, so a race with the periodic sweep doesn't double
+// credit. Returns true if the credit-back ran, false if already released.
+//
+// Called *before* the merchant fetch so a slow merchant doesn't hold
+// reservation budget any longer than the on-chain settle takes. Trade-off:
+// during the merchant-call window pending under-counts actual spend (cap is
+// briefly over-allocated for that window). Documented in
+// phase4-spend-caps-reservation.md § Failure-mode analysis.
+async function releaseReservationIfEnabled(routeId: string): Promise<void> {
+  if (process.env.SPEND_CAP_RESERVATION_ENABLED !== 'true') return;
+  const { error } = await supabase.rpc('release_spend_reservation', {
+    p_route_id: routeId,
+  });
+  if (error) {
+    console.error(
+      '[settle] release_spend_reservation failed (sweep + reconciliation will recover):',
+      error.message,
+    );
+  }
+}
 
 async function persistSettleResult(
   agentId: string,

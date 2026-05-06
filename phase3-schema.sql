@@ -256,4 +256,164 @@ create policy "Service role full" on receipts
 alter table receipts
   add column if not exists block_number bigint;
 
+-- ============================================================================
+-- Migration 2026-05-06 — P4-7 spend-cap reservation
+-- ============================================================================
+-- Adds atomic in-flight reservation accounting on top of the receipts-only
+-- spend-cap math from Phase 3. The Phase 3 rolling-cap check is approximately
+-- enforced under concurrency (CLAUDE.md, phase3-spend-caps.md § "Race 1");
+-- P4-7 closes that race with a pending counter on agents + a release marker
+-- on quotes. Full design + lifecycle in phase4-spend-caps-reservation.md.
+--
+-- Type choice: pending_spend_atomic is NUMERIC(78, 0), not TEXT like the cap
+-- columns. The reservation logic does SQL-side arithmetic (atomic UPDATE
+-- with cap-check WHERE clause) which TEXT can't express. Caps are read once
+-- into JS BigInt; pending is updated atomically in SQL.
+--
+-- Standalone migration script (for Supabase SQL editor):
+--   phase4-schema-spend-cap-reservation.sql
+-- ============================================================================
+alter table agents
+  add column if not exists pending_spend_atomic numeric(78, 0) not null default 0;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'pending_spend_nonneg'
+      and conrelid = 'agents'::regclass
+  ) then
+    alter table agents
+      add constraint pending_spend_nonneg check (pending_spend_atomic >= 0);
+  end if;
+end$$;
+
+alter table quotes
+  add column if not exists pending_released_at timestamptz;
+
+create index if not exists idx_quotes_pending_release
+  on quotes(valid_until)
+  where pending_released_at is null;
+
+-- Postgres functions for the reservation hot path. Full inline docs +
+-- failure-mode analysis are in phase4-schema-spend-cap-reservation.sql.
+create or replace function claim_spend_reservation(
+  p_agent_id uuid,
+  p_max_price numeric,
+  p_rolling_cap numeric,
+  p_spent_recent numeric
+) returns numeric
+language sql
+as $$
+  update agents
+     set pending_spend_atomic = pending_spend_atomic + p_max_price
+   where id = p_agent_id
+     and (
+       p_rolling_cap is null
+       or coalesce(p_spent_recent, 0) + pending_spend_atomic + p_max_price <= p_rolling_cap
+     )
+  returning pending_spend_atomic;
+$$;
+
+create or replace function release_spend_reservation(p_route_id text)
+returns boolean
+language plpgsql
+as $$
+declare
+  v_agent_id uuid;
+  v_max_price numeric;
+begin
+  update quotes
+     set pending_released_at = now()
+   where route_id = p_route_id
+     and pending_released_at is null
+  returning agent_id, max_price_atomic::numeric
+    into v_agent_id, v_max_price;
+
+  if not found then
+    return false;
+  end if;
+
+  update agents
+     set pending_spend_atomic = greatest(0::numeric, pending_spend_atomic - v_max_price)
+   where id = v_agent_id;
+
+  return true;
+end$$;
+
+create or replace function refund_pending_reservation(
+  p_agent_id uuid,
+  p_max_price numeric
+) returns void
+language sql
+as $$
+  update agents
+     set pending_spend_atomic = greatest(0::numeric, pending_spend_atomic - p_max_price)
+   where id = p_agent_id;
+$$;
+
+create or replace function sweep_expired_reservations()
+returns int
+language plpgsql
+as $$
+declare
+  v_quotes_released int := 0;
+begin
+  with released as (
+    update quotes
+       set pending_released_at = now()
+     where pending_released_at is null
+       and valid_until < now()
+    returning agent_id, max_price_atomic
+  ),
+  per_agent as (
+    select agent_id,
+           sum(max_price_atomic::numeric) as amt,
+           count(*)::int as n
+      from released
+     group by agent_id
+  ),
+  decremented as (
+    update agents a
+       set pending_spend_atomic = greatest(0::numeric, a.pending_spend_atomic - per_agent.amt)
+      from per_agent
+     where a.id = per_agent.agent_id
+    returning per_agent.n
+  )
+  select coalesce(sum(n), 0)::int into v_quotes_released from decremented;
+
+  return v_quotes_released;
+end$$;
+
+create or replace function reconcile_pending_spend()
+returns int
+language plpgsql
+as $$
+declare
+  v_changed int;
+begin
+  with expected as (
+    select a.id as agent_id,
+           coalesce((
+             select sum(q.max_price_atomic::numeric)
+               from quotes q
+              where q.agent_id = a.id
+                and q.pending_released_at is null
+                and q.valid_until > now()
+           ), 0) as expected_pending
+      from agents a
+  ),
+  changed as (
+    update agents a
+       set pending_spend_atomic = e.expected_pending
+      from expected e
+     where a.id = e.agent_id
+       and a.pending_spend_atomic <> e.expected_pending
+    returning a.id
+  )
+  select count(*)::int into v_changed from changed;
+
+  return v_changed;
+end$$;
+
 select '✅ Phase 3 schema additions ready' as status;

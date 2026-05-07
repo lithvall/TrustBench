@@ -1,4 +1,4 @@
-// src/index.ts — Phase 3 server: auth + idempotency + spend-caps + x402 + receipts.
+﻿// src/index.ts — Phase 3 server: auth + idempotency + spend-caps + x402 + receipts.
 import 'dotenv/config';
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
@@ -514,18 +514,6 @@ app.get('/analytics', async (c) => {
 
   return c.html(renderAnalyticsHtml(analyticsData), 200, {
     'Cache-Control': 'public, max-age=300',
-  });
-});
-
-const port = Number(process.env.PORT) || 3000;
-serve({ fetch: app.fetch, port });
-
-console.log(`🚀 TrustBench server running on http://localhost:${port}`);
-
-// P4-7: start the in-process pending-reservation sweep timer. No-op when
-// SPEND_CAP_RESERVATION_ENABLED!=true. See src/pending-sweep.ts for design.
-startPendingSweep();
-,
   });
 });
 

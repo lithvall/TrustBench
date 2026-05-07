@@ -1,28 +1,25 @@
-// src/receipt-html.ts — P4-2 polished HTML render of /receipts/:id
+// src/receipt-html.ts — Phase 4 redesigned receipt detail page.
 //
 // Companion to the JSON path in src/index.ts /receipts/:id. When the request's
 // Accept header prefers text/html (browsers, link unfurlers), this module
-// produces a self-contained HTML page that displays the receipt with:
-//   - ✅ Server-side Ed25519 signature verification badge (in-process; we are
-//     the signer, no HTTP round-trip needed for our own public key).
-//   - ✅ On-chain verification badge via Base RPC (mirrors the logic in
-//     scripts/verify-receipt.js verifyOnChain — confirms tx exists, calls
-//     transferWithAuthorization on USDC contract, payer/payee/amount/block
-//     match the receipt).
-//   - Basescan link for the tx_hash, copy-paste reference verifier command,
-//     issuer/key_id metadata, and a dark-theme single-file render that
-//     matches /methodology's aesthetic.
+// produces a self-contained HTML page with:
+//   - Breadcrumb (Analytics → Receipts → id).
+//   - Big green verdict banner when both signature + on-chain checks pass.
+//   - Two separate badge pills below the banner ("✅ Signature valid",
+//     "✅ On-chain verified") so the dual-layer verification is visible.
+//   - Two-column grid: Settlement / Routing / Pricing tables on the left,
+//     verification logic + copy-paste verify commands on the right.
+//   - Basescan link on the tx hash, copy-paste reference verifier commands.
+//
+// The verify functions (verifyReceiptSignatureInProcess /
+// verifyReceiptOnChainInProcess / getOrComputeVerifyResults) are unchanged
+// from Phase 3+4 — they're the canonical in-process verifier used by
+// scripts/verify-receipt.js as well. Only the rendering changed.
 //
 // In-memory cache: receipts are immutable, so once verified for any request
 // the {sig, chain} verdict is cached on receipt_id forever (until process
 // restart). First render pays ~200-500ms for chain RPC; every subsequent
-// render is <5ms. Cache key is just receipt_id since envelope content can't
-// change for a given id.
-//
-// This module is NOT a high-risk surface — we're consuming/displaying an
-// existing signature, not signing anything new. Standard discipline applies.
-// The reference verifier scripts/verify-receipt.js stays the canonical
-// third-party tool; this module mirrors its logic in-process for speed.
+// render is <5ms.
 
 import 'dotenv/config';
 import crypto from 'crypto';
@@ -31,6 +28,7 @@ import { base } from 'viem/chains';
 import type { SignedReceipt } from './receipt-generator.js';
 import { jcsCanonicalize } from './idempotency.js';
 import { getPublicKeyPem } from './scorer.js';
+import { siteHead, renderNav, renderFooter, escapeHtml } from './site-chrome.js';
 
 // ---------------------------------------------------------------------------
 // Constants — kept identical to scripts/verify-receipt.js so any drift here
@@ -41,33 +39,29 @@ import { getPublicKeyPem } from './scorer.js';
 const BASE_USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' as const;
 
 // transferWithAuthorization selector (first 4 bytes of keccak256 of the sig).
-// Verified against verify-receipt.js, kept as a const to avoid recomputing.
 const TRANSFER_WITH_AUTH_SELECTOR = '0xe3ee160e';
 
-// Module-local viem client. Matches the per-module pattern in route-handlers.ts.
-// Public Base RPC by default; override via BASE_RPC_URL env when prod traffic
-// warrants a higher-throughput provider. Read-only; no signing.
+// Module-local viem client. Public Base RPC by default; override via
+// BASE_RPC_URL env when prod traffic warrants. Read-only; no signing.
 const basePublicClient = createPublicClient({
   chain: base,
   transport: http(process.env.BASE_RPC_URL || 'https://mainnet.base.org'),
 });
 
 // ---------------------------------------------------------------------------
-// In-memory verification cache
+// In-memory verification cache. Receipts are immutable per receipt-generator.ts
+// (signed at issue time, never re-signed), so the verdict is trivially cacheable.
 // ---------------------------------------------------------------------------
-// Receipts are immutable per receipt-generator.ts (signed at issue time, never
-// re-signed). So the verdict for a given receipt_id never changes — caching is
-// trivially safe. Process-lifetime only; restart re-verifies on demand.
 
 type SigVerifyResult =
   | { kind: 'valid' }
   | { kind: 'invalid'; reason: string }
-  | { kind: 'unverifiable'; reason: string };  // HMAC fallback or key not loaded
+  | { kind: 'unverifiable'; reason: string };
 
 type ChainVerifyResult =
   | { kind: 'verified'; block_number: number; payer: string; payee: string; amount: string }
   | { kind: 'mismatch'; reason: string }
-  | { kind: 'unavailable'; reason: string };  // RPC error, transient
+  | { kind: 'unavailable'; reason: string };
 
 type VerifyCache = {
   sig: SigVerifyResult;
@@ -77,73 +71,54 @@ type VerifyCache = {
 const verifyCache = new Map<string, VerifyCache>();
 
 // ---------------------------------------------------------------------------
-// Signature verification (in-process, mirrors verify-receipt.js verifyEnvelope)
-// ---------------------------------------------------------------------------
+// Signature verification (in-process, mirrors verify-receipt.js verifyEnvelope).
 // Steps must EXACTLY match src/receipt-generator.ts step 5 (sign) and
-// scripts/verify-receipt.js verifyEnvelope (third-party verify):
-//   1. JCS-canonicalize envelope.receipt
-//   2. Encode UTF-8
-//   3. crypto.verify(null, canonicalBytes, publicKey, signatureBytes)
-// Any drift here produces a silent mismatch (we'd report INVALID against
-// receipts that are actually fine).
+// scripts/verify-receipt.js verifyEnvelope (third-party verify).
+// Any drift here produces a silent mismatch.
+// ---------------------------------------------------------------------------
 
 export function verifyReceiptSignatureInProcess(envelope: SignedReceipt): SigVerifyResult {
   const sig = envelope.signature;
   if (!sig || sig.alg !== 'ed25519') {
     return { kind: 'unverifiable', reason: `unsupported algorithm: ${sig?.alg ?? 'missing'}` };
   }
-
   const pubPem = getPublicKeyPem();
   if (!pubPem) {
-    // HMAC fallback mode or keys not configured. Page should render with a
-    // muted ⚠ badge rather than red — the receipt isn't necessarily invalid,
-    // we just can't verify it from this server's keyring.
     return {
       kind: 'unverifiable',
       reason: 'this instance is in HMAC fallback mode; receipt requires Ed25519 verification',
     };
   }
-
   let publicKey: crypto.KeyObject;
   try {
     publicKey = crypto.createPublicKey({ key: pubPem, format: 'pem' });
   } catch (err: any) {
     return { kind: 'unverifiable', reason: `public key parse failed: ${err.message}` };
   }
-
-  // Canonical bytes — must reproduce receipt-generator.ts's exact pipeline.
   const canonical = jcsCanonicalize(envelope.receipt);
   const canonicalBytes = Buffer.from(canonical, 'utf8');
-
-  // Signature is base64 (or base64url; both decode to the same bytes via
-  // Buffer.from with the standard 'base64' codec on Node.js).
   let sigBuf: Buffer;
   try {
     sigBuf = Buffer.from(sig.value, 'base64');
   } catch (err: any) {
     return { kind: 'invalid', reason: `signature decode failed: ${err.message}` };
   }
-
   let ok: boolean;
   try {
     ok = crypto.verify(null, canonicalBytes, publicKey, sigBuf);
   } catch (err: any) {
     return { kind: 'invalid', reason: `crypto.verify error: ${err.message}` };
   }
-
-  return ok ? { kind: 'valid' } : { kind: 'invalid', reason: 'signature does not match canonical receipt bytes' };
+  return ok
+    ? { kind: 'valid' }
+    : { kind: 'invalid', reason: 'signature does not match canonical receipt bytes' };
 }
 
 // ---------------------------------------------------------------------------
-// On-chain verification (mirrors verify-receipt.js verifyOnChain)
+// On-chain verification (mirrors verify-receipt.js verifyOnChain).
+// Confirms tx exists, calls USDC.transferWithAuthorization, decoded args
+// match (payer, payee, value), tx mined, and (when present) block_number.
 // ---------------------------------------------------------------------------
-// Confirms:
-//   1. Tx exists on Base.
-//   2. tx.to is the USDC contract.
-//   3. Calldata selector is transferWithAuthorization.
-//   4. Decoded (from, to, value) matches receipt's (payer, payee, amount).
-//   5. Tx mined successfully.
-//   6. If receipt has block_number, it matches the chain's blockNumber.
 
 export async function verifyReceiptOnChainInProcess(envelope: SignedReceipt): Promise<ChainVerifyResult> {
   const settlement = envelope.receipt.settlement;
@@ -162,31 +137,21 @@ export async function verifyReceiptOnChainInProcess(envelope: SignedReceipt): Pr
   try {
     tx = await basePublicClient.getTransaction({ hash: txHash as `0x${string}` });
   } catch (err: any) {
-    // viem throws TransactionNotFoundError when the hash isn't on chain.
-    // That's a strong signal the receipt is fabricated — flag as mismatch,
-    // not unavailable (this isn't a transient failure).
     if (err?.name === 'TransactionNotFoundError') {
       return { kind: 'mismatch', reason: `tx not found on chain: ${txHash}` };
     }
     return { kind: 'unavailable', reason: `RPC error: ${err?.shortMessage || err?.message || String(err)}` };
   }
-  if (!tx) {
-    return { kind: 'mismatch', reason: `tx not found: ${txHash}` };
-  }
+  if (!tx) return { kind: 'mismatch', reason: `tx not found: ${txHash}` };
 
-  // Tx must call the USDC contract — transferWithAuthorization is on the token.
   if (!tx.to || tx.to.toLowerCase() !== BASE_USDC_ADDRESS.toLowerCase()) {
     return { kind: 'mismatch', reason: `tx.to is ${tx.to} — expected USDC contract ${BASE_USDC_ADDRESS}` };
   }
-
-  // Selector must match transferWithAuthorization. transfer / transferFrom
-  // would mean the payer signed a different intent than the receipt claims.
   const selector = (tx.input as string).slice(0, 10).toLowerCase();
   if (selector !== TRANSFER_WITH_AUTH_SELECTOR) {
     return { kind: 'mismatch', reason: `tx selector ${selector} — expected ${TRANSFER_WITH_AUTH_SELECTOR}` };
   }
 
-  // Decode args. ABI fragment is local; no contract registry lookup.
   let decoded: any;
   try {
     decoded = decodeFunctionData({
@@ -210,12 +175,10 @@ export async function verifyReceiptOnChainInProcess(envelope: SignedReceipt): Pr
   } catch (err: any) {
     return { kind: 'mismatch', reason: `calldata decode failed: ${err.message}` };
   }
-
   const [chainFrom, chainTo, chainValue] = decoded.args as [string, string, bigint];
   const recPayer = settlement.payer_address.toLowerCase();
   const recPayee = settlement.payee_address.toLowerCase();
   const recAmount = BigInt(settlement.amount_atomic);
-
   if (chainFrom.toLowerCase() !== recPayer) {
     return { kind: 'mismatch', reason: `payer mismatch: chain=${chainFrom} receipt=${settlement.payer_address}` };
   }
@@ -226,22 +189,16 @@ export async function verifyReceiptOnChainInProcess(envelope: SignedReceipt): Pr
     return { kind: 'mismatch', reason: `amount mismatch: chain=${chainValue} receipt=${recAmount}` };
   }
 
-  // Tx must be mined and successful.
   let txReceipt: any;
   try {
     txReceipt = await basePublicClient.getTransactionReceipt({ hash: txHash as `0x${string}` });
   } catch (err: any) {
     return { kind: 'unavailable', reason: `tx receipt RPC error: ${err?.shortMessage || err?.message || String(err)}` };
   }
-  if (!txReceipt) {
-    return { kind: 'mismatch', reason: 'tx exists but has no receipt yet (still pending)' };
-  }
+  if (!txReceipt) return { kind: 'mismatch', reason: 'tx exists but has no receipt yet (still pending)' };
   if (txReceipt.status !== 'success') {
     return { kind: 'mismatch', reason: `tx mined but reverted (status=${txReceipt.status})` };
   }
-
-  // Block-number match (only when the receipt asserted one — pre-closeout-#3
-  // receipts don't have block_number, in which case skip this check).
   if (typeof settlement.block_number === 'number') {
     if (Number(txReceipt.blockNumber) !== settlement.block_number) {
       return { kind: 'mismatch', reason: `block mismatch: chain=${txReceipt.blockNumber} receipt=${settlement.block_number}` };
@@ -265,229 +222,214 @@ export async function getOrComputeVerifyResults(envelope: SignedReceipt): Promis
   const id = envelope.receipt.receipt_id;
   const cached = verifyCache.get(id);
   if (cached) return cached;
-
-  // Signature verify is fast (~ms) and independent of network. Run it first
-  // synchronously; if it fails, still attempt chain verify (information value
-  // for the rendered page; "signature invalid AND chain matches" is a
-  // different story than "signature invalid, chain confirms tampering").
   const sig = verifyReceiptSignatureInProcess(envelope);
   const chain = await verifyReceiptOnChainInProcess(envelope);
-
   const result: VerifyCache = { sig, chain };
   verifyCache.set(id, result);
   return result;
 }
 
 // ---------------------------------------------------------------------------
-// Render
+// Render — Phase 4 light-theme design (V1 corrected from Stitch)
 // ---------------------------------------------------------------------------
 
 export function renderReceiptHtml(envelope: SignedReceipt, verify: VerifyCache): string {
   const r = envelope.receipt;
   const s = envelope.signature;
-
-  const sigBadge = renderSigBadge(verify.sig);
-  const chainBadge = renderChainBadge(verify.chain);
-  const overallBadge = renderOverallBadge(verify.sig, verify.chain);
-
+  const overall = overallVerdict(verify.sig, verify.chain);
   const basescanUrl = `https://basescan.org/tx/${r.settlement.tx_hash}`;
-  const blockExplorerLine = typeof r.settlement.block_number === 'number'
-    ? `<tr><th>Block</th><td><code>${escapeHtml(String(r.settlement.block_number))}</code></td></tr>`
-    : '';
+  const txHashShort = `${r.settlement.tx_hash.slice(0, 10)}...${r.settlement.tx_hash.slice(-4)}`;
 
-  const verifierCmd = `npm run verify-receipt -- ${r.receipt_id}`;
-  const verifierWithChain = `npm run verify-receipt -- ${r.receipt_id} --check-chain`;
-
-  // Description for OG/Twitter cards. Short, factual, no marketing language.
-  const desc = `${formatUsdc(r.settlement.amount_atomic, r.settlement.decimals)} ${escapeHtml(r.settlement.currency)} settlement for ${escapeHtml(r.call.capability)} routed by TrustBench. ${verify.sig.kind === 'valid' ? 'Signature verified.' : ''} ${verify.chain.kind === 'verified' ? 'On-chain confirmed.' : ''}`.trim();
+  const title = `Receipt ${r.receipt_id} · TrustBench`;
+  const desc = `${formatUsdc(r.settlement.amount_atomic, r.settlement.decimals)} ${r.settlement.currency} settlement for ${r.call.capability} routed by TrustBench. ${verify.sig.kind === 'valid' ? 'Signature verified.' : ''} ${verify.chain.kind === 'verified' ? 'On-chain confirmed.' : ''}`.trim();
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>Receipt ${escapeHtml(r.receipt_id)} · TrustBench</title>
-  <meta name="description" content="${escapeHtml(desc)}">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta property="og:type" content="article">
-  <meta property="og:title" content="TrustBench Receipt ${escapeHtml(r.receipt_id)}">
-  <meta property="og:description" content="${escapeHtml(desc)}">
-  <meta name="twitter:card" content="summary">
-  <meta name="twitter:title" content="TrustBench Receipt ${escapeHtml(r.receipt_id)}">
-  <meta name="twitter:description" content="${escapeHtml(desc)}">
-  <style>
-    :root { color-scheme: dark; }
-    body {
-      font-family: system-ui, -apple-system, sans-serif;
-      max-width: 760px;
-      margin: 40px auto;
-      padding: 0 20px 80px;
-      background: #0f0f0f;
-      color: #ddd;
-      line-height: 1.55;
-    }
-    a { color: #22c55e; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    code, pre {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      background: #1f1f1f;
-      color: #fff;
-      border-radius: 4px;
-    }
-    code { padding: 2px 6px; word-break: break-all; }
-    pre {
-      padding: 12px 16px;
-      overflow-x: auto;
-      white-space: pre-wrap;
-      word-break: break-all;
-      border-left: 3px solid #22c55e;
-    }
-    .crumb { color: #888; font-size: 0.9em; margin-bottom: 8px; }
-    .crumb a { color: #888; }
-    h1 { color: #22c55e; margin: 0 0 4px; font-size: 1.6em; }
-    h2 { color: #22c55e; margin: 32px 0 8px; font-size: 1.05em; text-transform: uppercase; letter-spacing: 0.06em; }
-    .receipt-id { font-size: 0.95em; }
-    .badges { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 8px; }
-    .badge {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 6px 12px; border-radius: 999px; font-size: 0.9em;
-      border: 1px solid #2a2a2a; background: #1a1a1a;
-    }
-    .badge.green { color: #22c55e; border-color: #14532d; background: #052e16; }
-    .badge.red { color: #fca5a5; border-color: #7f1d1d; background: #2a0a0a; }
-    .badge.amber { color: #fbbf24; border-color: #78350f; background: #2a1a00; }
-    .badge.muted { color: #888; }
-    .overall {
-      padding: 14px 18px; border-radius: 8px; margin: 20px 0 24px;
-      font-size: 1.05em; display: flex; align-items: center; gap: 10px;
-    }
-    .overall.green { background: #052e16; border: 1px solid #14532d; color: #22c55e; }
-    .overall.red { background: #2a0a0a; border: 1px solid #7f1d1d; color: #fca5a5; }
-    .overall.amber { background: #2a1a00; border: 1px solid #78350f; color: #fbbf24; }
-    .meta { color: #888; font-size: 0.9em; margin-top: 4px; }
-    table { width: 100%; border-collapse: collapse; margin: 8px 0; }
-    th, td {
-      padding: 10px 0; text-align: left; vertical-align: top;
-      border-bottom: 1px solid #1f1f1f; font-size: 0.95em;
-    }
-    th { color: #888; font-weight: normal; width: 140px; }
-    td code { font-size: 0.92em; }
-    .reason { color: #fca5a5; font-size: 0.85em; margin-top: 6px; font-style: italic; }
-    footer {
-      margin-top: 60px; padding-top: 20px;
-      border-top: 1px solid #1f1f1f; color: #666; font-size: 0.85em;
-    }
-    footer a { color: #888; margin-right: 14px; }
-    .key-meta { color: #666; font-size: 0.85em; margin-top: 8px; }
-    .key-meta code { background: transparent; padding: 0; color: #aaa; }
-  </style>
+${siteHead(title, desc)}
 </head>
-<body>
-  <div class="crumb"><a href="/">TrustBench</a> · <a href="/methodology">Methodology</a> · Receipt</div>
-  <h1>Receipt</h1>
-  <code class="receipt-id">${escapeHtml(r.receipt_id)}</code>
+<body class="bg-bg text-ink">
+${renderNav('receipt')}
 
-  ${overallBadge}
+<main class="max-w-6xl mx-auto px-6 py-10">
+  <!-- Breadcrumb -->
+  <nav class="flex items-center gap-2 text-faint label-caps mb-6">
+    <a href="/analytics" class="hover:text-primary">Analytics</a>
+    <span>›</span>
+    <span>Receipts</span>
+    <span>›</span>
+    <span class="text-ink mono normal-case tracking-normal text-xs">${escapeHtml(r.receipt_id)}</span>
+  </nav>
 
-  <div class="badges">
-    ${sigBadge}
-    ${chainBadge}
-  </div>
-  <div class="meta">
-    Issued ${escapeHtml(formatTimestamp(r.issued_at))} by <code>${escapeHtml(r.issuer)}</code>
-  </div>
+  <!-- Verdict banner -->
+  ${renderVerdictBanner(overall)}
 
-  <h2>Settlement</h2>
-  <table>
-    <tr><th>Tx hash</th><td><a href="${escapeHtml(basescanUrl)}" target="_blank" rel="noopener noreferrer"><code>${escapeHtml(r.settlement.tx_hash)}</code></a> <a href="${escapeHtml(basescanUrl)}" target="_blank" rel="noopener noreferrer">↗ Basescan</a></td></tr>
-    ${blockExplorerLine}
-    <tr><th>Payer</th><td><code>${escapeHtml(r.settlement.payer_address)}</code></td></tr>
-    <tr><th>Payee</th><td><code>${escapeHtml(r.settlement.payee_address)}</code></td></tr>
-    <tr><th>Amount</th><td>${escapeHtml(formatUsdc(r.settlement.amount_atomic, r.settlement.decimals))} ${escapeHtml(r.settlement.currency)} on ${escapeHtml(r.settlement.chain)}</td></tr>
-    <tr><th>Settled at</th><td>${escapeHtml(formatTimestamp(r.settlement.settled_at))}</td></tr>
-  </table>
-
-  <h2>Routing</h2>
-  <table>
-    <tr><th>Capability</th><td>${escapeHtml(r.call.capability)}</td></tr>
-    <tr><th>Provider</th><td><code>${escapeHtml(r.call.provider_id)}</code></td></tr>
-    <tr><th>Score at decision</th><td>${escapeHtml(String(r.routing.score_at_decision))} / 100</td></tr>
-    <tr><th>Alternatives considered</th><td>${escapeHtml(String(r.routing.alternatives_considered))}</td></tr>
-    <tr><th>Selection reason</th><td>${escapeHtml(r.routing.selection_reason)}</td></tr>
-    <tr><th>Latency</th><td>${escapeHtml(String(r.call.latency_ms))} ms</td></tr>
-  </table>
-
-  <h2>Pricing</h2>
-  <table>
-    <tr><th>Provider price</th><td>${escapeHtml(formatUsdc(r.pricing.provider_price_atomic, r.settlement.decimals))} ${escapeHtml(r.settlement.currency)}</td></tr>
-    <tr><th>TrustBench fee</th><td>${escapeHtml(formatUsdc(r.pricing.trustbench_fee_atomic, r.settlement.decimals))} ${escapeHtml(r.settlement.currency)} <span class="meta">(${escapeHtml(r.pricing.fee_model)})</span></td></tr>
-    <tr><th>Total paid</th><td>${escapeHtml(formatUsdc(r.pricing.total_paid_atomic, r.settlement.decimals))} ${escapeHtml(r.settlement.currency)}</td></tr>
-  </table>
-
-  <h2>Verify yourself</h2>
-  <p>The signature is detached and verifiable by anyone with the published Ed25519 public key. Try it:</p>
-  <pre>${escapeHtml(verifierCmd)}</pre>
-  <p>Or check the receipt against Base on-chain settlement:</p>
-  <pre>${escapeHtml(verifierWithChain)}</pre>
-  <div class="key-meta">
-    Signed with Ed25519 · key_id <code>${escapeHtml(s.key_id)}</code> · public key at <a href="${escapeHtml(s.public_key_url)}">${escapeHtml(s.public_key_url)}</a>
+  <!-- Two badges below banner -->
+  <div class="flex flex-wrap gap-2 mt-3">
+    ${renderSigBadge(verify.sig)}
+    ${renderChainBadge(verify.chain)}
   </div>
 
-  <footer>
-    <a href="/methodology">Methodology</a>
-    <a href="/.well-known/trustbench-pubkey">Public key</a>
-    <a href="?format=json">View as JSON</a>
-    <a href="https://github.com/lithvall/TrustBench/blob/main/scripts/verify-receipt.js" target="_blank" rel="noopener noreferrer">Reference verifier</a>
-  </footer>
+  <p class="text-sm text-muted mt-3">
+    Issued ${escapeHtml(formatTimestamp(r.issued_at))} by <span class="mono text-ink">${escapeHtml(r.issuer)}</span>
+  </p>
+
+  <!-- Two-column content grid -->
+  <div class="mt-10 grid grid-cols-1 lg:grid-cols-12 gap-8">
+    <!-- Left column: data tables -->
+    <div class="lg:col-span-7 space-y-6">
+      ${renderTable('Settlement', [
+        ['Tx hash', `<a href="${escapeHtml(basescanUrl)}" target="_blank" rel="noopener noreferrer" class="mono text-primary hover:underline break-all">${escapeHtml(txHashShort)} <span class="text-xs">↗ Basescan</span></a>`],
+        ['Block', typeof r.settlement.block_number === 'number' ? `<span class="mono">${r.settlement.block_number.toLocaleString('en-US')}</span>` : '<span class="text-faint">—</span>'],
+        ['Payer', `<span class="mono text-xs break-all">${escapeHtml(r.settlement.payer_address)}</span>`],
+        ['Payee', `<span class="mono text-xs break-all">${escapeHtml(r.settlement.payee_address)}</span>`],
+        ['Amount', `<span class="font-semibold text-ink">${escapeHtml(formatUsdc(r.settlement.amount_atomic, r.settlement.decimals))} ${escapeHtml(r.settlement.currency)}</span> <span class="text-faint text-xs">on ${escapeHtml(r.settlement.chain)}</span>`],
+        ['Settled at', `<span class="mono text-sm">${escapeHtml(formatTimestamp(r.settlement.settled_at))}</span>`],
+      ])}
+
+      ${renderTable('Routing', [
+        ['Capability', `<span class="mono">${escapeHtml(r.call.capability)}</span>`],
+        ['Provider', `<span class="mono text-sm break-all">${escapeHtml(r.call.provider_id)}</span>`],
+        ['Score at decision', `<span class="mono">${escapeHtml(String(r.routing.score_at_decision))} / 100</span>`],
+        ['Alternatives considered', `<span class="mono">${escapeHtml(String(r.routing.alternatives_considered))}</span>`],
+        ['Selection reason', `<span class="mono">${escapeHtml(r.routing.selection_reason)}</span>`],
+        ['Latency', `<span class="mono">${escapeHtml(String(r.call.latency_ms))} ms</span>`],
+      ])}
+
+      ${renderTable('Pricing', [
+        ['Provider price', `<span class="mono">${escapeHtml(formatUsdc(r.pricing.provider_price_atomic, r.settlement.decimals))} ${escapeHtml(r.settlement.currency)}</span>`],
+        ['TrustBench fee', `<span class="mono">${escapeHtml(formatUsdc(r.pricing.trustbench_fee_atomic, r.settlement.decimals))} ${escapeHtml(r.settlement.currency)}</span> <span class="text-faint text-xs">(${escapeHtml(r.pricing.fee_model)})</span>`],
+        ['Total paid', `<span class="font-semibold text-primary mono">${escapeHtml(formatUsdc(r.pricing.total_paid_atomic, r.settlement.decimals))} ${escapeHtml(r.settlement.currency)}</span>`],
+      ])}
+    </div>
+
+    <!-- Right column: verification logic + verify commands -->
+    <div class="lg:col-span-5 space-y-6">
+      <section class="bg-mono border border-border rounded-lg p-5">
+        <h3 class="label-caps text-faint mb-4 flex items-center gap-2"><span>🛡️</span> Verification logic</h3>
+        <div class="space-y-4">
+          ${renderCheckRow(verify.sig.kind === 'valid', 'Signature valid', `Ed25519 detached signature verified against ${escapeHtml(s.key_id)} public key`)}
+          ${renderCheckRow(verify.chain.kind === 'verified', 'On-chain verified', verify.chain.kind === 'verified' ? `Tx confirmed on Base block ${(verify.chain as any).block_number?.toLocaleString('en-US')} — payer/payee/amount match receipt` : 'kind' in verify.chain ? (verify.chain as any).reason : 'check unavailable')}
+          ${renderCheckRow(true, 'Issuer attested', `Issued by ${escapeHtml(r.issuer)}`)}
+        </div>
+      </section>
+
+      <section>
+        <h3 class="label-caps text-faint mb-3">Verify yourself</h3>
+        <p class="text-sm text-muted mb-3">The signature is detached and verifiable by anyone with the published Ed25519 public key.</p>
+        <div class="space-y-2">
+          <div class="bg-mono border border-border rounded p-3 mono text-xs break-all">npm run verify-receipt -- ${escapeHtml(r.receipt_id)}</div>
+          <div class="bg-mono border border-border rounded p-3 mono text-xs break-all">npm run verify-receipt -- ${escapeHtml(r.receipt_id)} --check-chain</div>
+        </div>
+        <p class="mt-3 text-xs text-faint">
+          Signed Ed25519 · key_id <code class="mono">${escapeHtml(s.key_id)}</code><br>
+          Public key at <a href="${escapeHtml(s.public_key_url)}" class="text-primary hover:underline break-all">${escapeHtml(s.public_key_url)}</a>
+        </p>
+      </section>
+
+      <section class="text-sm">
+        <a href="?format=json" class="text-primary hover:underline">View as JSON →</a>
+      </section>
+    </div>
+  </div>
+</main>
+
+${renderFooter()}
 </body>
 </html>`;
 }
 
 // ---------------------------------------------------------------------------
-// Badge renderers — small, focused, easy to swap visual states
+// Section / row renderers
 // ---------------------------------------------------------------------------
+
+function renderTable(label: string, rows: Array<[string, string]>): string {
+  const tbody = rows.map(([k, v]) => `
+    <tr class="border-b border-border last:border-0">
+      <td class="label-caps text-faint py-3 pr-4 align-top whitespace-nowrap">${escapeHtml(k)}</td>
+      <td class="py-3 text-sm">${v}</td>
+    </tr>`).join('');
+  return `<section>
+    <h3 class="label-caps text-faint mb-3">${escapeHtml(label)}</h3>
+    <div class="bg-surface border border-border rounded-lg p-5">
+      <table class="w-full"><tbody>${tbody}</tbody></table>
+    </div>
+  </section>`;
+}
+
+function renderCheckRow(ok: boolean, title: string, sub: string): string {
+  const icon = ok
+    ? `<span class="text-primary text-lg leading-none">✓</span>`
+    : `<span class="text-amber text-lg leading-none">⚠</span>`;
+  return `<div class="flex items-start gap-3">
+    <div class="mt-0.5">${icon}</div>
+    <div>
+      <p class="font-medium text-ink">${escapeHtml(title)}</p>
+      <p class="text-xs text-muted leading-relaxed mt-0.5">${sub}</p>
+    </div>
+  </div>`;
+}
+
+type Verdict = 'pass' | 'partial' | 'fail';
+
+function overallVerdict(sig: SigVerifyResult, chain: ChainVerifyResult): Verdict {
+  if (sig.kind === 'valid' && chain.kind === 'verified') return 'pass';
+  if (sig.kind === 'invalid' || chain.kind === 'mismatch') return 'fail';
+  return 'partial';
+}
+
+function renderVerdictBanner(verdict: Verdict): string {
+  if (verdict === 'pass') {
+    return `<div class="bg-soft-green border border-primary/30 rounded-lg p-5 flex items-start gap-4">
+      <div class="bg-primary text-white rounded-full p-2 flex-shrink-0"><span class="text-lg leading-none">✓</span></div>
+      <div>
+        <h1 class="text-xl font-semibold text-primary-dark">Verified receipt — signature valid AND on-chain settlement matches</h1>
+        <p class="text-sm text-primary-dark/80 mt-1">Cryptographically verifiable by anyone with the published Ed25519 public key.</p>
+      </div>
+    </div>`;
+  }
+  if (verdict === 'fail') {
+    return `<div class="bg-red-soft border border-red-ink/30 rounded-lg p-5 flex items-start gap-4">
+      <div class="bg-red-ink text-white rounded-full p-2 flex-shrink-0"><span class="text-lg leading-none">✕</span></div>
+      <div>
+        <h1 class="text-xl font-semibold text-red-ink">Receipt verification failed — see details below</h1>
+        <p class="text-sm text-red-ink/80 mt-1">One or more checks did not pass. Inspect the verification logic for the failure reason.</p>
+      </div>
+    </div>`;
+  }
+  return `<div class="bg-amber-soft border border-amber/30 rounded-lg p-5 flex items-start gap-4">
+    <div class="bg-amber text-white rounded-full p-2 flex-shrink-0"><span class="text-lg leading-none">⚠</span></div>
+    <div>
+      <h1 class="text-xl font-semibold text-amber-ink">Partial verification — see details below</h1>
+      <p class="text-sm text-amber-ink/80 mt-1">Some checks could not complete (e.g. transient RPC error, HMAC fallback mode).</p>
+    </div>
+  </div>`;
+}
 
 function renderSigBadge(sig: SigVerifyResult): string {
   if (sig.kind === 'valid') {
-    return `<span class="badge green">✅ Signature valid</span>`;
+    return `<span class="inline-flex items-center gap-1.5 bg-soft-green text-primary-dark border border-primary/30 px-3 py-1 rounded-full text-sm font-medium">✅ Signature valid</span>`;
   }
   if (sig.kind === 'invalid') {
-    return `<span class="badge red">❌ Signature invalid<div class="reason">${escapeHtml(sig.reason)}</div></span>`;
+    return `<span class="inline-flex items-center gap-1.5 bg-red-soft text-red-ink border border-red-ink/30 px-3 py-1 rounded-full text-sm font-medium" title="${escapeHtml(sig.reason)}">❌ Signature invalid</span>`;
   }
-  // unverifiable
-  return `<span class="badge amber">⚠ Signature not verifiable<div class="reason">${escapeHtml(sig.reason)}</div></span>`;
+  return `<span class="inline-flex items-center gap-1.5 bg-amber-soft text-amber-ink border border-amber/30 px-3 py-1 rounded-full text-sm font-medium" title="${escapeHtml(sig.reason)}">⚠ Signature not verifiable</span>`;
 }
 
 function renderChainBadge(chain: ChainVerifyResult): string {
   if (chain.kind === 'verified') {
-    return `<span class="badge green">✅ On-chain verified</span>`;
+    return `<span class="inline-flex items-center gap-1.5 bg-soft-green text-primary-dark border border-primary/30 px-3 py-1 rounded-full text-sm font-medium">✅ On-chain verified</span>`;
   }
   if (chain.kind === 'mismatch') {
-    return `<span class="badge red">❌ On-chain mismatch<div class="reason">${escapeHtml(chain.reason)}</div></span>`;
+    return `<span class="inline-flex items-center gap-1.5 bg-red-soft text-red-ink border border-red-ink/30 px-3 py-1 rounded-full text-sm font-medium" title="${escapeHtml(chain.reason)}">❌ On-chain mismatch</span>`;
   }
-  // unavailable (transient)
-  return `<span class="badge amber">⏳ On-chain check unavailable<div class="reason">${escapeHtml(chain.reason)}</div></span>`;
-}
-
-function renderOverallBadge(sig: SigVerifyResult, chain: ChainVerifyResult): string {
-  // Overall verdict drives the big visual at top of page.
-  // Both green = headline green. Any red = headline red. Otherwise amber.
-  if (sig.kind === 'valid' && chain.kind === 'verified') {
-    return `<div class="overall green">✅ <strong>Verified receipt</strong> · signature valid AND on-chain settlement matches</div>`;
-  }
-  if (sig.kind === 'invalid' || chain.kind === 'mismatch') {
-    return `<div class="overall red">❌ <strong>Receipt verification failed</strong> · see details below</div>`;
-  }
-  return `<div class="overall amber">⚠ <strong>Partial verification</strong> · see details below</div>`;
+  return `<span class="inline-flex items-center gap-1.5 bg-amber-soft text-amber-ink border border-amber/30 px-3 py-1 rounded-full text-sm font-medium" title="${escapeHtml(chain.reason)}">⏳ On-chain check unavailable</span>`;
 }
 
 // ---------------------------------------------------------------------------
 // Format helpers
 // ---------------------------------------------------------------------------
 
-// Convert atomic-unit string to a decimal display string. BigInt-aware so
-// USDC amounts (6 decimals) and any other integer-decimal currency render
-// without precision loss. Trailing zeros after the decimal point are trimmed
-// for cleaner display: "10000" / 6 → "0.01" not "0.010000".
 function formatUsdc(atomic: string, decimals: number): string {
   if (!/^\d+$/.test(atomic)) return atomic;
   const big = BigInt(atomic);
@@ -500,8 +442,6 @@ function formatUsdc(atomic: string, decimals: number): string {
   return fracStr ? `${whole}.${fracStr}` : whole.toString();
 }
 
-// Format an ISO timestamp as "May 6 2026 09:30:25 UTC". Hand-formatted for
-// determinism (no locale dependence — every visitor sees the same text).
 function formatTimestamp(iso: string): string {
   try {
     const d = new Date(iso);
@@ -517,17 +457,4 @@ function formatTimestamp(iso: string): string {
   } catch {
     return iso;
   }
-}
-
-// Defensive HTML escaping. Receipt fields like `capability` and
-// `idempotency_key` originate from agent-supplied input; we don't trust them
-// to be safe HTML. Static labels and addresses don't strictly need it but
-// defense-in-depth is cheap.
-function escapeHtml(s: string): string {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }

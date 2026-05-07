@@ -1,30 +1,25 @@
-// src/rankings-html.ts — P4-2 second delivery: polished HTML for /rankings.
+// src/rankings-html.ts — Phase 4 redesign (light theme + left sidebar).
 //
 // Companion to the JSON path in src/index.ts /rankings. When the request's
 // Accept header prefers text/html (browsers, link unfurlers), this module
 // produces a self-contained page with:
-//   - Capability tabs (search / inference / data / media / infra) — server-
-//     side links that re-fetch with ?capability=X. Bookmarkable, shareable.
-//   - Filter pills (All / Verified x402 / Coinbase 1P / Coinbase 3P) —
-//     client-side toggle, hides non-matching rows in-page.
-//   - Search input — client-side substring filter on provider name + URL.
-//   - Sortable-by-default table (score desc), columns: rank, provider, score,
-//     latency p50/p95, uptime 7d, verified badges, last updated.
+//   - Top nav + footer (shared chrome).
+//   - Left sidebar: capability list (Search/Inference/Data/Media/Infra),
+//     Verification filter pills (All / ✅ Verified x402 / 🪪 Coinbase 1P /
+//     🔗 Coinbase 3P), and a search input.
+//   - Main: hero (capability h1 + sub), summary bar, sortable table, footer.
 //
-// Same dark-theme aesthetic as /methodology and /receipts. Single-file Hono
-// pattern: HTML + inline CSS + ~30 lines of vanilla JS for the filter UX.
-// No SPA, no build step.
-//
-// JSON contract is unchanged; this module is consumer-side rendering only.
+// JSON contract is unchanged; this is consumer-side rendering only. The
+// existing callers (paid-probe, /rankings/paid, MCP tools) all hit the JSON
+// path and don't see this module.
 
+import { siteHead, renderNav, renderFooter, escapeHtml } from './site-chrome.js';
 import type { Capability } from './provider-selection.js';
 
 // Shape of a row returned by getRankings() in src/scorer.ts. Duck-typed here
-// because scorer.ts doesn't export a formal type. If scorer's shape drifts,
-// adjust here — TypeScript will surface it as a property-access error in the
-// renderer.
+// because scorer.ts doesn't export a formal type.
 export type RankingRow = {
-  provider_id: string;          // URL (used as both key and display)
+  provider_id: string;          // URL — used as both key and display
   capability: string;
   name: string;
   score: number;
@@ -36,16 +31,15 @@ export type RankingRow = {
   integration_type: '1P' | '3P' | null;
 };
 
-// All routable capabilities, in the order shown on the tab strip. Mirrors
+// All routable capabilities, in the order shown on the sidebar. Mirrors
 // ROUTABLE_CAPABILITIES in provider-selection.ts (5-cat alignment with
-// Coinbase Agentic Market, P4-1c). Adding a capability there should add it
-// here too.
-const CAPABILITY_TABS: ReadonlyArray<{ key: Capability; label: string }> = [
-  { key: 'search', label: 'Search' },
-  { key: 'inference', label: 'Inference' },
-  { key: 'data', label: 'Data' },
-  { key: 'media', label: 'Media' },
-  { key: 'infra', label: 'Infra' },
+// Coinbase Agentic Market). Add a capability there → add it here too.
+const CAPABILITY_TABS: ReadonlyArray<{ key: Capability; label: string; icon: string }> = [
+  { key: 'search',    label: 'Search',    icon: '🔍' },
+  { key: 'inference', label: 'Inference', icon: '⚡' },
+  { key: 'data',      label: 'Data',      icon: '🗄️' },
+  { key: 'media',     label: 'Media',     icon: '🎬' },
+  { key: 'infra',     label: 'Infra',     icon: '⚙️' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -58,306 +52,230 @@ export function renderRankingsHtml(rankings: RankingRow[], capability: string): 
   const oneP = rankings.filter(r => r.integration_type === '1P').length;
   const threeP = rankings.filter(r => r.integration_type === '3P').length;
 
-  const desc = `${rankings.length} ${escapeHtml(safeCapability)} provider${rankings.length === 1 ? '' : 's'} on TrustBench, ranked by liveness telemetry. ${verifiedCount} x402-verified.`;
+  const desc = `${rankings.length} ${escapeHtml(safeCapability)} provider${rankings.length === 1 ? '' : 's'} on TrustBench, ranked by liveness telemetry.`;
+  const title = `${capitalize(safeCapability)} rankings · TrustBench`;
 
-  const tabsHtml = renderCapabilityTabs(safeCapability);
-  const pillsHtml = renderFilterPills(rankings.length, verifiedCount, oneP, threeP);
-  const tableHtml = renderTable(rankings);
+  // Last-probe relative time — pick the most recent last_updated across rows.
+  const lastProbe = rankings.length > 0
+    ? formatRelativeTime(rankings.reduce((acc, r) => r.last_updated > acc ? r.last_updated : acc, rankings[0].last_updated))
+    : '—';
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>${escapeHtml(capitalize(safeCapability))} rankings · TrustBench</title>
-  <meta name="description" content="${escapeHtml(desc)}">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta property="og:type" content="website">
-  <meta property="og:title" content="TrustBench ${escapeHtml(capitalize(safeCapability))} Rankings">
-  <meta property="og:description" content="${escapeHtml(desc)}">
-  <meta name="twitter:card" content="summary">
-  <meta name="twitter:title" content="TrustBench ${escapeHtml(capitalize(safeCapability))} Rankings">
-  <meta name="twitter:description" content="${escapeHtml(desc)}">
-  <style>
-    :root { color-scheme: dark; }
-    body {
-      font-family: system-ui, -apple-system, sans-serif;
-      max-width: 1080px;
-      margin: 40px auto;
-      padding: 0 20px 80px;
-      background: #0f0f0f;
-      color: #ddd;
-      line-height: 1.55;
-    }
-    a { color: #22c55e; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    code {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      background: #1f1f1f; color: #fff;
-      border-radius: 4px; padding: 2px 6px; font-size: 0.92em;
-      word-break: break-all;
-    }
-    .crumb { color: #888; font-size: 0.9em; margin-bottom: 8px; }
-    .crumb a { color: #888; }
-    h1 { color: #22c55e; margin: 0 0 4px; font-size: 1.6em; }
-    .subtitle { color: #888; font-size: 0.95em; margin: 0 0 24px; }
-
-    /* Capability tabs */
-    nav.cap-tabs {
-      display: flex; flex-wrap: wrap; gap: 4px;
-      margin: 16px 0 16px;
-      border-bottom: 1px solid #1f1f1f;
-    }
-    .cap-tab {
-      padding: 10px 18px; color: #888; border-radius: 6px 6px 0 0;
-      border: 1px solid transparent; border-bottom: none;
-      transition: background 0.1s;
-    }
-    .cap-tab:hover { background: #1a1a1a; color: #ddd; text-decoration: none; }
-    .cap-tab.active {
-      color: #22c55e; background: #052e16;
-      border-color: #14532d;
-      position: relative; bottom: -1px;
-    }
-
-    /* Filter row */
-    .filter-row {
-      display: flex; flex-wrap: wrap; gap: 10px;
-      align-items: center; margin: 12px 0 20px;
-    }
-    .pill {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 6px 14px; border-radius: 999px; font-size: 0.9em;
-      border: 1px solid #2a2a2a; background: #1a1a1a; color: #aaa;
-      cursor: pointer; user-select: none;
-      transition: border-color 0.1s, background 0.1s;
-    }
-    .pill:hover { border-color: #14532d; }
-    .pill.active {
-      color: #22c55e; border-color: #14532d; background: #052e16;
-    }
-    .pill .count { color: #666; font-size: 0.85em; }
-    .pill.active .count { color: #22c55e; }
-    .search-wrap { flex: 1; min-width: 200px; }
-    .search-wrap input {
-      width: 100%; padding: 8px 14px; border-radius: 999px;
-      border: 1px solid #2a2a2a; background: #1a1a1a; color: #ddd;
-      font-size: 0.95em; outline: none;
-      transition: border-color 0.1s;
-    }
-    .search-wrap input:focus { border-color: #22c55e; }
-
-    /* Table */
-    table {
-      width: 100%; border-collapse: collapse;
-      margin: 8px 0;
-    }
-    th, td {
-      padding: 12px 8px; text-align: left;
-      border-bottom: 1px solid #1f1f1f;
-      font-size: 0.93em; vertical-align: middle;
-    }
-    th {
-      color: #888; font-weight: normal; text-transform: uppercase;
-      letter-spacing: 0.05em; font-size: 0.78em;
-    }
-    tbody tr { transition: background 0.05s; }
-    tbody tr:hover { background: #141414; }
-    td.rank { color: #666; font-variant-numeric: tabular-nums; width: 40px; }
-    td.provider { min-width: 220px; }
-    td.provider .name { color: #ddd; font-weight: 500; }
-    td.provider .url { color: #666; font-size: 0.82em; word-break: break-all; }
-    td.score-cell {
-      font-variant-numeric: tabular-nums; font-weight: 600;
-      width: 70px;
-    }
-    td.score-cell.high { color: #22c55e; }
-    td.score-cell.med { color: #fbbf24; }
-    td.score-cell.low { color: #999; }
-    td.num { font-variant-numeric: tabular-nums; color: #aaa; width: 80px; }
-    td.badges { width: 140px; }
-    .badge-mini {
-      display: inline-block; font-size: 0.72em;
-      padding: 2px 8px; border-radius: 999px;
-      border: 1px solid #2a2a2a; margin-right: 4px;
-      vertical-align: middle;
-    }
-    .badge-mini.green { color: #22c55e; border-color: #14532d; background: #052e16; }
-    .badge-mini.blue { color: #93c5fd; border-color: #1e3a8a; background: #0a1733; }
-    .badge-mini.muted { color: #888; }
-    td.updated { color: #666; font-size: 0.85em; width: 130px; }
-
-    .empty {
-      padding: 60px 20px; text-align: center;
-      color: #888; font-size: 0.95em;
-      background: #141414; border-radius: 8px;
-      margin: 20px 0;
-    }
-    .meta-footer {
-      display: flex; justify-content: space-between;
-      flex-wrap: wrap; gap: 12px;
-      margin-top: 12px; color: #666; font-size: 0.85em;
-    }
-    footer.page-foot {
-      margin-top: 50px; padding-top: 20px;
-      border-top: 1px solid #1f1f1f; color: #666; font-size: 0.85em;
-    }
-    footer.page-foot a { color: #888; margin-right: 14px; }
-
-    @media (max-width: 720px) {
-      table, thead, tbody, th, td, tr { display: block; }
-      thead { display: none; }
-      tr { border-bottom: 1px solid #1f1f1f; padding: 10px 0; }
-      td { border-bottom: none; padding: 4px 0; }
-      td:before { content: attr(data-label); color: #666; display: inline-block; width: 110px; font-size: 0.8em; text-transform: uppercase; }
-    }
-  </style>
+${siteHead(title, desc)}
 </head>
-<body>
-  <div class="crumb"><a href="/">TrustBench</a> · <a href="/methodology">Methodology</a> · Rankings</div>
-  <h1>${escapeHtml(capitalize(safeCapability))} rankings</h1>
-  <p class="subtitle">${escapeHtml(desc)} <a href="/methodology">How is this measured?</a></p>
+<body class="bg-bg text-ink">
+${renderNav('rankings')}
 
-  ${tabsHtml}
+<main class="max-w-7xl mx-auto px-6 py-10">
+  <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+    <!-- Sidebar -->
+    <aside class="lg:col-span-3">
+      <div class="lg:sticky lg:top-24 space-y-6">
+        <!-- Search input -->
+        <div class="relative">
+          <input id="search" type="search" placeholder="Search by name or URL…" autocomplete="off"
+                 class="w-full bg-surface border border-border rounded px-3 py-2 text-sm focus:border-primary focus:outline-none transition-colors">
+        </div>
 
-  ${pillsHtml}
+        <!-- Capability list -->
+        <section>
+          <h3 class="label-caps text-faint mb-3">Capability</h3>
+          <div class="space-y-1">
+            ${CAPABILITY_TABS.map(t => renderCapabilityLink(t, safeCapability)).join('')}
+          </div>
+        </section>
 
-  ${rankings.length === 0
-    ? `<div class="empty">No providers registered for <code>${escapeHtml(safeCapability)}</code> yet. <a href="/methodology">Methodology</a> · <a href="?format=json">JSON</a></div>`
-    : tableHtml}
+        <!-- Verification filter pills -->
+        <section>
+          <h3 class="label-caps text-faint mb-3">Verification</h3>
+          <div class="space-y-1">
+            ${pill('all',      'All',                rankings.length, true)}
+            ${pill('verified', '✅ Verified (x402)', verifiedCount,   false)}
+            ${pill('1p',       '🪪 Coinbase 1P',     oneP,            false)}
+            ${pill('3p',       '🔗 Coinbase 3P',     threeP,          false)}
+          </div>
+        </section>
+      </div>
+    </aside>
 
-  <div class="meta-footer">
-    <div>
-      <span id="visibleCount">${rankings.length}</span> of ${rankings.length} providers shown
-    </div>
-    <div>
-      <a href="?capability=${encodeURIComponent(safeCapability)}&format=json">View as JSON</a>
+    <!-- Main -->
+    <div class="lg:col-span-9">
+      <!-- Hero -->
+      <div class="mb-6">
+        <div class="label-caps text-faint mb-2">Capability rankings</div>
+        <h1 class="text-3xl font-semibold tracking-tight text-ink">${escapeHtml(capitalize(safeCapability))} rankings</h1>
+        <p class="text-muted mt-2">${escapeHtml(desc)} <a href="/methodology" class="text-primary hover:underline">How is this measured?</a></p>
+      </div>
+
+      <!-- Summary bar -->
+      <div class="bg-surface border border-border rounded-lg grid grid-cols-2 md:grid-cols-4 divide-x divide-border mb-6">
+        ${stat('Providers',      String(rankings.length))}
+        ${stat('Verified (x402)', String(verifiedCount))}
+        ${stat('Coinbase 1P',     String(oneP))}
+        ${stat('Last probe',      lastProbe, true)}
+      </div>
+
+      <!-- Table -->
+      ${rankings.length === 0
+        ? `<div class="bg-surface border border-border rounded-lg py-16 text-center text-muted">
+             No providers registered for <code class="mono bg-mono px-1.5 py-0.5 rounded">${escapeHtml(safeCapability)}</code> yet.
+             <div class="mt-2 text-sm"><a href="/methodology" class="text-primary hover:underline">Methodology</a> · <a href="?capability=${encodeURIComponent(safeCapability)}&format=json" class="text-primary hover:underline">JSON</a></div>
+           </div>`
+        : renderTable(rankings)}
+
+      <!-- Footer of section -->
+      <div class="mt-4 pt-4 border-t border-border flex justify-between items-center">
+        <span class="label-caps text-faint"><span id="visibleCount">${rankings.length}</span> of ${rankings.length} shown · capability=${escapeHtml(safeCapability)}</span>
+        <a href="?capability=${encodeURIComponent(safeCapability)}&format=json" class="text-sm text-primary hover:underline">View as JSON →</a>
+      </div>
     </div>
   </div>
+</main>
 
-  <footer class="page-foot">
-    <a href="/methodology">Methodology</a>
-    <a href="/.well-known/trustbench-pubkey">Public key</a>
-    <a href="/health">Health</a>
-    <a href="https://github.com/lithvall/TrustBench" target="_blank" rel="noopener noreferrer">GitHub</a>
-  </footer>
+${renderFooter()}
 
-  <script>
-    // Filter + search behaviour. Pure vanilla JS, no framework. Visibility is
-    // toggled by row.style.display rather than a CSS class because each row
-    // has independent visibility from BOTH the active pill AND the search
-    // box, and combining via classes gets fiddly. Direct style is cleanest.
-    (function () {
-      const rows = Array.from(document.querySelectorAll('tbody tr.row'));
-      const search = document.getElementById('search');
-      const pills = Array.from(document.querySelectorAll('.pill'));
-      const visibleCounter = document.getElementById('visibleCount');
-      let activeFilter = 'all';
+<script>
+// Sidebar filter + search behaviour. Pure vanilla JS, no framework.
+// Visibility is toggled via row.style.display because each row depends on
+// BOTH the active pill AND the search box; combining via CSS classes gets
+// fiddly.
+(function () {
+  var rows = Array.from(document.querySelectorAll('tbody tr.row'));
+  var search = document.getElementById('search');
+  var pills = Array.from(document.querySelectorAll('.pill'));
+  var counter = document.getElementById('visibleCount');
+  var activeFilter = 'all';
 
-      function applyFilters() {
-        const q = (search && search.value || '').toLowerCase().trim();
-        let visible = 0;
-        rows.forEach(function (row) {
-          const text = row.getAttribute('data-search') || '';
-          const verified = row.getAttribute('data-x402-verified') === 'true';
-          const itype = row.getAttribute('data-integration-type') || '';
-          let show = true;
-          if (activeFilter === 'verified' && !verified) show = false;
-          if (activeFilter === '1p' && itype !== '1P') show = false;
-          if (activeFilter === '3p' && itype !== '3P') show = false;
-          if (q && text.indexOf(q) === -1) show = false;
-          row.style.display = show ? '' : 'none';
-          if (show) visible += 1;
-        });
-        if (visibleCounter) visibleCounter.textContent = String(visible);
-      }
+  function applyFilters() {
+    var q = (search && search.value || '').toLowerCase().trim();
+    var visible = 0;
+    rows.forEach(function (row) {
+      var text = row.getAttribute('data-search') || '';
+      var verified = row.getAttribute('data-x402-verified') === 'true';
+      var itype = row.getAttribute('data-integration-type') || '';
+      var show = true;
+      if (activeFilter === 'verified' && !verified) show = false;
+      if (activeFilter === '1p' && itype !== '1P') show = false;
+      if (activeFilter === '3p' && itype !== '3P') show = false;
+      if (q && text.indexOf(q) === -1) show = false;
+      row.style.display = show ? '' : 'none';
+      if (show) visible += 1;
+    });
+    if (counter) counter.textContent = String(visible);
+  }
 
-      if (search) search.addEventListener('input', applyFilters);
-      pills.forEach(function (p) {
-        p.addEventListener('click', function (e) {
-          e.preventDefault();
-          pills.forEach(function (pp) { pp.classList.remove('active'); });
-          p.classList.add('active');
-          activeFilter = p.getAttribute('data-filter') || 'all';
-          applyFilters();
-        });
-      });
-    })();
-  </script>
+  if (search) search.addEventListener('input', applyFilters);
+  pills.forEach(function (p) {
+    p.addEventListener('click', function (e) {
+      e.preventDefault();
+      pills.forEach(function (pp) { pp.classList.remove('pill-active'); });
+      p.classList.add('pill-active');
+      activeFilter = p.getAttribute('data-filter') || 'all';
+      applyFilters();
+    });
+  });
+})();
+</script>
+<style>
+  .pill { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; border-radius: 6px; cursor: pointer; transition: background-color 0.1s; color: #5C6963; font-size: 14px; }
+  .pill:hover { background: #F4F6F4; }
+  .pill-active { background: #E8F3EC; color: #0F4D24; font-weight: 500; }
+  .pill .count { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #8A938E; padding: 1px 6px; background: #F4F6F4; border-radius: 999px; }
+  .pill-active .count { background: #FFFFFF; color: #1F7A3A; }
+  .cap-link { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 6px; color: #5C6963; font-size: 14px; transition: background-color 0.1s, color 0.1s; }
+  .cap-link:hover { background: #F4F6F4; color: #0F1A14; }
+  .cap-link.cap-active { background: #E8F3EC; color: #0F4D24; font-weight: 500; }
+</style>
 </body>
 </html>`;
 }
 
 // ---------------------------------------------------------------------------
-// Section renderers
+// Renderers
 // ---------------------------------------------------------------------------
 
-function renderCapabilityTabs(activeCapability: string): string {
-  const tabs = CAPABILITY_TABS.map(t => {
-    const isActive = t.key === activeCapability;
-    return `<a class="cap-tab${isActive ? ' active' : ''}" href="?capability=${encodeURIComponent(t.key)}">${escapeHtml(t.label)}</a>`;
-  }).join('');
-  return `<nav class="cap-tabs" aria-label="Capability">${tabs}</nav>`;
+function renderCapabilityLink(t: { key: string; label: string; icon: string }, active: string): string {
+  const isActive = t.key === active;
+  return `<a href="?capability=${encodeURIComponent(t.key)}" class="cap-link${isActive ? ' cap-active' : ''}">
+    <span>${t.icon}</span>
+    <span>${escapeHtml(t.label)}</span>
+  </a>`;
 }
 
-function renderFilterPills(total: number, verified: number, oneP: number, threeP: number): string {
-  return `<div class="filter-row">
-    <div class="pill active" data-filter="all">All <span class="count">${total}</span></div>
-    <div class="pill" data-filter="verified">✅ Verified (x402) <span class="count">${verified}</span></div>
-    <div class="pill" data-filter="1p">🪪 Coinbase 1P <span class="count">${oneP}</span></div>
-    <div class="pill" data-filter="3p">🔗 Coinbase 3P <span class="count">${threeP}</span></div>
-    <div class="search-wrap"><input id="search" type="search" placeholder="Search by name or URL…" autocomplete="off"></div>
+function pill(filter: string, label: string, count: number, active: boolean): string {
+  return `<div class="pill${active ? ' pill-active' : ''}" data-filter="${filter}">
+    <span>${label}</span>
+    <span class="count">${count}</span>
+  </div>`;
+}
+
+function stat(label: string, value: string, accent = false): string {
+  const valueClass = accent ? 'text-primary' : 'text-ink';
+  return `<div class="px-5 py-4">
+    <div class="label-caps text-faint mb-1">${escapeHtml(label)}</div>
+    <div class="mono text-base font-semibold ${valueClass} tabular-nums">${escapeHtml(value)}</div>
   </div>`;
 }
 
 function renderTable(rankings: RankingRow[]): string {
   const rows = rankings.map((r, i) => renderRow(r, i + 1)).join('');
-  return `<table>
-    <thead>
-      <tr>
-        <th>#</th>
-        <th>Provider</th>
-        <th>Score</th>
-        <th>p50 ms</th>
-        <th>p95 ms</th>
-        <th>Uptime 7d</th>
-        <th>Verified</th>
-        <th>Updated</th>
-      </tr>
-    </thead>
-    <tbody>${rows}</tbody>
-  </table>`;
+  return `<div class="bg-surface border border-border rounded-lg overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="w-full">
+        <thead>
+          <tr class="border-b border-border bg-mono">
+            <th class="label-caps text-faint py-3 px-4 text-left">#</th>
+            <th class="label-caps text-faint py-3 px-4 text-left">Provider</th>
+            <th class="label-caps text-faint py-3 px-4 text-left">Score</th>
+            <th class="label-caps text-faint py-3 px-4 text-right">p50 ms</th>
+            <th class="label-caps text-faint py-3 px-4 text-right">p95 ms</th>
+            <th class="label-caps text-faint py-3 px-4 text-right">Uptime 7d</th>
+            <th class="label-caps text-faint py-3 px-4 text-center">Verified</th>
+            <th class="label-caps text-faint py-3 px-4 text-right">Updated</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </div>`;
 }
 
 function renderRow(r: RankingRow, rank: number): string {
   const search = `${r.name} ${r.provider_id}`.toLowerCase();
   const itype = r.integration_type || '';
-  const scoreClass = r.score >= 85 ? 'high' : (r.score >= 65 ? 'med' : 'low');
+  // Score colour: ≥85 brand-green, 65-84 amber, <65 grey
+  const scoreColor = r.score >= 85 ? 'text-primary' : r.score >= 65 ? 'text-amber' : 'text-faint';
+  const uptimeColor = r.uptime_7d >= 99 ? 'text-primary' : r.uptime_7d >= 97 ? 'text-amber' : 'text-red-ink';
 
   const verifiedBadge = r.x402_verified
-    ? `<span class="badge-mini green" title="TrustBench live-probe-confirmed x402 challenge">✅ x402</span>`
-    : `<span class="badge-mini muted" title="Not yet probed for x402 wire compliance">—</span>`;
+    ? `<span class="text-sm" title="TrustBench live-probe-confirmed x402 challenge">✅ x402</span>`
+    : `<span class="text-faint">—</span>`;
   const integrationBadge =
     itype === '1P'
-      ? `<span class="badge-mini blue" title="Coinbase Agentic Market: 1st-party native x402 integration">1P</span>`
+      ? `<span class="text-sm ml-1" title="Coinbase Agentic Market: 1st-party native">🪪 1P</span>`
       : itype === '3P'
-        ? `<span class="badge-mini muted" title="Coinbase Agentic Market: proxied (3rd-party) integration">3P</span>`
+        ? `<span class="text-sm ml-1" title="Coinbase Agentic Market: proxied (3rd-party)">🔗 3P</span>`
         : '';
 
-  return `<tr class="row"
+  return `<tr class="row border-b border-border last:border-0 hover:bg-mono/40 transition-colors"
     data-search="${escapeHtml(search)}"
     data-x402-verified="${r.x402_verified ? 'true' : 'false'}"
     data-integration-type="${escapeHtml(itype)}">
-    <td class="rank" data-label="#">${rank}</td>
-    <td class="provider" data-label="Provider">
-      <div class="name">${escapeHtml(r.name)}</div>
-      <div class="url"><code>${escapeHtml(r.provider_id)}</code></div>
+    <td class="py-4 px-4 mono text-sm font-semibold text-ink">${String(rank).padStart(2, '0')}</td>
+    <td class="py-4 px-4">
+      <div class="font-medium text-ink">${escapeHtml(r.name)}</div>
+      <div class="mono text-xs text-faint break-all">${escapeHtml(r.provider_id)}</div>
     </td>
-    <td class="score-cell ${scoreClass}" data-label="Score">${escapeHtml(formatNum(r.score))}</td>
-    <td class="num" data-label="p50 ms">${escapeHtml(formatNum(r.latency_p50))}</td>
-    <td class="num" data-label="p95 ms">${escapeHtml(formatNum(r.latency_p95))}</td>
-    <td class="num" data-label="Uptime 7d">${escapeHtml(formatNum(r.uptime_7d))}%</td>
-    <td class="badges" data-label="Verified">${verifiedBadge} ${integrationBadge}</td>
-    <td class="updated" data-label="Updated">${escapeHtml(formatRelativeTime(r.last_updated))}</td>
+    <td class="py-4 px-4">
+      <span class="mono text-base font-semibold ${scoreColor} tabular-nums">${escapeHtml(formatNum(r.score))}</span>
+    </td>
+    <td class="py-4 px-4 text-right mono text-sm text-muted tabular-nums">${escapeHtml(formatNum(r.latency_p50))}</td>
+    <td class="py-4 px-4 text-right mono text-sm text-muted tabular-nums">${escapeHtml(formatNum(r.latency_p95))}</td>
+    <td class="py-4 px-4 text-right mono text-sm font-semibold ${uptimeColor} tabular-nums">${escapeHtml(formatNum(r.uptime_7d))}%</td>
+    <td class="py-4 px-4 text-center whitespace-nowrap">${verifiedBadge}${integrationBadge}</td>
+    <td class="py-4 px-4 text-right text-xs text-faint">${escapeHtml(formatRelativeTime(r.last_updated))}</td>
   </tr>`;
 }
 
@@ -367,17 +285,12 @@ function renderRow(r: RankingRow, rank: number): string {
 
 function formatNum(n: unknown): string {
   if (typeof n === 'number' && Number.isFinite(n)) {
-    // Integer when whole, otherwise 1 decimal — keeps tabular numerics tidy
-    // without introducing precision drift in the display.
     if (Number.isInteger(n)) return n.toString();
     return n.toFixed(1);
   }
   return '—';
 }
 
-// Best-effort relative time. ISO timestamps from the DB; render as "2h ago"
-// when recent, otherwise "May 6, 2026". Locale-free for determinism — every
-// visitor sees the same text.
 function formatRelativeTime(iso: string): string {
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return iso;
@@ -387,7 +300,6 @@ function formatRelativeTime(iso: string): string {
   if (ageMs < hr) return `${Math.floor(ageMs / min)}m ago`;
   if (ageMs < day) return `${Math.floor(ageMs / hr)}h ago`;
   if (ageMs < 7 * day) return `${Math.floor(ageMs / day)}d ago`;
-  // Older than a week — show absolute date.
   const d = new Date(t);
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   return `${months[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
@@ -396,15 +308,4 @@ function formatRelativeTime(iso: string): string {
 function capitalize(s: string): string {
   if (!s) return s;
   return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-// Defense-in-depth HTML escape. Provider names + URLs come from registry data
-// (controlled by the crawler), but defensive escaping is cheap.
-function escapeHtml(s: unknown): string {
-  return String(s ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }

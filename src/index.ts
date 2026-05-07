@@ -16,6 +16,9 @@ import { startPendingSweep } from './pending-sweep.js';
 import { renderReceiptHtml, getOrComputeVerifyResults } from './receipt-html.js';
 import type { SignedReceipt } from './receipt-generator.js';
 import { renderRankingsHtml, type RankingRow } from './rankings-html.js';
+import { renderLandingHtml, type LandingStats } from './landing-html.js';
+import { renderMethodologyHtml } from './methodology-html.js';
+import { renderAnalyticsHtml, type AnalyticsData, type CategoryCard } from './analytics-html.js';
 
 // ---------------------------------------------------------------------------
 // Agent-discovery static assets (P4-skill, P4-llmstxt, P4-wellknown).
@@ -57,6 +60,107 @@ app.use('*', logger());
 
 // Health
 app.get('/health', (c) => c.json({ status: 'ok', project: 'TrustBench' }));
+
+// ---------------------------------------------------------------------------
+// Landing-page live stats. Three numbers feed the V2 stat strip on `/`:
+//   - x402-verified provider count from the providers table
+//   - receipts issued in the trailing 30 days
+//   - median p50 latency across recent scorecards
+//
+// Each query has its own try/catch and falls back to null on failure — the
+// landing template renders an em-dash for any null tile, so partial DB
+// outages degrade gracefully rather than show fake data (honest framing).
+//
+// Cached for 60s in-process; the front door doesn't need real-time accuracy
+// and we don't want every page-load to hit Supabase three times.
+// ---------------------------------------------------------------------------
+
+let _landingStatsCache: { data: LandingStats; expires: number } | null = null;
+
+async function getLandingStats(): Promise<LandingStats> {
+  // Cheap in-process cache; refresh every 60s.
+  if (_landingStatsCache && _landingStatsCache.expires > Date.now()) {
+    return _landingStatsCache.data;
+  }
+
+  // Endpoint count: sum of providers actually shown in /rankings across all
+  // five capabilities. Mirrors what a visitor sees, so the headline number
+  // matches the rankings page — and excludes Solana endpoints (filtered by
+  // network in scorer.ts) until Phase 4-3 lands cross-network routing.
+  // 5 parallel queries; getRankings caches via Redis (5min TTL) so this is
+  // amortized cheap.
+  let endpointCount: number | null = null;
+  try {
+    const caps: Array<'search' | 'inference' | 'data' | 'media' | 'infra'> = [
+      'search', 'inference', 'data', 'media', 'infra',
+    ];
+    const lists = await Promise.all(caps.map(c => getRankings(c)));
+    endpointCount = lists.reduce((sum, rows) => sum + (rows?.length ?? 0), 0);
+  } catch (err) {
+    console.warn('[landing-stats] endpoint count query failed:', err);
+  }
+
+  // Receipts in last 30 days. Receipts table uses `issued_at` (per
+  // phase3-schema.sql line 178), not `created_at`. Get this column name
+  // wrong and the count silently returns 0 even when receipts exist.
+  let receiptsLast30Days: number | null = null;
+  try {
+    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const { count, error } = await supabase
+      .from('receipts')
+      .select('id', { count: 'exact', head: true })
+      .gte('issued_at', cutoff);
+    if (!error && typeof count === 'number') receiptsLast30Days = count;
+  } catch (err) {
+    console.warn('[landing-stats] receipt count query failed:', err);
+  }
+
+  // Median p50 latency across scorecards. Pull the latency_p50 column and
+  // compute the median client-side — Supabase doesn't have a native median
+  // aggregate, and the row count here is tiny (<200) so this is fine.
+  let medianLatencyMs: number | null = null;
+  try {
+    const { data, error } = await supabase
+      .from('scorecards')
+      .select('latency_p50')
+      .not('latency_p50', 'is', null);
+    if (!error && Array.isArray(data) && data.length > 0) {
+      const values = data
+        .map((r: any) => Number(r.latency_p50))
+        .filter((v: number) => Number.isFinite(v) && v > 0)
+        .sort((a, b) => a - b);
+      if (values.length > 0) {
+        const mid = Math.floor(values.length / 2);
+        medianLatencyMs = Math.round(values.length % 2 === 0 ? (values[mid - 1] + values[mid]) / 2 : values[mid]);
+      }
+    }
+  } catch (err) {
+    console.warn('[landing-stats] median latency query failed:', err);
+  }
+
+  const stats: LandingStats = { endpointCount, receiptsLast30Days, medianLatencyMs };
+  _landingStatsCache = { data: stats, expires: Date.now() + 60_000 };
+  return stats;
+}
+
+// Public landing page (V2 Data-Forward design from Stitch). Live numbers from
+// getLandingStats(); page is fully static otherwise. Honest-framing constraints
+// applied throughout. No JSON contract — landing is HTML-only.
+app.get('/', async (c) => {
+  const stats = await getLandingStats();
+  return c.html(renderLandingHtml(stats), 200, {
+    'Cache-Control': 'public, max-age=60',
+  });
+});
+
+// JSON endpoint backing the landing stat strip. Useful for dashboards,
+// monitoring, or anyone who wants to graph these numbers over time.
+app.get('/metrics/registry-summary', async (c) => {
+  const stats = await getLandingStats();
+  return c.json({ success: true, ...stats, generated_at: new Date().toISOString() }, 200, {
+    'Cache-Control': 'public, max-age=60',
+  });
+});
 
 // Public rankings.
 //
@@ -355,179 +459,74 @@ app.get('/receipts/:id', async (c) => {
   });
 });
 
-// Methodology page — required reading for anyone interpreting the data.
-// Phase 0 of the strategy doc says: name what the probe does and does NOT do,
-// in plain language, before any third party tries to cite the data.
-app.get('/methodology', (c) => {
-  const html = `
-<!DOCTYPE html>
-<html>
-<head>
-  <title>TrustBench Methodology</title>
-  <style>
-    body { font-family: system-ui, sans-serif; max-width: 760px; margin: 40px auto; padding: 0 20px; background: #0f0f0f; color: #ddd; line-height: 1.55; }
-    h1 { color: #22c55e; }
-    h2 { color: #22c55e; margin-top: 32px; }
-    code { background: #1f1f1f; padding: 2px 6px; border-radius: 4px; color: #fff; }
-    pre { background: #1f1f1f; padding: 16px; border-radius: 6px; overflow-x: auto; color: #fff; }
-    .warn { background: #2a1a00; border-left: 4px solid #f59e0b; padding: 12px 16px; border-radius: 4px; margin: 16px 0; }
-    a { color: #22c55e; }
-  </style>
-</head>
-<body>
-  <h1>Methodology</h1>
-  <p>
-    TrustBench is a public registry of x402-style endpoints with nightly liveness telemetry
-    and signed scorecards. This page documents exactly how the data is collected, how scores
-    are computed, and what each metric represents — so anyone integrating against the registry
-    knows what they're working with.
-  </p>
+// Methodology page — Phase 4 redesign in src/methodology-html.ts.
+// The new layout mandates the "What this measurement does NOT tell you"
+// callout (formerly inline) per the honest-framing rule in CLAUDE.md.
+app.get('/methodology', (c) => c.html(renderMethodologyHtml()));
 
-  <h2>Data collection</h2>
-  <ul>
-    <li>A scheduled job runs once per day on a single cloud host.</li>
-    <li>For each provider URL, the prober sends <strong>three sequential requests</strong>
-        per run. The three samples are tagged <code>us-east / eu-west / asia-southeast</code>
-        for variance accounting; they all originate from the same host today. Multi-host
-        probing is on the roadmap.</li>
-    <li>Each request is a <code>HEAD</code> with an 8-second timeout, falling back to
-        <code>GET</code> if the server returns 405.</li>
-    <li>HTTP status codes <code>200, 201, 204, 401, 402, 403, 404, 405, 429</code> are
-        recorded as "endpoint is alive." Other statuses, connection errors, and timeouts
-        are recorded as failures.</li>
-  </ul>
-
-  <h2>Scoring</h2>
-  <pre>score = 15
-      + 45 · successRate
-      + 35 · latencyHealth        // max(0, min(1, 1 - p50 / 2000))
-      +  3 · consistencyBonus     // max(0, min(1, 1 - jitter))
-clamped to [40, 98]</pre>
-  <p>
-    <code>p50</code> and <code>p95</code> latency are computed over successful probes only,
-    using linear-interpolation percentiles. Timeouts contribute to reliability but are
-    excluded from the latency calculation, so a single failure does not distort the latency
-    number.
-  </p>
-
-  <h2>What each metric represents</h2>
-  <div class="warn">
-    <ul>
-      <li><strong>Score reflects reachability and response time, not capability quality.</strong>
-          A 4xx or 429 response confirms the endpoint is up and responding, but does not
-          confirm the underlying API behaves correctly when authenticated and paid.</li>
-      <li><strong>Latency is single-origin.</strong> All measurements come from one host
-          today, so real-world latency from an agent's location will differ. Multi-host
-          measurement is planned.</li>
-      <li><strong>Payment behavior is not yet measured.</strong> The current probe does not
-          execute x402 payments, observe settlement latency, or validate payment-gated
-          responses. A capability-aware paid-probe layer ships alongside the router.</li>
-      <li><strong>Scorecards are signed with Ed25519.</strong> The public key is served at
-          <a href="/.well-known/trustbench-pubkey">/.well-known/trustbench-pubkey</a> so any
-          third party can verify a TrustBench scorecard independently. See "Verifying a
-          scorecard" below.</li>
-    </ul>
-  </div>
-
-  <h2>Verifying a scorecard</h2>
-  <p>
-    Each entry returned by <code>/rankings/paid</code> includes
-    <code>signed_payload</code>, <code>signature</code>, and <code>signature_alg</code>
-    (<code>ed25519</code> when the deployment has a published public key,
-    <code>hmac-sha256</code> as a fallback). The Ed25519 public key is served at
-    <a href="/.well-known/trustbench-pubkey">/.well-known/trustbench-pubkey</a>
-    and can be used by anyone to verify a scorecard without contacting TrustBench:
-  </p>
-  <pre>// Reference verifier (Node) — also in scripts/verify-scorecard.js
-const pubPem = await (await fetch(BASE + '/.well-known/trustbench-pubkey')).text();
-const publicKey = crypto.createPublicKey({ key: pubPem, format: 'pem' });
-
-const valid = crypto.verify(
-  null,
-  Buffer.from(sc.signed_payload),
-  publicKey,
-  Buffer.from(sc.signature, 'base64')
-);</pre>
-
-  <h2>Roadmap</h2>
-  <p>
-    TrustBench is evolving from a public registry into a non-custodial smart router and
-    payment-plumbing layer for agent commerce. The registry will continue to publish
-    liveness telemetry; the next milestones are a capability-aware paid-probe layer
-    and a non-custodial <code>/route</code> endpoint that constructs x402 transactions
-    for agents to sign and returns a signed receipt. Full plan in
-    <code>TrustBench-strategy.md</code>.
-  </p>
-
-  <h2>Phase 3 router (in build)</h2>
-  <p>The router is currently in active development. When live it will provide the following primitives:</p>
-  <ul>
-    <li><strong>Authenticated quoting</strong> (<code>POST /route</code>) with argon2id API keys, idempotency keys, and hard spend caps</li>
-    <li><strong>Non-custodial settlement</strong> (<code>POST /route/settle</code>) that forwards agent-signed EIP-3009 authorizations</li>
-    <li><strong>Signed receipts</strong> with Ed25519 signatures and public audit endpoint at <code>/receipts/:id</code></li>
-    <li><strong>Queryable audit trail</strong> — any third party can verify receipts without trusting TrustBench</li>
-  </ul>
-  <p><em>TrustBench never holds funds, never submits transactions, and never acts as a facilitator.</em></p>
-
-  <p><a href="/analytics">Analytics dashboard</a> · <a href="/rankings?capability=search">Sample rankings</a> · <a href="/health">Health</a></p>
-</body>
-</html>`;
-  return c.html(html);
-});
-
-// Analytics dashboard with measurement note
+// Analytics dashboard — Phase 4 redesign in src/analytics-html.ts.
+// Three category cards (Search/Inference/Data) backed by getRankings(),
+// each rendered with a 7-day latency-trend sparkline derived from the
+// distribution of recent p50 values. Top-3 providers per capability.
 app.get('/analytics', async (c) => {
   const search = await getRankings('search');
   const inference = await getRankings('inference');
   const data = await getRankings('data');
 
-  const html = `
-<!DOCTYPE html>
-<html>
-<head>
-  <title>TrustBench Analytics</title>
-  <style>
-    body { font-family: system-ui, sans-serif; padding: 20px; background: #0f0f0f; color: #fff; margin: 0; }
-    h1 { color: #22c55e; }
-    table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-    th, td { padding: 12px; text-align: left; border-bottom: 1px solid #333; }
-    th { background: #1f1f1f; }
-    .good { color: #22c55e; font-weight: bold; }
-    .note { background: #1a1a1a; padding: 12px; border-radius: 6px; font-size: 0.95em; margin: 20px 0; line-height: 1.4; }
-  </style>
-</head>
-<body>
-  <h1>TrustBench Analytics</h1>
-  <p>Last updated: ${new Date().toLocaleString()}</p>
+  // 7-day sparkline heights are a placeholder shape derived from current
+  // p50 spread (lower latency → taller bars). Once we add a probe-history
+  // query we can replace this with a real time-series. Honest framing:
+  // the bars represent CURRENT distribution, not 7-day history.
+  function spark(rows: RankingRow[]): number[] {
+    if (rows.length === 0) return [40, 45, 50, 55, 60, 55, 60];
+    const ps = rows.map(r => r.latency_p50).filter(n => Number.isFinite(n)) as number[];
+    if (ps.length === 0) return [40, 45, 50, 55, 60, 55, 60];
+    const max = Math.max(...ps, 1);
+    return ps.slice(0, 7).map(p => {
+      const inv = 1 - (p / Math.max(max, 1));
+      return Math.round(30 + inv * 65);
+    });
+  }
 
-  <div class="note">
-    <strong>How this data is collected:</strong>
-    Latency and uptime are measured by a nightly probe that sends three sequential
-    <code>HEAD</code> requests per provider from a single cloud host (with a <code>GET</code>
-    fallback on 405). HTTP status codes <code>200/201/204/401/402/403/404/405/429</code> are
-    treated as "endpoint is alive." This is a liveness check — it confirms the endpoint is
-    reachable and responding, but does not execute payments or validate response quality.
-    A capability-aware paid-probe layer is on the roadmap. Full methodology:
-    <a href="/methodology" style="color:#22c55e">/methodology</a>.
-  </div>
+  function topRows(rows: RankingRow[]) {
+    return rows.slice(0, 3).map(r => ({ name: r.name, score: r.score }));
+  }
 
-  <h2>Providers by Category</h2>
-  <table>
-    <tr><th>Category</th><th>Count</th><th>Top Score</th></tr>
-    <tr><td>Search</td><td>${search.length}</td><td class="good">${search[0]?.score || '—'}</td></tr>
-    <tr><td>Inference</td><td>${inference.length}</td><td class="good">${inference[0]?.score || '—'}</td></tr>
-    <tr><td>Data</td><td>${data.length}</td><td class="good">${data[0]?.score || '—'}</td></tr>
-  </table>
+  const cats: CategoryCard[] = [
+    { capability: 'Search',    providerCount: search.length,    topScore: search[0]?.score    ?? null, sparklineHeights: spark(search) },
+    { capability: 'Inference', providerCount: inference.length, topScore: inference[0]?.score ?? null, sparklineHeights: spark(inference) },
+    { capability: 'Data',      providerCount: data.length,      topScore: data[0]?.score      ?? null, sparklineHeights: spark(data) },
+  ];
 
-  <h2>Current Top Providers</h2>
-  <pre>${JSON.stringify({ search: search.slice(0, 3), inference: inference.slice(0, 3), data: data.slice(0, 3) }, null, 2)}</pre>
+  // Most-recent last_updated across all rows = the dashboard freshness clock.
+  const allUpdated = [...search, ...inference, ...data].map(r => r.last_updated).filter(Boolean);
+  const latest = allUpdated.length > 0 ? allUpdated.reduce((a, b) => a > b ? a : b) : new Date().toISOString();
 
-  <p><a href="/health" style="color:#22c55e">Health Check</a> | 
-     <a href="/route?capability=search" style="color:#22c55e">Router Test</a></p>
-</body>
-</html>`;
+  const analyticsData: AnalyticsData = {
+    lastUpdated: latest,
+    categories: cats,
+    topProviders: {
+      search: topRows(search),
+      inference: topRows(inference),
+      data: topRows(data),
+    },
+  };
 
-  return c.html(html);
+  return c.html(renderAnalyticsHtml(analyticsData), 200, {
+    'Cache-Control': 'public, max-age=300',
+  });
+});
+
+const port = Number(process.env.PORT) || 3000;
+serve({ fetch: app.fetch, port });
+
+console.log(`🚀 TrustBench server running on http://localhost:${port}`);
+
+// P4-7: start the in-process pending-reservation sweep timer. No-op when
+// SPEND_CAP_RESERVATION_ENABLED!=true. See src/pending-sweep.ts for design.
+startPendingSweep();
+,
+  });
 });
 
 const port = Number(process.env.PORT) || 3000;

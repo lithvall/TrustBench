@@ -72,17 +72,18 @@ function loadKeys(): SigningMethod {
 // ---------------------------------------------------------------------------
 // Public API
 export async function getRankings(capability: string) {
-  // Cache key bumped to v4 (2026-05-06) to bust cached results that may have
-  // contained Solana-mistagged-as-Base rows from Agentic Market (the Heurist
-  // mesh.heurist.xyz/x402/solana/* URLs). v3 keys age out within 5 minutes;
-  // harmless orphan data. Bumping the version on filter changes ensures
-  // immediate effect rather than waiting on TTL expiry.
+  // Cache key bumped to v5 (2026-05-08) for the Solana visibility unblock.
+  // v4 (2026-05-06) busted Solana-mistagged-as-Base rows from Agentic Market.
+  // v5 changes the projection shape: rows now carry an explicit `network`
+  // field ('base' | 'solana') and Solana entries are NO LONGER filtered out
+  // of /rankings (they're filtered out of /route via selectProvider instead).
+  // Bumping the version on schema or filter changes avoids stale-shape rows
+  // leaking into clients before the 5-min TTL expires.
   //
   // Earlier history: v3 (2026-05-05) added `integration_type` per row
   // (Coinbase Agentic Market 1P/3P signal, alongside x402_verified). v2
-  // was the original Phase 4 shape. Bumping the version on schema or
-  // filter changes avoids stale-shape rows leaking into clients.
-  const cacheKey = `rankings:v4:${capability}`;
+  // was the original Phase 4 shape.
+  const cacheKey = `rankings:v5:${capability}`;
   const cached = await redis.get(cacheKey);
   if (cached) return JSON.parse(cached);
 
@@ -102,38 +103,44 @@ export async function getRankings(capability: string) {
 
   const scorecardMap = new Map(scorecards?.map(s => [s.provider_id, s]) || []);
 
-  // Phase 4 P4-1d-heurist (2026-05-06): Solana-network rows are stored in
-  // providers (Heurist Mesh crawler) but filtered out of /rankings and
-  // /route until P4-3 (Solana settlement) ships. Filtering at projection
-  // time means rows live in the DB ready for P4-3 — removing this filter
-  // is the only step needed to expose them all at that point. No
-  // re-crawl, no data migration. Legacy rows without an explicit network
-  // metadata key are treated as Base (the default before this filter
-  // existed), preserving backward compat with everything Agentic Market
-  // and the verified seed have inserted to date.
+  // Phase 4b (2026-05-08): Solana visibility unblock.
   //
-  // Defensive secondary check (added 2026-05-06 after diagnostic surfaced
-  // 92 mistagged rows): Agentic Market lists some Heurist Mesh endpoints
-  // (URL: mesh.heurist.xyz/x402/solana/agents/...) tagged as Base instead
-  // of Solana. Trusting the URL path over upstream metadata catches those.
-  // The /x402/solana/ segment is unambiguous — it's part of Heurist's URL
-  // design and only appears on actually-Solana endpoints. Routing to one
-  // would 502 at quote time anyway (validateChallenge in route-handlers.ts
-  // rejects non-Base challenges), but filtering them here is honest UX —
-  // they shouldn't appear in the public rankings as Base.
-  const filteredProviders = (providers || []).filter(p => {
+  // Pre-2026-05-08 behavior: Solana-network rows were filtered out of
+  // /rankings AND /route at this projection point. That kept the public
+  // rankings honest (we couldn't route to them) but also kept ~150 indexed
+  // Solana endpoints invisible to anyone reading our public surface.
+  //
+  // Post-2026-05-08 behavior: filter REMOVED from /rankings; moved to
+  // selectProvider() in provider-selection.ts so /route stays Base-only.
+  // Each row now carries an explicit `network` field ('base' | 'solana')
+  // derived from metadata.network with URL-path fallback for Heurist Mesh
+  // endpoints (mesh.heurist.xyz/x402/solana/agents/...) that Agentic Market
+  // sometimes tags as Base. Consumers see all networks; only Base is
+  // routable until P4-3 (Solana settlement) ships.
+  //
+  // Defense in depth: even if a Solana provider somehow reaches /route via
+  // selectProvider (it shouldn't with the new filter there), the existing
+  // validateChallenge() in route-handlers.ts rejects non-Base challenges
+  // with 502 at quote time. Three layers between Solana inventory and a
+  // bad payment construction (this projection's network field, the filter
+  // in selectProvider, validateChallenge).
+  //
+  // Legacy rows without an explicit network metadata key are still treated
+  // as Base — preserving backward compat with everything Agentic Market and
+  // the verified seed have inserted to date.
+  const inferNetwork = (p: { url?: string | null; metadata?: unknown }): 'base' | 'solana' => {
     const meta = (p.metadata && typeof p.metadata === 'object' && !Array.isArray(p.metadata))
       ? (p.metadata as Record<string, unknown>)
       : {};
-    const network = typeof meta.network === 'string' ? meta.network : null;
-    if (network === 'solana') return false;
-    if (typeof p.url === 'string' && p.url.includes('/x402/solana/')) return false;
-    // network is null OR === 'base' OR any other value (defensive — only
-    // explicit 'solana' or known-Solana URL paths get dropped today).
-    return !network || network === 'base';
-  });
+    const explicit = typeof meta.network === 'string' ? meta.network.toLowerCase() : null;
+    if (explicit === 'solana') return 'solana';
+    if (typeof p.url === 'string' && p.url.includes('/x402/solana/')) return 'solana';
+    // Default: explicit 'base', or any other value, or no network metadata,
+    // all map to 'base'. Conservative — only known-Solana signal flips it.
+    return 'base';
+  };
 
-  const processed = filteredProviders.map(p => {
+  const processed = (providers || []).map(p => {
     const s = scorecardMap.get(p.url) || {};
     // Defensive coercion — metadata might be null, an array, or have a
     // non-boolean x402_verified. Only `=== true` qualifies as verified.
@@ -155,11 +162,20 @@ export async function getRankings(capability: string) {
       rawIntegrationType === '1P' || rawIntegrationType === '3P'
         ? (rawIntegrationType as '1P' | '3P')
         : null;
+    // Phase 4b (2026-05-08): network field exposed per row.
+    //   'base'   — routable today; settles in USDC via Coinbase CDP facilitator.
+    //   'solana' — registered (Heurist Mesh inventory, ~150 endpoints) but
+    //              NOT routable today. Surfaced for transparency; consumers
+    //              should treat as preview-only until P4-3 ships Solana
+    //              settlement. /route + selectProvider continues to filter
+    //              non-Base networks defensively.
+    const network = inferNetwork(p);
     return {
       id: s.id || null,
       provider_id: p.url,
       capability: p.capability,
       name: p.name || 'Unknown',
+      network,
       score: s.score ?? 40,
       latency_p50: s.latency_p50 ?? 9999,
       latency_p95: s.latency_p95 ?? 9999,

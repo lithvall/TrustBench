@@ -54,6 +54,11 @@ type RankingRow = {
   latency_p50: number | null;
   last_updated: string;
   x402_verified?: boolean;
+  // Phase 4b (2026-05-08): network field added by scorer.ts. Used to
+  // exclude non-Base providers from routing until P4-3 (Solana settlement)
+  // ships. Optional in the type because legacy cached entries (v4 cache
+  // keys) may not have it; defensive default in the filter handles that.
+  network?: 'base' | 'solana';
 };
 
 /**
@@ -76,6 +81,15 @@ export async function selectProvider(
   const now = Date.now();
   const candidates = rankings
     .filter((r) => {
+      // Phase 4b (2026-05-08): Solana visibility unblock moved this filter
+      // here from scorer.ts. /rankings now shows all networks for public
+      // transparency; /route stays Base-only until P4-3 (Solana settlement)
+      // ships. Defense in depth: route-handlers.ts validateChallenge will
+      // also reject non-Base challenges with 502 if anything sneaks through.
+      // Default to Base when the network field is missing (legacy cached
+      // entries from v4 cache keys, before this field existed). Bumping
+      // the cache key to v5 in scorer.ts forces refresh on first call.
+      if (r.network && r.network !== 'base') return false;
       if (r.score < SCORE_FLOOR) return false;
       const updatedMs = new Date(r.last_updated).getTime();
       if (Number.isNaN(updatedMs)) return false;

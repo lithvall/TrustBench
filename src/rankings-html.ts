@@ -22,6 +22,7 @@ export type RankingRow = {
   provider_id: string;          // URL — used as both key and display
   capability: string;
   name: string;
+  network?: 'base' | 'solana'; // Phase 4b (2026-05-08): added to surface non-Base inventory
   score: number;
   latency_p50: number;
   latency_p95: number;
@@ -259,13 +260,22 @@ function renderRow(r: RankingRow, rank: number): string {
         ? `<span class="text-sm ml-1" title="Coinbase Agentic Market: proxied (3rd-party)">🔗 3P</span>`
         : '';
 
+  // Phase 4b (2026-05-08): Solana visibility unblock. Solana inventory is
+  // surfaced in /rankings but not routable until P4-3 ships settlement.
+  // The badge tells consumers explicitly so they don't try to /route to it.
+  const networkBadge =
+    r.network === 'solana'
+      ? `<span class="ml-2 inline-block px-1.5 py-0.5 rounded bg-amber-soft text-amber-ink text-[10px] font-semibold uppercase tracking-wide" title="Solana inventory — registered but not routable until P4-3 (Solana settlement) ships. Routing today is Base only.">Solana · registry only</span>`
+      : '';
+
   return `<tr class="row border-b border-border last:border-0 hover:bg-mono/40 transition-colors"
     data-search="${escapeHtml(search)}"
     data-x402-verified="${r.x402_verified ? 'true' : 'false'}"
-    data-integration-type="${escapeHtml(itype)}">
+    data-integration-type="${escapeHtml(itype)}"
+    data-network="${escapeHtml(r.network || 'base')}">
     <td class="py-4 px-4 mono text-sm font-semibold text-ink">${String(rank).padStart(2, '0')}</td>
     <td class="py-4 px-4">
-      <div class="font-medium text-ink">${escapeHtml(r.name)}</div>
+      <div class="font-medium text-ink">${escapeHtml(r.name)}${networkBadge}</div>
       <div class="mono text-xs text-faint break-all">${escapeHtml(r.provider_id)}</div>
     </td>
     <td class="py-4 px-4">

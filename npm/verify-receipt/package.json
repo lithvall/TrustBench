@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "@trustbench/verify-receipt",
   "version": "0.1.0",
   "description": "Standalone third-party verifier for TrustBench Ed25519-signed receipts. No TrustBench API calls in the verify path beyond fetching the published public key.",
@@ -31,7 +31,7 @@
     }
   },
   "bin": {
-    "trustbench-verify-receipt": "./cli.js"
+    "trustbench-verify-receipt": "cli.js"
   },
   "files": [
     "index.js",

@@ -1,6 +1,8 @@
 # Competitive landscape — adjacent projects to watch
 
-Last updated: 2026-05-03. Merges the April 2026 review of Infopunks / SpendGate / AgentlyHQ with the prior analysis of AgentProof / ProofRail / ProofRails plus a May 2026 update adding Valeo / Sentinel.
+**Last updated: 2026-05-08.** This document is a living record. Sections are added over time, not deleted. Newer sections supersede older ones. Always check the bottom-most "Update YYYY-MM-DD" section for current strategic posture.
+
+**Reading order:** if you only have 5 minutes, skip to § "Update 2026-05-08 — post partnership-day shift" at the bottom. The earlier sections are historical context (Phase-2-era analyses from 2026-05-03 + earlier).
 
 ## Where TrustBench sits
 
@@ -60,7 +62,7 @@ SpendGate is the project most likely to be confused with — or to displace — 
 
 **Strategic takeaway.** TrustBench's lane is "pick the right provider and prove what happened" — measurement + routing + receipt. SpendGate's lane is "constrain whatever your agent already does." These are genuinely different jobs, but a buyer who only feels the spend-control pain may not realize that and will buy SpendGate first because it is live.
 
-## Implications for TrustBench
+## Implications for TrustBench (2026-05-03 — SUPERSEDED, see § "Update 2026-05-08" below)
 
 1. **The router (with telemetry) is the unique value prop.** No one in this landscape constructs x402 transactions on the agent's behalf based on live measurement. Lead every public framing with that.
 2. **Bundle, don't unbundle.** Idempotency, hard spend caps, signed receipts, queryable audit must be free with `/route` — they are table stakes after Phase 2 validation, and they are SpendGate's whole product. We can't sell separately what they give away.
@@ -84,3 +86,157 @@ SpendGate is the project most likely to be confused with — or to displace — 
 - [Sentinel](https://sentinel.valeocash.com/) — Valeo's compliance layer for x402 agent payments
 - [v402 GitHub](https://github.com/valeo-cash/v402) — "Non-custodial payment protocol for AI agents on Solana"
 - [Stratum](https://stratumx402.com/) — Valeo's clearing layer for AI agent payments
+
+---
+
+# Update 2026-05-08 — post partnership-day shift
+
+This section supersedes the 2026-05-03 *"Implications for TrustBench"* directives above. The strategic frame committed on 2026-05-07 (component-in-stack with x402-paywalled API monetization, partnership-driven) replaces the earlier *"router-with-telemetry-is-the-unique-value-prop"* framing. See `partnership-day-record-2026-05-07.md` for the full record of why.
+
+## Major ecosystem shifts since 2026-05-03
+
+Five concrete things changed in the ecosystem in the 5 days between the previous update and this one. Each one tightens or shifts TrustBench's lane.
+
+**1. x402 Foundation `offer-and-receipt` extension v0.6 shipped (Alfred Tom, Feb 2026, verified 2026-05-07).** Defines signed offers + signed receipts as merchant-side artifacts in the `extensions["offer-receipt"]` namespace, EIP-712 or JWS signatures. The merchant-side signed-receipt slot TrustBench's original receipt-spec was positioned to fill is now occupied by Foundation work. **TrustBench's lane narrows from "the receipt format for agent commerce" to "router-side attestation that composes with offer-and-receipt."** Spec link: `specs/extensions/extension-offer-and-receipt.md` in `coinbase/x402` (now `x402-foundation/x402`).
+
+**2. coinbase/x402 transferred to x402 Foundation (Linux Foundation governance, multi-org).** Foundation members include Coinbase, AWS, Cloudflare, Stripe, plus dozens of others. Coinbase repo is now a development fork; canonical work lands at `github.com/x402-foundation/x402`. Standards-track work moves through Foundation process, not Coinbase unilaterally. *Strategic implication:* better odds for partner-contributed extensions, but Foundation pace is slower than solo-founder execution.
+
+**3. AWS Bedrock AgentCore Payments launched (2026-05-07).** Native integration of x402 + Coinbase wallet infrastructure into AWS Bedrock. Bundles managed wallet auth, time-bound spending limits, CDP-facilitator compliance, audit trails, and Coinbase-MCP-mediated discovery into one offering for AWS-resident enterprise agents. *Strategic implication:* the four Phase-2-validated primitives (idempotency, hard spend caps, signed receipts, queryable audit) are now bundled at the largest enterprise cloud. TrustBench's audience compresses to non-AWS-aligned, multi-cloud, multi-protocol, or non-Coinbase-aligned agents.
+
+**4. AP2 v0.2 spec stable (Google → FIDO Alliance, January–February 2026).** Defines Cart/Checkout Mandates + Payment Mandates + Mandate-bound Receipts as the agent-payment authorization framework. Reference samples at `samples/python/scenarios/a2a/{human-present,human-not-present}/x402/` show explicit AP2 + x402 composition. *Strategic implication:* AP2 covers the user-intent and Cart-binding layer; TrustBench composes with it (AP2 has no Router role). Full assessment in `ap2-compatibility-assessment.md`.
+
+**5. a2a-x402 v0.2 published (parent extension to the AP2 + x402 integration).** Embedded Flow defined: x402 PaymentPayload nested inside AP2 PaymentMandate, x402PaymentRequiredResponse nested inside AP2 CartMandate. Three signing patterns (atomic / delegated / smart-contract escrow). *Strategic implication:* there are now multiple explicit signature standards inside the x402 ecosystem (Ed25519, EIP-712, JWS, SD-JWT). Any TrustBench Foundation-track extension proposal needs to align with the established conventions, not invent new ones.
+
+## Verified competitors in adjacent lanes
+
+Verification sprints on 2026-05-07 (full reports at `agentlog-competitor-verification-2026-05-07.md` and `trustbench-reliability-pivot-verification-2026-05-07.md`) surfaced active competitors across three adjacent lanes. None of these existed in the 2026-05-03 picture.
+
+### Reliability + verification + monitoring + audit (the lane the reliability-pivot doc proposed entering, verified-saturated)
+
+| Competitor | Status | Match | Threat |
+|---|---|---|---|
+| **PaySentry** ([github.com/mkmkkkkk/paysentry](https://github.com/mkmkkkkk/paysentry)) | Open-source, multi-protocol (x402 + ACP + AP2 + Stripe). 79 test cases. Includes circuit breaker, retry classification, settlement recovery, RecoveryEngine for refunds, dispute filing, full audit trail. | Field-for-field equivalent to the proposed reliability pivot's full architecture. | Critical — open source equivalent already shipped. |
+| **PEAC Protocol** ([peacprotocol.org](https://www.peacprotocol.org/)) | Open-source. Ed25519 JWS signed receipts. peac.txt policy file. Express middleware. Same signature scheme as TrustBench receipt-spec-v1. | Open-source version of TrustBench's signed-receipts thesis. | High — closer to TrustBench's original positioning than anything else. |
+| **Probe** ([getprobe.xyz](https://getprobe.xyz/)) | Free, no signup, unlimited audits, 44 compliance checks (x402, ERC-8004, MCP, Voice AI, EU AI Act, security headers, etc.). | Pre-call compliance scanner; covers Strata-shape territory. | High — free tier eats the entry-level audit value prop. |
+| **Sentinel by Valeo** ([sentinel.valeocash.com](https://sentinel.valeocash.com/)) | Already in 2026-05-03 doc above. | Audit + compliance layer for x402, intercepts payments, enforces budgets. | High (already noted). |
+| **xpay.sh** ([xpay.sh](https://www.xpay.sh/)) | Non-custodial x402 infrastructure: Smart Proxy with hard limits / soft alerts / automated shutoffs, paywall-as-a-service, MCP monetization, real-time observability. | TrustBench Phase 4 + Phase 5 merged into one shipping product. | High — closest commercial competitor on the actual TrustBench surface. |
+| **x402station** ([x402station.com](https://x402station.com/)) | Real-time analytics platform. ~35,000 endpoints probed. $1 USDC machine-paid Verified Badge system. ~17% of probed endpoints flagged as landmines / dead. | Industry-scale established analytics; eats "neutral observatory" positioning. | High. |
+| **x402scan** (Merit Systems, open-source). | Open-source ecosystem explorer, Coinbase-Developer-Platform-endorsed. | Adjacent registry-explorer. | Medium. |
+| **OpenZeppelin Defender** with x402 Facilitator ([docs](https://docs.openzeppelin.com/relayer/guides/stellar-x402-facilitator-guide)) | Enterprise-grade. Stellar focus today; could expand to Base. Spending limits, multisig, scoped permissions, monitoring at multiple layers. | Different chain focus (Stellar) but full-stack capable. | Medium — moves up if they expand to Base. |
+| **Tenderly, Forta** | EVM monitoring incumbents. Could ship x402 modules in a quarter if demand materializes. | Generalist; not x402-specific yet. | Low today, medium-term watch. |
+
+### AI spend tracking (the AgentLog wedge — verified-saturated 2026-05-07)
+
+Not a TrustBench-direct lane, but shared the user persona overlap (agent builders / prosumers tracking AI tool costs). Listed for completeness because the verification dynamic was illustrative.
+
+Competitors verified: **Orbit Money, AICosts.ai, CostLayer, CostGoat, Toolspend, AI Spend, Torii, CloudFuze Manage, Ramp AI Token Spend Intelligence.** Toolspend specifically launched on Product Hunt in February 2026 (#2 Product of the Day, 401 upvotes) with Plaid + AI service integration. Ramp shipped enterprise-grade AI token tracking in their existing platform. The AI spend tracking wedge is structurally closed for solo-founder differentiation.
+
+### Discovery / catalog / agent runtime
+
+- **Coinbase Agentic Market + Bazaar** — protocol-level discovery extension, native to AWS Bedrock now. Curated catalog of ~650 services. Owns the discovery slot for Coinbase-aligned agents.
+- **Coinbase Agentic Wallet skills** — auth/fund/send/trade/earn primitives bundled into AWS Bedrock.
+- **Anthropic Managed Agents** — agent runtime + sandboxing + state management. Different layer; could subsume policy primitives over time.
+
+### Identity + attestation
+
+- **ERC-8004 Trustless Agents** — live on Ethereum mainnet, BNB, Base. ~14K–34K agents per chain. Threading reputation through TrustBench's router would require ERC-8004 token integration if/when partner asks.
+- **ENS + ENSIP-25** — verifiable AI agent identity via ENS. agent.arp text record proposal extends.
+- **Phala TEE 5-min agent template** — TEE-attested agents, open-source.
+- **EigenLayer Verifiable Agents + EigenCompute / EigenVerify** — preview, but cementing.
+- **Reclaim Protocol** — `reclaim-8004-validator` for ZK credentials in ERC-8004.
+- **Visa TAP** — RFC 9421 HTTP Message Signatures + Cloudflare Web Bot Auth, in pilot in APAC + Europe.
+
+These are not competitors; they're identity-layer infrastructure that TrustBench receipts could *reference* as an annotation. Same compose pattern as the Strata `runtime_score` integration.
+
+## Partnership-readiness signals (NEW 2026-05-08)
+
+Three independent partnership inbounds in the 48-hour window 2026-05-06 / 2026-05-07. These are not competitors — they're complementary players actively proposing integration. The partnership-readiness pattern is what reframed TrustBench from "standalone product" to "component-in-stack" on 2026-05-07.
+
+### Infopunks (@InfopunksHQ)
+
+- **Status:** existing partner (cognition layer was the merchant in TrustBench's first paid receipt, P4-1b).
+- **Inbound:** DM 2026-05-06 — *"mate just checking trust bench / everything looks awesome / lets collab / keen to get on a call on google meet sometime today."*
+- **Public endorsement:** *"once cognition has receipts agents can start routing by evidence instead of vibes"* (2026-05-04).
+- **Engagement state:** Johan sent initial async reply 2026-05-07. Awaiting response. Pre-drafted follow-up at `infopunks-followup-draft.md`.
+- **Anti-poach rule:** do not reply to Infopunks's tweets via Grok. Read and learn the room only.
+
+### Strata (@stratamcp, usestrata.dev, built by PThrower)
+
+- **Status:** new partnership prospect, very strong signal.
+- **Inbound:** DM 2026-05-06 — *"complementary stacks. Pre-call trust scoring + your signed receipts and liveness telemetry is a stronger stack than either of us ships alone. Open to a quick call before our Show HN Tuesday."*
+- **Their product:** "Trust Layer for AI Agents" — security_score + runtime_score + agent identity + payment-endpoint verify across 22 ecosystems, 2,178 MCP servers indexed, $0 / $29-month / $100-lifetime tiers.
+- **Architecture endorsement (2026-05-08):** *"Carrying it as a trust-signal annotation in the receipt envelope makes sense — verifiers downstream get pre-call posture without a separate Strata lookup."* They explicitly endorsed Direction B from the integration deep-dive.
+- **Active deliverable:** Strata sketch at `strata-integration-sketch-draft.md`, pending Johan's review before send.
+- **Show HN deadline:** Tuesday (2026-05-12 or 2026-05-13 depending on timezone).
+- **Anti-poach rule:** do not reply to Strata's tweets via Grok. Same as Infopunks.
+
+### CLU_AGENT (@CLU_AGENT, automated by @Logik185, project: Grid)
+
+- **Status:** parallel-discovery technical alignment, not a partnership offer per se.
+- **Public engagement:** *"Strict reservation + idempotency keys hit the mark. We're shipping per-call caps with signed receipts on Grid — same three-leg pattern you're describing. Audit trail is non-negotiable."* + technical detail on sidecar quote tables, batch audit writes <2% overhead, error-code standardization across L402/x402 hops.
+- **Engagement state:** open public thread; no DM partnership offer yet, but technical alignment is high-quality and the conversation is welcoming.
+- **Anti-poach rule:** public engagement OK; private partnership pitch not yet warranted.
+
+## Implications for TrustBench (2026-05-08 — current strategic posture)
+
+These supersede the 2026-05-03 implications.
+
+1. **TrustBench is a component, not a standalone product.** The standalone-router-with-telemetry positioning is replaced by *"router-side attestation that composes with x402's offer-and-receipt extension and partner trust signals."* All public copy and outreach should reflect this; subscription / standalone framing is off the table.
+2. **Revenue is x402-native paywalled API.** Per-call pricing in USDC on Base. No subscriptions, no contracts. Specific tiers in active validation with first integration partners (Strata explicitly asked for tiers; sketch includes them, pending Johan's approval).
+3. **Standards-track work stays deferred.** The reasons in `phase6-reassessment-2026-05-07.md` § 4 (solo-founder bandwidth, structural fragility of standards-first plays, lane narrowing) all still hold. Defer Foundation-track Discussion / extension-proposal work until production traction makes it pull-shaped, not push-shaped.
+4. **Non-AWS, non-Coinbase-aligned, multi-cloud, multi-protocol agents are the addressable persona.** AWS Bedrock + Coinbase bundling absorbed the AWS-aligned single-merchant flow audience. The agents that need TrustBench specifically are the ones who *don't* want to be inside Coinbase's curated ecosystem.
+5. **Defending against PaySentry / PEAC / Probe / x402station is structurally hard.** They are open-source, free, or industry-scale. The honest framing: *compose, don't compete.* Surface their existence on the TrustBench landing page rather than pretending the lane is open.
+6. **The four Phase-2-validated primitives (idempotency, spend caps, signed receipts, queryable audit) remain free and bundled.** They are now table stakes across multiple competitors. Charging for them separately is closed off.
+7. **Pay-to-list bond stays unique.** Refundable verification bond + signed registry is structurally something competitors haven't shipped. Defend that.
+8. **The compose framing is the narrative weapon.** *"TrustBench Receipt + Strata score + AP2 Mandate + offer-and-receipt + x402 settlement = the full proof chain."* This is the only framing that survives skeptical reading after the Foundation absorbed merchant-side receipts.
+
+## Weekly monitoring queue
+
+Per `grok-x-research-briefing.md` § 3 + § 5.1 / 5.2, set a 30-minute Monday recurring review checking each of these for material changes:
+
+**Tier 1 (must scan weekly):**
+- PaySentry (`github.com/mkmkkkkk/paysentry`) — releases, multi-protocol expansion
+- x402station — new badge tiers, dashboard expansion
+- xpay.sh — feature additions especially MCP / receipt support
+- AWS Bedrock AgentCore Payments — feature ships, new partners
+- coinbase/x402 → x402-foundation/x402 — extension proposals, releases
+- Anthropic Managed Agents — pricing, primitive expansion
+
+**Tier 2 (scan biweekly):**
+- PEAC Protocol — adopters, version updates
+- Probe — pricing changes (the free tier is the threat)
+- Sentinel / Valeo — Sentinel Explorer growth, $VALEO-funded marketing pushes
+- Torii / CloudFuze — AI-specific features, MCP integrations
+- Tenderly / Forta — x402 modules announced
+
+**Tier 3 (scan monthly or on signal):**
+- AICosts.ai, CostLayer, CostGoat, Toolspend, Orbit Money, Ramp AI Token Spend Intelligence (AgentLog wedge — only relevant if AgentLog reincarnates)
+- AgentProof, ProofRail, ProofRails, AgentlyHQ (Phase-2-era competitors — track but lower urgency)
+
+**Watch-for canaries (drop-everything-and-reassess-strategy if any of these fire):**
+- A behemoth (Anthropic / Google / Stripe) ships cross-platform aggregation across competitors. Probability: low. Impact: would invalidate the structural-conflict moat the AgentLog concept relied on.
+- Coinbase ships routing-attestation as a Bazaar extension. Probability: low (structural conflict — would standardize "the agent picked between Coinbase and someone else"). Impact: would close TrustBench's core remaining lane.
+- A well-funded startup (Series A+) launches a TrustBench-shaped router with managed hosting + SLAs. Probability: medium. Impact: requires component-in-stack posture to be defensible against scale, not just against open-source.
+
+## Sources (added 2026-05-08)
+
+Verification sprint sources from 2026-05-07 (full lists in the verification reports themselves):
+
+- [PaySentry](https://github.com/mkmkkkkk/paysentry)
+- [PEAC Protocol](https://www.peacprotocol.org/) and [PEAC GitHub](https://github.com/peacprotocol/peac)
+- [Probe](https://getprobe.xyz/)
+- [xpay.sh](https://www.xpay.sh/)
+- [x402station](https://x402station.com/) and [Verified Badge announcement](https://earezki.com/ai-news/2026-05-02-a-1-verified-badge-for-x402-services-fully-autonomous-machine-paid/)
+- [x402scan via awesome-x402](https://github.com/Merit-Systems/awesome-x402)
+- [Tenderly](https://tenderly.co/), [Forta](https://www.forta.org/)
+- [x402 Payment Timeouts (mkmkkkkk on dev.to)](https://dev.to/mkmkkkkk/x402-payment-timeouts-why-your-agent-loses-money-and-how-to-fix-it-fgk)
+- [coinbase/x402 issue #1062 — timeout race condition](https://github.com/coinbase/x402/issues/1062)
+- [a2a-x402 spec v0.1 + v0.2](https://github.com/google-agentic-commerce/a2a-x402)
+- [AP2 v0.2 specification](https://ap2-protocol.org/ap2/specification/)
+- [offer-and-receipt extension v0.6](https://github.com/coinbase/x402/blob/main/specs/extensions/extension-offer-and-receipt.md)
+- [AWS Bedrock AgentCore Payments announcement](https://aws.amazon.com/blogs/machine-learning/agents-that-transact-introducing-amazon-bedrock-agentcore-payments-built-with-coinbase-and-stripe/)
+- [Strata (usestrata.dev)](https://usestrata.dev/)
+- [Toolspend on Product Hunt](https://www.producthunt.com/products/toolspend)
+- [Ramp AI Token Spend Intelligence](https://ramp.com/ai-cost-monitoring)
+
+Internal cross-references: `partnership-day-record-2026-05-07.md`, `phase6-reassessment-2026-05-07.md`, `trustbench-reliability-pivot-verification-2026-05-07.md`, `agentlog-competitor-verification-2026-05-07.md`, `ap2-compatibility-assessment.md`, `strata-deep-dive-2026-05-07.md`, `strata-integration-sketch-draft.md`, `infopunks-followup-draft.md`.

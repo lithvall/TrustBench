@@ -4,6 +4,25 @@ A living log of patterns, surprises, and corrections worth remembering across se
 
 ---
 
+## 2026-05-06 — Defensive URL-path filter for Solana (P4-1d-heurist follow-up)
+
+Smoke against the Heurist crawler surfaced 92 mistagged rows: Agentic Market lists some `mesh.heurist.xyz/x402/solana/agents/*` URLs as Base (`metadata.networks=['base']`), but they're actually Solana endpoints. Trusting upstream metadata alone left them in /rankings as Base, where routing to them would 502 at quote time.
+
+**Fix:** `scorer.ts` filter now also drops rows whose URL contains `/x402/solana/`. The path segment is unambiguous (it's part of Heurist's URL design, only appears on actually-Solana endpoints) and overrides any upstream metadata. Cache key bumped v3 → v4 so the filter takes effect immediately rather than waiting on Redis TTL expiry.
+
+**Lesson learned:** when a registry source delivers metadata that contradicts the URL itself, **trust the URL when it carries unambiguous evidence**. The `/x402/solana/` path is structurally guaranteed by Heurist; the `networks` array is just a label that can drift. This is the same pattern as "trust the chain, not the merchant" from P4-1b — multiple signals in agreement is stronger than any single signal alone.
+
+**Carry-forward:** if a future crawler source delivers Heurist or any Solana-only catalog with mistagged metadata, the URL-path check catches it. If a non-Heurist provider somehow uses `/x402/solana/` in a Base-network URL, the filter would over-block — accepted trade-off (no such case observed; defensive narrow check).
+
+**Smoke after fix (post-cache-bump):**
+- search: 11, inference: 140, data: 532, media: 266, infra: 46 routable Base endpoints (~995 total)
+- Plus 52 Solana endpoints stored but filtered until P4-3
+- 0 Solana leaks on every capability via the precise `/x402/solana/agents` URL check
+
+`src/server.ts` got deleted in the same commit (it was a stale carry-forward stub causing one of the four pre-existing tsc errors). Now down to 3 carry-forward errors.
+
+---
+
 ## 2026-05-06 — Heurist Solana mesh crawler implemented (registry coverage, P4-3 prep)
 
 Same-day pickup. Per re-ranked agenda (`project_zauth_and_post_p4_7_agenda.md`), Heurist Mesh as 4th crawler source after Agentic Market + verified seed (Paddock import is still pending). Adds ~150 Solana x402 endpoints to the registry as pre-work for P4-3 (Solana settlement) — store now, expose when settlement ships.
@@ -849,3 +868,191 @@ Unsent at session close. Send if it feels right; the prioritization implication 
 - After P4-1b ships (live receipt), P4-7 is the next sprint piece. Read `src/spend-caps.ts` first; the change is small but the failure mode (over-reservation, deadlock, or under-release on partial settle) needs careful handling.
 - Update receipt schema / `receipt-spec-v1.md` is NOT required for P4-7 — reservation state is an internal `agents.pending_spend_atomic` counter, not a receipt field. No external compatibility break.
 - The handoff doc `phase4-clu-agent-handoff.md` can stay at root as a historical anchor; the actionable bits are now in this lessons entry + the kickoff sprint table + the new memory entry.
+
+---
+
+## 2026-05-06 (afternoon) — Pay.sh response sprint + Edit-tool truncation re-bit
+
+**What shipped (4 moves in one batch, Pay.sh response):**
+1. `pay-sh-provider-triage.md` — categorization of all article-named providers vs Agentic Market vs pay-skills GitHub (9 committed providers vs the article's "50+" headline).
+2. `phase4-p4-3-timing.md` — three-option decision doc (display-only vs display+route-flag vs full Solana settlement); recommendation is Option A within 48h, Option C deferred until 3rd paid partner.
+3. Public copy reframe: `src/landing-html.ts` (hero h1 + description + Registry card), `README.md`, `llms.txt`, `skill.md`. Single theme: "cross-network registry, Base routing today, Solana next, protocol-agnostic over time across x402, p402, MPP."
+4. `pay-sh-amplification-draft.md` — three X-post drafts for Grok hand-off (drafts 1-2 safe today, draft 3 holds until Option A ships).
+
+`tsc --noEmit` clean after the run. `MEMORY.md` updated with `project_pay_sh_launch_2026_05_06.md`.
+
+**Edit-tool truncation re-bit me on three files in a row.**
+
+The Edit tool's success message is *not* a guarantee that the on-disk file reflects the cached view. After editing `src/landing-html.ts`, `skill.md`, `README.md`, and `llms.txt` via Edit, all four were silently truncated on disk (mid-line, no newline). The harness Read tool happily showed the "expected" content for each, but bash via `wc -l` and `tail -c` revealed the actual on-disk byte count was much shorter. `tsc --noEmit` caught `landing-html.ts` (broke a template literal). The other three were content-only files so tsc didn't catch them — only `tail` did.
+
+**Symptom signature:**
+- File ends mid-line with no trailing newline.
+- `tail -c 1 file | xxd -p` is the cheapest detector — final byte should be `0a` for files we wrote with proper line endings, anything else is suspicious.
+- `wc -l` returns fewer lines than `Read` shows.
+- The Read tool returns the harness's cached view, NOT the actual file. Editing then re-Reading proves nothing.
+
+**Mandatory new step after any Edit + before declaring "done":**
+
+```sh
+# Cheap on-disk integrity check — run after any Edit-tool batch
+for f in <list of files just edited>; do
+  LASTBYTE=$(tail -c 1 "$f" | xxd -p)
+  LINES=$(wc -l < "$f")
+  echo "$f: $LINES lines, last byte hex=$LASTBYTE"
+done
+```
+
+If `LASTBYTE != 0a` for a markdown / TS / config file, the file is truncated. Fix with either `cat >> file << 'EOF' ... EOF` (append the missing tail using the Read-cached canonical content) or re-Write the full file via the Write tool.
+
+**The deeper rule (now repeated several times in this lessons file):** the harness Read tool and bash see different states. **Bash is the source of truth for what is actually on disk.** Never declare a file "saved" without a bash-side verification.
+
+This is at least the third occurrence of this pattern (chat-markdown linkifies, Read-vs-bash truncation, now Edit-vs-bash truncation). Build the verification into the workflow next time:
+
+> After any non-trivial Edit batch, run a one-liner that prints `wc -l` + `tail -c 1 | xxd -p` for every edited file, and only then call `tsc --noEmit` and declare done.
+existing `requireWithinSpendCap` middleware in `src/spend-caps.ts` reads the rolling-window total at quote time and rejects if `total + max_price > cap`. The reservation pattern adds two changes: (a) at quote issuance, atomically debit a `pending_spend_atomic` counter on the agent row; (b) at settle (or quote expiry), credit it back. The hard cap then becomes `total_spent + total_pending + max_price > cap`. ~1 day of focused work, server-side only, smoke-testable with a quick concurrency harness. The two external signals just confirm the priority; they aren't load-bearing for the implementation.
+
+**Optional X reply (em-dash-free per outreach memory, draft):**
+
+> You're naming the reservation/release gap on the quote→settle window. Today's caps are server-side hard caps per-agent + per-call, approximate under concurrency. Strict reservation lands as P4-7. Idempotency for replay, receipts for audit, reservation as the third leg.
+
+Unsent at session close. Send if it feels right; the prioritization implication stands either way.
+
+**@Logik185 (the human operator):** worth adding to Grok-side X research for partnership/reach context. The automated reply is technically substantive, suggests the operator has thought about agent-payment infra seriously. Not on the urgent path.
+
+**Carry-forward to next session:**
+- After P4-1b ships (live receipt), P4-7 is the next sprint piece. Read `src/spend-caps.ts` first; the change is small but the failure mode (over-reservation, deadlock, or under-release on partial settle) needs careful handling.
+- Update receipt schema / `receipt-spec-v1.md` is NOT required for P4-7 — reservation state is an internal `agents.pending_spend_atomic` counter, not a receipt field. No external compatibility break.
+- The handoff doc `phase4-clu-agent-handoff.md` can stay at root as a historical anchor; the actionable bits are now in this lessons entry + the kickoff sprint table + the new memory entry.
+
+---
+
+## 2026-05-06 (afternoon) — Pay.sh response sprint + Edit-tool truncation re-bit
+
+**What shipped (4 moves in one batch, Pay.sh response):**
+1. `pay-sh-provider-triage.md` — categorization of all article-named providers vs Agentic Market vs pay-skills GitHub (9 committed providers vs the article's "50+" headline).
+2. `phase4-p4-3-timing.md` — three-option decision doc (display-only vs display+route-flag vs full Solana settlement); recommendation is Option A within 48h, Option C deferred until 3rd paid partner.
+3. Public copy reframe: `src/landing-html.ts` (hero h1 + description + Registry card), `README.md`, `llms.txt`, `skill.md`. Single theme: "cross-network registry, Base routing today, Solana next, protocol-agnostic over time across x402, p402, MPP."
+4. `pay-sh-amplification-draft.md` — three X-post drafts for Grok hand-off (drafts 1-2 safe today, draft 3 holds until Option A ships).
+
+`tsc --noEmit` clean after the run. `MEMORY.md` updated with `project_pay_sh_launch_2026_05_06.md`.
+
+**Edit-tool truncation re-bit me on FOUR files in this session.**
+
+The Edit tool's success message is *not* a guarantee that the on-disk file reflects the cached view. After editing `src/landing-html.ts`, `skill.md`, `README.md`, `llms.txt`, AND `lessons.md` via Edit, all five were silently truncated on disk (mid-line, no newline) while the harness Read tool happily showed the "expected" content. `tsc --noEmit` caught `landing-html.ts` (broke a template literal). The other four were content-only files so tsc didn't catch them — only `wc -l` + `tail -c 1 | xxd -p` did.
+
+**Symptom signature:**
+- File ends mid-line with no trailing newline.
+- `tail -c 1 file | xxd -p` is the cheapest detector — final byte should be `0a` for files we wrote with proper line endings, anything else is suspicious.
+- `wc -l` returns fewer lines than `Read` shows.
+- The Read tool returns the harness's cached view, NOT the actual file. Editing then re-Reading proves nothing.
+
+**For lessons.md specifically (extra-painful failure mode):**
+The harness reported the Edit succeeded, but on-disk inspection showed the file was already truncated AND the new content never reached disk. The Edit tool wrote into the cache layer but the cache→disk flush is unreliable for files that were already in a corrupt state. Recovery: bash `cat >> file << EOF` is durable; the harness Edit on a pre-truncated file is not.
+
+**Mandatory new step after any Edit + before declaring "done":**
+
+```sh
+# Cheap on-disk integrity check — run after any Edit-tool batch
+for f in <list of files just edited>; do
+  LASTBYTE=$(tail -c 1 "$f" | xxd -p)
+  LINES=$(wc -l < "$f")
+  echo "$f: $LINES lines, last byte hex=$LASTBYTE"
+done
+```
+
+If `LASTBYTE != 0a` for a markdown / TS / config file, the file is truncated. Recovery options, in order of reliability:
+1. `cat >> file << 'EOF' <missing-tail-from-Read-cached-view> EOF` — bash append, durable.
+2. `Write` the entire file fresh from cached content — works if you have the full content.
+3. Re-Edit — DOES NOT WORK if the file is already truncated. Don't try.
+
+**The deeper rule (now repeated multiple times in this lessons file):** the harness Read tool and bash see different states. **Bash is the source of truth for what is actually on disk.** Never declare a file "saved" without a bash-side verification.
+
+This is now at least the third major occurrence of this pattern (chat-markdown linkifies, Read-vs-bash truncation, Edit-vs-bash truncation with the additional Edit-doesn't-flush-to-corrupt-files variant). Build the verification into the workflow next time:
+
+> After any non-trivial Edit batch, run a one-liner that prints `wc -l` + `tail -c 1 | xxd -p` for every edited file. If anything is truncated, fix with bash `cat >>` (NOT another Edit). Only then call `tsc --noEmit` and declare done.
+
+
+
+---
+
+## 2026-05-08 — Windows mount drift on Linux-side `tsc` (false-positive verification failures)
+
+After editing `src/methodology-html.ts` to update the Phase 4 roadmap rows, Linux-side `npx tsc --noEmit` reported `error TS1002: Unterminated string literal` at line 159 col 69. The Read-tool view of line 159 showed the line intact: `const statusLabel = status === 'done' ? 'DONE' : status === 'current' ? 'CURRENT' : 'FUTURE';` — perfectly valid TypeScript.
+
+`sed -n '155,165p' | cat -A` from bash confirmed the issue: line 159 truncated mid-string at column ~69 (`'curre` cut off). The actual file on the Windows side was fine; the Linux mount view was stale / partially-flushed. PowerShell-side `npx tsc --noEmit` ran clean with no errors and PowerShell `git diff HEAD` showed the expected three-file changeset with no string-literal corruption.
+
+**Lesson learned:** When `tsc` from the Linux mount fails with errors that don't match the Read-tool view of the file, and the syntax error is at a column that's "almost-but-not-quite end-of-line," it's almost certainly a mount drift artifact, not a real bug. Verify from PowerShell before treating as a real failure.
+
+This is consistent with the pattern recorded in `feedback_windows_mount_truncation` memory and the multiple prior occurrences in this lessons file. The cross-platform write semantics under the Cowork mount setup don't always propagate atomically — bash sees a transitional state.
+
+**Carry-forward verification protocol (when an edit batch finishes and Linux-side `tsc` fails):**
+
+1. Read the failing line via the Read tool — does the visible content match the error?
+2. If the Read view is correct, run PowerShell-side: `cd <repo>; npx tsc --noEmit; git diff HEAD -- <files>`
+3. If PowerShell agrees the file is correct, commit and push. The Linux mount will catch up.
+4. Only treat the Linux error as real if PowerShell-side reproduces it.
+
+The previous lessons-file entries about this pattern recommended `cat >> file << 'EOF'` as the recovery for actual truncation. That recovery is still valid for the truncation case. The new finding here is specifically about *false-positive `tsc` errors* — when no content is actually missing, just transitional. Skip the cat-recovery for this case; just verify on Windows and proceed.
+
+---
+
+## 2026-05-08 — Stale `.git/index.lock` after interrupted Linux-side git operation
+
+When verifying methodology-html.ts edits on the Linux side (during the PowerShell-vs-Linux mount-drift investigation), I attempted `cd <repo> && git stash; npx tsc --noEmit; git stash pop` to test the file against HEAD without my edits. The `git stash` failed with `unable to unlink '...index.lock': Operation not permitted`. The error was the Cowork sandbox's lack of unlink permission on the mounted `.git/` directory.
+
+The lock file remained after this failure. PowerShell-side `git add` and `git commit` then both failed with `fatal: Unable to create '...git/index.lock': File exists.` — the lock was stuck.
+
+Fix from PowerShell: `Remove-Item .git\index.lock` (works because PowerShell has unlink permission Windows-side; the Linux sandbox didn't). After deletion, `git add → git commit → git push` succeeded normally.
+
+**Lesson learned:** The Cowork Linux sandbox lacks unlink permission on certain `.git/` directory entries that Windows owns. Any git command that needs to create/remove a lock (stash, commit, rebase mid-flight, etc.) can fail mid-operation and strand state.
+
+**Carry-forward — operational rules:**
+
+1. **Never run `git stash`, `git rebase`, or `git commit --amend` from the Linux sandbox.** Use the Bash tool for read-only git operations (status, diff, log, show) but not for any operation that takes the index lock. Run write-path git commands from PowerShell.
+2. **Read-only git is fine on the Linux side:** `git diff HEAD`, `git status`, `git log`, `git show`. These don't take the index lock.
+3. **If a stale lock is suspected** (operations failing with `index.lock: File exists`), run `Remove-Item .git\index.lock` from PowerShell. It's a one-line fix.
+4. **Recovery is robust:** the lock file isn't holding any data, just a flag. Deleting it doesn't lose work.
+
+---
+
+## 2026-05-08 — Grok anchor-rule slippage on partnership-shaped X drafts
+
+Grok's daily X scan returned 5 A-tier reply drafts. Three of the five (drafts 2, 3, 5) opened with phrases that quoted 5+ words verbatim from the source tweet:
+
+- Draft 2 (@0xAggelos): *"audit trail is one of the parts people underestimate"* — 9 words, near-verbatim from his post (*"audit trail is one of the parts I think people underestimate"*).
+- Draft 3 (@Kaelai_): *"sending side with budget controls, compliance, audit trails is enterprise grade"* — 11 words, near-verbatim.
+- Draft 5 (@PharosInsights): *"can this agent prove it was allowed to act"* — 9 words, exactly verbatim from his post.
+
+The briefing rule is unambiguous (`grok-x-research-briefing.md` § 6 rule 1 + § 7 antipattern): anchor on a 2–4 word phrase, write your own sentence around it. Verbatim openers read as paste-jobs and burn characters. The rule was correctly stated; Grok's drafting discipline slipped.
+
+**Compounding issue in draft 3:** the same draft also said *"endpoints are x402-paywalled, small per-call fees, no subs"* — present tense overclaim, since the x402-paywalled API isn't live yet (it's the Phase 4b in-flight item). Briefing § 6 rule 10 requires re-checking the live-vs-soon split before drafting tense-honest claims.
+
+**Lesson learned:** A workflow rule named in the spec doesn't enforce itself. Grok needs an explicit pre-draft check step:
+
+1. Identify the 2–4 word anchor phrase from the source tweet.
+2. Count words. If anchor > 4 words, rewrite shorter.
+3. Write the reply with the anchor *embedded*, not as opening clause.
+4. Re-check § 1 of briefing for live-vs-soon. Anything claimed as live must actually be live.
+
+**Carry-forward:** when reviewing Grok's daily output, count words in the anchor phrase before approving. If 5+ words from the source post appear contiguously in the draft, send it back for rewrite. This was already in the briefing as anti-pattern but wasn't being enforced at review time. Enforce it now.
+
+---
+
+## 2026-05-08 — Verify-before-positioning (the AgentLog → reliability pivot pattern, generalized)
+
+Three verification sprints in the 72-hour window (AgentLog wedge, reliability pivot, Strata) followed the same pattern: a strategy concept doc was drafted with a confident claim about lane availability (*"There are no direct competitors currently"* / *"No dominant independent reliability layer exists"*), then a 60–90-minute verification sprint disproved the claim each time. AgentLog had 9 verified competitors. Reliability pivot had 9. Strata research surfaced 3 different "Strata"s (one of which is YC X25 and unrelated to the partner who DM'd us).
+
+The pattern: in the AI infrastructure space in 2026, every plausible-sounding wedge has 5–20 funded teams shipping in parallel. Surface-level desk research underestimates competitive density 3–5x. The only reliable way to know is a focused web-search verification sprint.
+
+**Lesson learned:** When a strategy concept makes a *"the lane is open"* claim, treat it as a hypothesis, not a fact. Run the verification sprint *before* writing the concept doc, not after. The research takes ~1 hour; writing a concept doc against an unverified claim wastes a day.
+
+The discipline applies symmetrically: a *"the lane is closed"* claim also needs verification. The reliability-pivot concept doc was eventually rejected because verification surfaced PaySentry, PEAC, x402station, etc. — but the concept doc's *original* claim that the lane was open was the unverified part. Both directions of claim deserve the same skepticism.
+
+**Carry-forward — pre-strategy verification protocol:**
+
+1. **Before drafting any concept doc that asserts lane availability**, do a 30-minute web-search sweep using at least three search angles (the obvious one, an adjacent-product angle, a recent-launches angle). Target finding 10 candidate competitors.
+2. **For each candidate, fetch the landing page** (or at minimum a credible third-party description). Verify the product is live, its scope, its pricing if public.
+3. **Document findings in a verification report** (`<concept>-verification-YYYY-MM-DD.md`) with a table format and explicit threat ratings.
+4. **Only after verification, draft the concept doc.** The concept doc cites the verification as ground truth and stays calibrated to actual lane density.
+
+This is the pattern used successfully on 2026-05-07 to kill AgentLog cleanly (no engineering investment) and to reroute the reliability-pivot direction. Bake it into the workflow.

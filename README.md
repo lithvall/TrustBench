@@ -1,21 +1,40 @@
 # TrustBench
 
-A non-custodial smart router and payment-plumbing layer for x402 agents.
+A cross-network, non-custodial smart router and payment-plumbing layer for
+x402 agents. Routes Base today, registers Solana endpoints (Heurist Mesh,
+Pay.sh skills), Solana settlement next; protocol-agnostic over time across
+x402, p402, and MPP.
 
 ## What's live today
-- Public registry of x402 endpoints (~20 providers across search/inference/data)
+- Public registry of x402 endpoints across Base (Coinbase Agentic Market,
+  ~650 services) and Solana (Heurist Mesh, ~150 endpoints) — Solana inventory
+  is in the database today and surfaces on `/rankings` once the network
+  filter is dropped (P4-3a, see `phase4-p4-3-timing.md`)
 - Nightly liveness probe (HEAD requests from a single cloud host, 3 samples per
   provider, statuses 200/201/204/401/402/403/404/405/429 treated as alive)
 - Score derivation: 15 + 45·successRate + 35·latencyHealth + 3·consistency,
   clamped to [40, 98], via linear-interpolation percentiles
 - Ed25519-signed scorecards, public key at /.well-known/trustbench-pubkey
+- Routing and settlement on Base + USDC (Phase 3); Solana is roadmap (P4-3)
 - Methodology disclosure at /methodology
 
-## What's in Phase 3 build (not yet live)
+## Phase 3 + 4 (live since 2026-05-04 / 2026-05-06)
 - Authenticated POST /route endpoint with API-key auth (argon2id), idempotency
   keys, hard spend caps, and Ed25519-signed receipts
 - /route/settle endpoint forwarding agent-signed EIP-3009 authorizations
 - Queryable audit at /receipts/:id
+- Strict reservation-based spend caps (P4-7)
+- Discovery surfaces: /skill.md, /llms.txt, /.well-known/trustbench.json
+- First paid x402 receipt against a real provider, settled on Base 2026-05-06:
+  [rcpt_01KQY7C44GAPSXZPFQYRZ1D10C](https://trustbench.io/receipts/rcpt_01KQY7C44GAPSXZPFQYRZ1D10C)
+  — verifies SIGNATURE VALID + ON-CHAIN VERIFIED with no overrides.
+
+## In flight (Phase 4b)
+- x402-paywalled API endpoints (per-call USDC pricing surface)
+- Public receipt explorer at /explorer
+- Formal partner integrations
+- Solana routing (registry pre-built, network filter to drop)
+- npm verifier package `@trustbench/verify-receipt`
 
 ## What we don't do
 - We never hold agent funds, never submit transactions on-chain, never act as
@@ -24,8 +43,10 @@ A non-custodial smart router and payment-plumbing layer for x402 agents.
   the resulting tx_hash and records it in a signed receipt.
 
 ## Pricing model
-- Flat per-tx fee on routed calls (Phase 3+; exact value TBD)
-- Optional policy subscription (Phase 4+)
+- x402-native paywalled API endpoints, per-call USDC settlement on Base
+- No subscriptions, no contracts, no per-seat or per-month charge
+- Specific per-call tiers are in active validation with first integration
+  partners and not yet published. Reviewable based on real volume.
 - Refundable provider verification bond — pay-to-list, never pay-to-rank
 
 ## Stack
@@ -103,8 +124,8 @@ Existing receipts remain verifiable — the public key and JCS canonicalization 
 These are limits in the current implementation, called out so consumers don't infer behavior the system doesn't actually deliver:
 
 - **Single-merchant routing.** `POST /route` serves one capability against one selected provider per call. Multi-merchant fan-out (one intent → multiple paid APIs → one envelope) is Phase 4.
-- **Spend caps are approximately enforced under concurrency.** The check reads the rolling-window total at quote time; under N concurrent in-flight quotes for the same agent, total spend can overshoot by up to `(N − 1) × max_price`. Strict reservation-based caps that atomically debit a pending-spend counter are Phase 4.
 - **Receipt content is not yet on-chain anchored.** Receipts are Ed25519-signed by TrustBench. They are not Merkle-batched into a public blockchain. On-chain anchoring is a Phase 5 consideration if real demand surfaces.
+- **Single-chain settlement today.** Routing + settlement is Base + USDC. Solana inventory is registered but not yet routable (P4-3 next).
 
 ## Methodology disclosure
 
@@ -115,3 +136,5 @@ This is not a benchmark in the rigorous sense. Latency is wall-clock from a sing
 ## License
 
 MIT.
+
+

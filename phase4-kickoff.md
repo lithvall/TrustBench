@@ -1,7 +1,10 @@
 # Phase 4 Kickoff
 
-**Status:** Phase 3 closed 2026-05-04. Phase 4 ready to begin.
-**Audience:** Fresh Claude session with the prompt "please start phase 4." Read this first; it supersedes `phase3-closeout.md` as the working entry-point. `phase3-closeout.md` remains the authoritative reference for what shipped in Phase 3 and the original priority-ordered Phase 4 plan.
+**Status:** Phase 3 closed 2026-05-04. Phase 4a (discovery surfaces, P4-7 reservation caps, first paid receipt P4-1b) shipped 2026-05-04 / 2026-05-06. Phase 4b (paywalled API, receipt explorer, partner integrations) in flight.
+
+**Strategic direction superseded 2026-05-07:** This document is the engineering-state record. The current strategic direction (component-in-stack with x402-paywalled API monetization, partnership-driven) is in `partnership-day-record-2026-05-07.md` and **should be read first** if you're picking up the project cold. The Phase 4b items below are still the right engineering work; what changed is the framing around why they matter and what the revenue model is.
+
+**Audience:** Fresh Claude session. Read `partnership-day-record-2026-05-07.md` first for current direction, then this doc for engineering context, then `phase3-closeout.md` for what shipped through Phase 3.
 
 ---
 

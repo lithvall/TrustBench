@@ -8,9 +8,9 @@
     "methodology": "https://trustbench.io/methodology",
     "skill": "https://trustbench.io/skill.md",
     "llmsTxt": "https://trustbench.io/llms.txt",
-    "readme": "https://github.com/lithvall88/TrustBench/blob/main/README.md",
-    "strategy": "https://github.com/lithvall88/TrustBench/blob/main/TrustBench-strategy.md",
-    "receiptSpec": "https://github.com/lithvall88/TrustBench/blob/main/receipt-spec-v1.md"
+    "readme": "https://github.com/lithvall/TrustBench/blob/main/README.md",
+    "strategy": "https://github.com/lithvall/TrustBench/blob/main/TrustBench-strategy.md",
+    "receiptSpec": "https://github.com/lithvall/TrustBench/blob/main/receipt-spec-v1.md"
   },
   "publicEndpoints": {
     "health": "https://trustbench.io/health",
@@ -71,8 +71,8 @@
     "canonicalization": "JCS (RFC 8785)",
     "fallbackAlgorithm": "HMAC-SHA256 (server-internal only; publicKeyUrl returns 503 in fallback mode)",
     "verifierScripts": {
-      "scorecard": "https://github.com/lithvall88/TrustBench/blob/main/scripts/verify-scorecard.js",
-      "receipt": "https://github.com/lithvall88/TrustBench/blob/main/scripts/verify-receipt.js"
+      "scorecard": "https://github.com/lithvall/TrustBench/blob/main/scripts/verify-scorecard.js",
+      "receipt": "https://github.com/lithvall/TrustBench/blob/main/scripts/verify-receipt.js"
     }
   },
   "custody": {
@@ -80,8 +80,8 @@
     "claim": "TrustBench never holds funds, never signs payments, and never broadcasts transactions. The agent signs an EIP-3009 transferWithAuthorization with its own wallet; the merchant submits the on-chain transaction with its own gas wallet; TrustBench observes the resulting tx_hash and emits a signed receipt."
   },
   "pricing": {
-    "model": "flat-per-tx",
-    "policySubscription": "optional, Phase 4 follow-up",
+    "model": "x402-native paywalled API",
+    "description": "Endpoints are paywalled via x402 with per-call USDC settlement on Base. No subscriptions, no contracts. Specific per-call tiers are in active validation with first integration partners and not yet published.",
     "providerVerificationBond": "refundable, pay-to-list, never pay-to-rank",
     "phase4Status": "invite-only during the build; access via direct message to @TrustBench on X"
   },
@@ -100,11 +100,12 @@
   "phases": {
     "phase3ClosedOn": "2026-05-04",
     "phase3Surfaces": "Authenticated POST /route + POST /route/settle, GET /receipts/:id, scripts/verify-receipt.js, paid-probe.ts. Smoke A1-A5 / B1-B4 green against the local mock provider.",
-    "phase4InProgress": "Discovery surfaces (skill.md, manifest, llms.txt route), registry refresh against x402.org/ecosystem, taxonomy alignment to 5-cat (Search / Inference / Data / Media / Infra), Agentic Market crawler integration. First paid receipt against a real x402 provider in flight pending facilitator clarification.",
+    "phase4Shipped": "Discovery surfaces (skill.md, manifest, llms.txt), Agentic Market crawler integration, 5-cat taxonomy alignment (Search / Inference / Data / Media / Infra), strict reservation-based spend caps (P4-7), first paid x402 receipt against a real provider (rcpt_01KQY7C44GAPSXZPFQYRZ1D10C settled on Base 2026-05-06).",
+    "phase4InProgress": "x402-paywalled API endpoints (per-call pricing surface), public receipt explorer, formal partner integrations.",
     "phase5Planned": "p402, KYB and identity attestations, settlement-finality semantics across protocols, Canton coverage."
   },
   "contact": {
     "x": "https://x.com/TrustBench",
-    "github": "https://github.com/lithvall88/TrustBench"
+    "github": "https://github.com/lithvall/TrustBench"
   }
 }

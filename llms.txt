@@ -1,13 +1,14 @@
 # TrustBench
 
-> Non-custodial routing + verification layer for agentic x402 payments. Agents call TrustBench, TrustBench picks the best provider (live telemetry), constructs the x402 challenge, the agent signs, the provider settles on-chain, and TrustBench returns a signed receipt. Today: public registry of x402-style endpoints with nightly liveness telemetry, plus a live non-custodial routing surface (`POST /route` and `POST /route/settle`) with idempotency keys, hard spend caps, and Ed25519-signed receipts. Phase 3 closed 2026-05-04. Phase 4 in flight: agent-discovery surfaces (skill.md, manifest, llms.txt route) and first paid receipts against real x402 providers.
+> Non-custodial, cross-network routing + verification layer for agentic x402 payments. Agents call TrustBench, TrustBench picks the best provider (live telemetry), constructs the x402 challenge, the agent signs, the provider settles on-chain, and TrustBench returns a signed receipt. Registry covers x402 endpoints across **Base** (via Coinbase Agentic Market, ~650 services) and **Solana** (via Heurist Mesh, ~150 endpoints; Pay.sh `pay-skills` catalog as a 4th source on the roadmap). Routing + settlement is **Base + USDC today**; Solana settlement (P4-3) is next, with the registry already pre-built so the transition is filter-removal, not re-crawl. Protocol-agnostic over time across x402, p402, and MPP. Phase 3 closed 2026-05-04 with the four primitives below (idempotency, spend caps, signed receipts, queryable audit). Phase 4 shipped 2026-05-04 / 2026-05-06: agent-discovery surfaces (skill.md, manifest, llms.txt), strict reservation-based spend caps, and the first public Railway-issued paid receipt (`rcpt_01KQY7C44GAPSXZPFQYRZ1D10C`) settled on Base against a real x402 provider. Phase 4 in flight: x402-paywalled API endpoints (per-call pricing surface), public receipt explorer, formal partner integrations.
 
-This file is intended for AI agents, agent builders, and other automated consumers. Humans should start at the [README](https://github.com/lithvall88/TrustBench/blob/main/README.md) and the live [methodology page](https://trustbench.io/methodology).
+This file is intended for AI agents, agent builders, and other automated consumers. Humans should start at the [README](https://github.com/lithvall/TrustBench/blob/main/README.md) and the live [methodology page](https://trustbench.io/methodology).
 
 ## What TrustBench does and does not do
 
-- **Does:** discover and rank x402-style providers; expose live liveness telemetry; (Phase 3) construct x402 challenges, route requests, and emit signed receipts.
+- **Does:** discover and rank x402-style providers across networks (Base via Agentic Market, Solana via Heurist Mesh); expose live liveness telemetry; (Phase 3) construct x402 challenges, route requests, and emit signed receipts on Base.
 - **Does not:** hold agent funds, sign on behalf of agents, submit transactions on-chain, or verify on-chain settlement. We are HTTP middleware. The agent signs; the provider submits with their own gas wallet.
+- **Networks routable today:** Base + USDC. Solana inventory is registered but not yet routable — P4-3 is the next sprint after the first paid receipts. Pay.sh / Solana-side facilitators (PayAI, Crossmint, Merit Systems, Corbits, MoonPay, Sponge, ATXP, Tektonic) are observed; cross-network routing through them is the Phase 5 ambition.
 - **Honest measurement:** the nightly probe is a `HEAD` (with `GET` fallback on 405) liveness check, 3 samples, from one cloud host. Status codes `200/201/204/401/402/403/404/405/429` are treated as "alive". This is a registry with telemetry, not a benchmark.
 
 ## Public read endpoints (no auth)
@@ -76,13 +77,13 @@ Response (`200`): the upstream provider's response body, plus an `X-Receipt-Id` 
 
 ### Receipts
 
-Receipts follow the [TrustBench Receipt Spec v1.0.0](https://github.com/lithvall88/TrustBench/blob/main/receipt-spec-v1.md): a JSON object with a `receipt` body (call / settlement / pricing / routing / audit fields) and a detached Ed25519 `signature` over the JCS-canonical bytes (RFC 8785). Reference verifier: `scripts/verify-receipt.js` in the repo.
+Receipts follow the [TrustBench Receipt Spec v1.0.0](https://github.com/lithvall/TrustBench/blob/main/receipt-spec-v1.md): a JSON object with a `receipt` body (call / settlement / pricing / routing / audit fields) and a detached Ed25519 `signature` over the JCS-canonical bytes (RFC 8785). Reference verifier: `scripts/verify-receipt.js` in the repo.
 
 Audit endpoint: `GET /receipts/:id` returns the same JSON, fresh from the issuer. Status: live since Phase 3 close 2026-05-04. Cache headers are `public, max-age=86400, immutable`. The receipt id is unguessable (ULID) and acts as the audit token.
 
 ## Policy guarantees (the four Phase 3 primitives)
 
-These are the things an agent or agent builder can rely on TrustBench enforcing on every routed call. They are deliberately the surface the [r/AI_Agents and InfopunksHQ Phase 2 conversations](https://github.com/lithvall88/TrustBench/blob/main/%23%20Phase%202%20%E2%80%94%20Builder%20Conversations.md) said they wanted before adoption:
+These are the things an agent or agent builder can rely on TrustBench enforcing on every routed call. They are deliberately the surface the [r/AI_Agents and InfopunksHQ Phase 2 conversations](https://github.com/lithvall/TrustBench/blob/main/%23%20Phase%202%20%E2%80%94%20Builder%20Conversations.md) said they wanted before adoption:
 
 - **Idempotency keys.** Required on every `POST /route`. Same key + same body → same response, even under partial-timeout retries. No double-charge under normal failure modes.
 - **Hard spend caps.** Per-call cap and rolling-window cap, both enforced server-side, both denominated in atomic-unit USDC strings. Max-price on the request must clear the per-call cap; expected spend (request + window) must clear the rolling cap. Caps are per-agent and configured by the operator.
@@ -98,11 +99,11 @@ These are the things an agent or agent builder can rely on TrustBench enforcing 
 
 ## Pricing
 
-Flat per-tx fee on routed calls (`fee_model: "flat_per_tx"` in the receipt). No percentage spread on the routed amount, that model was rejected during Phase 2 builder conversations on 2026-04-30. Operator-side subscription tiers for the policy firewall land in Phase 4. Phase 4 is invite-only during the build; direct message @TrustBench on X for a `tb_live_…` API key.
+x402-native paywalled API endpoints. Per-call USDC settlement on Base. No subscriptions, no contracts. Specific per-call tiers are in active validation with first integration partners and not yet published. Percentage spreads on the routed amount were rejected during Phase 2 builder conversations on 2026-04-30 and remain off the table. Provider verification is a refundable pay-to-list bond, never pay-to-rank. Phase 4 is invite-only during the build; direct message @TrustBench on X for a `tb_live_…` API key.
 
 ## Repository
 
-Source: <https://github.com/lithvall88/TrustBench>. Strategic context: [`TrustBench-strategy.md`](https://github.com/lithvall88/TrustBench/blob/main/TrustBench-strategy.md). Phase 3 entry-point: [`phase3-handoff.md`](https://github.com/lithvall88/TrustBench/blob/main/phase3-handoff.md). Receipt schema: [`receipt-spec-v1.md`](https://github.com/lithvall88/TrustBench/blob/main/receipt-spec-v1.md).
+Source: <https://github.com/lithvall/TrustBench>. Strategic context: [`TrustBench-strategy.md`](https://github.com/lithvall/TrustBench/blob/main/TrustBench-strategy.md). Phase 3 entry-point: [`phase3-handoff.md`](https://github.com/lithvall/TrustBench/blob/main/phase3-handoff.md). Receipt schema: [`receipt-spec-v1.md`](https://github.com/lithvall/TrustBench/blob/main/receipt-spec-v1.md).
 
 ## Contact
 

@@ -110,7 +110,8 @@ clamped to [40, 98]</pre>
           ${roadmapRow('Phase 1', 'done', 'Ed25519 scorecard signing', 'Ed25519 keys generated, public key published, reference verifier shipped')}
           ${roadmapRow('Phase 2', 'done', 'Builder validation', 'Three real conversations + written expressions of interest (closed 2026-04-30)')}
           ${roadmapRow('Phase 3', 'done', 'Non-custodial router', 'Idempotency, hard spend caps, signed receipts, /receipts/:id audit (closed 2026-05-04)')}
-          ${roadmapRow('Phase 4', 'current', 'Policy firewall, paid-probe, agent-discovery surfaces', 'In progress: reservation caps, /skill.md, /llms.txt, /.well-known')}
+          ${roadmapRow('Phase 4a', 'done', 'Discovery surfaces + reservation caps + first paid receipt', '/skill.md, /llms.txt, /.well-known/trustbench.json, strict reservation-based spend caps, and the first public paid x402 receipt against a real provider all shipped 2026-05-04 / 2026-05-06')}
+          ${roadmapRow('Phase 4b', 'current', 'Paywalled API + receipt explorer + partner integrations', 'In progress: x402-native paywalled API endpoints (per-call pricing surface), public /explorer for receipts, formal partner integrations')}
           ${roadmapRow('Phase 5', 'future', 'p402 / Canton expansion', 'Multi-protocol settlement (after x402 path is stable)')}
         </div>
       </section>

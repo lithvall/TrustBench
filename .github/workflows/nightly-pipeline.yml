@@ -1,9 +1,15 @@
 name: Nightly TrustBench Pipeline
 
+# Crawl-then-probe nightly job. Single source of truth for the registry refresh
+# + scoring pass. Consolidated 2026-05-09 from the old duplicate pair
+# (nightly-pipeline.yml at 03:00 UTC probing only, pipeline.yml at 00:00 UTC
+# crawling+probing). The 03:00 UTC slot is preferred because upstream sources
+# (Agentic Market, Heurist Mesh) settle their own daily updates earlier.
+
 on:
   schedule:
-    - cron: '0 3 * * *'     # Every night at 3:00 AM UTC
-  workflow_dispatch:
+    - cron: '0 3 * * *'     # Every night at 03:00 UTC
+  workflow_dispatch:        # Manual trigger from the Actions tab
 
 jobs:
   pipeline:
@@ -16,13 +22,29 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Run full pipeline
+      # Step 1 of 2: refresh the registry from canonical sources (Agentic Market
+      # paginated catalog + Heurist Mesh + the seeded x402 endpoints). Crawler
+      # writes one provider row per (service, endpoint) pair. Idempotent on
+      # URL conflict so re-running is safe.
+      - name: Run crawl (refresh registry)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           UPSTASH_REDIS_URL: ${{ secrets.UPSTASH_REDIS_URL }}
+        run: npm run crawl
+
+      # Step 2 of 2: probe every endpoint, write fresh scorecards. Probe is a
+      # HEAD-based liveness check (3 samples per endpoint). Treats 4xx and 429
+      # as alive per methodology. Updates rankings cache via Redis TTL.
+      - name: Run probe (refresh scorecards)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          UPSTASH_REDIS_URL: ${{ secrets.UPSTASH_REDIS_URL }}
+          PROBE_REGION: github-actions-ubuntu
         run: npm run pipeline

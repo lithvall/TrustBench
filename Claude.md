@@ -10,7 +10,9 @@ The honest framing — and what the public site should reflect — is:
 
 The full diagnosis, scoring fix, honest reassessment, and phased plan live in `TrustBench-strategy.md` — that document is the source of truth for direction; this file is the working agreement for *how* we build against it.
 
-**If you are picking up TrustBench in a new session, read `phase4-kickoff.md` first.** Phase 3 closed 2026-05-04 (sign-off in `lessons.md`). `phase4-kickoff.md` is the new entry-point — it captures Phase 3's final state, the new Infopunks intel from 2026-05-04, the proposed Phase 4 priority reweighting, and decision points to ask the user before committing. `phase3-closeout.md` remains the authoritative reference for what shipped in Phase 3 and the full original Phase 4 plan. `phase3-handoff.md` is historical only.
+**If you are picking up TrustBench in a new session, read `partnership-day-record-2026-05-07.md` FIRST.** That file documents the strategic shift from "standalone-product searching for a wedge" to "component-in-stack with x402-paywalled API monetization" — driven by partnership inbounds from Infopunks, Strata (@stratamcp), and CLU_AGENT in a 48-hour window. It supersedes the prior strategy direction and contains the committed decision, draft partner replies, and revenue model. Then read `phase4-kickoff.md` for engineering state. `phase3-closeout.md` remains the authoritative reference for what shipped in Phase 3. `phase3-handoff.md`, `phase6-beyond-strategy.md`, and `phase6-reassessment-2026-05-07.md` are historical / context-only — read after the partnership-day record, not before.
+
+**If picking up the QBT-Labs/x402 read or the x402-paywall design pass, read `phase4-qbt-and-paywall-handoff.md` after the partnership-day record.** That file contains the Reddit-thread context with Aggelos Kappos (`AngeloKappos`), the focused-read brief on `github.com/QBT-Labs/x402` (compose vs compete framing), and the 10 design questions for x402-paywalled endpoint revenue (with Strata-anchored pricing tiers and the non-custodial / no-subscription / solo-founder constraint list).
 
 ## Stack
 
@@ -32,8 +34,8 @@ TypeScript + Hono (API) + Supabase (Postgres + RLS) + ioredis (Upstash Redis cac
   - `crawler.ts` — CDP discovery API with hard-coded fallback list of ~20 providers
   - `scorer.ts` — rankings reads with Redis cache + Ed25519 scorecard signing (HMAC-SHA256 fallback when Ed25519 keys are not configured). Public key served at `/.well-known/trustbench-pubkey`. Generate keys with `npm run keygen`; verify a scorecard with `npm run verify-scorecard`.
   - `types.ts` — shared TS types
-- `.github/workflows/` — `nightly-pipeline.yml` (cron probe+score), `pipeline.yml` (older crawl+probe duplicate — see Known Cleanups), `post-to-x.yml` (daily autonomous post)
-- `scripts/post-to-x.js` — daily X post (currently static copy; will need to align with new framing)
+- `.github/workflows/` — `nightly-pipeline.yml` (single source of truth: crawl then probe at 03:00 UTC), `pipeline.yml` (deprecated stub, no triggers, safe to delete from local clone), `paid-probe.yml` (live x402 paid probe job), `post-to-x.yml` (daily autonomous post, currently disabled until rotation is reviewed)
+- `scripts/post-to-x.js` — daily X post (rewrite landed 2026-05-09: live registry pulse fetched from `/metrics/registry-summary` + methodology rotation + build-in-public). 7-day rotation, no em-dashes, fail-loud on missing env vars. Run with `--dry-run` to preview.
 - `schema.sql` — current minimal schema in use (providers / probes / scorecards, RLS public read)
 - `supabase/schema.sql` — older schema with EIP-712 trigger machinery; **not in use**, kept as reference only
 - Root files: `package.json`, `tsconfig.json`, `.env.example`, `railway.json`, `Dockerfile`, `README.md`, `TrustBench-strategy.md`
@@ -138,10 +140,10 @@ For complex tasks, internally apply Anthropic's 6-element structure: (1) Role/Co
 ## Known cleanups (low priority, do as we touch the area)
 
 - Root-level `index.ts` and `run-crawler.ts` are stale duplicates of `src/index.ts` and the crawler+prober pair. They reference `crawlBazaar` / `probeProvider` exports that don't exist in `src/` and use a `SUPABASE_SERVICE_ROLE_KEY` env var that's not in `.env.example`. Delete or quarantine when convenient.
-- `.github/workflows/nightly-pipeline.yml` and `.github/workflows/pipeline.yml` both run the nightly job (one at 03:00 UTC, the other at 00:00 UTC, only the latter also runs `npm run crawl`). Consolidate to a single workflow that crawls *then* probes.
+- ~~`.github/workflows/nightly-pipeline.yml` and `.github/workflows/pipeline.yml` both run the nightly job (one at 03:00 UTC, the other at 00:00 UTC, only the latter also runs `npm run crawl`). Consolidate to a single workflow that crawls *then* probes.~~ **Resolved 2026-05-09:** consolidated into `nightly-pipeline.yml` (crawl then probe at 03:00 UTC); `pipeline.yml` reduced to an inert no-trigger stub; safe to fully delete from local clone with `Remove-Item .github\workflows\pipeline.yml`.
 - `supabase/schema.sql` is the old EIP-712-flavored schema; the live one is `schema.sql` at the repo root. Either delete the old file or rename it to `schema.legacy.sql` and add a comment.
 - README.md and prior `Claude.md` revisions had stray `\#` / `\##` escape artifacts. Always write Markdown without backslash-escaping headers.
-- Daily X post (`scripts/post-to-x.js`) still uses "best x402 providers" copy. Soften to "live x402 telemetry + registry" once Phase 0 ships.
+- ~~Daily X post (`scripts/post-to-x.js`) still uses "best x402 providers" copy. Soften to "live x402 telemetry + registry" once Phase 0 ships.~~ **Resolved 2026-05-09:** rewritten with honest registry-pulse + methodology rotation + build-in-public mix; trustbench.io URLs throughout; em-dash-free; fail-loud env validation. Workflow stays disabled in GitHub Actions until you re-read the rotation arrays and flip it on.
 
 ## Out of scope (don't touch without explicit approval)
 

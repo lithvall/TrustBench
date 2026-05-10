@@ -27,6 +27,7 @@
     "dotenv": "^16.4.5",
     "hono": "^4.4.0",
     "ioredis": "^5.4.1",
+    "twitter-api-v2": "^1.18.0",
     "ulid": "^3.0.2"
   },
   "devDependencies": {

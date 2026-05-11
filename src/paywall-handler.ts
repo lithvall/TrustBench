@@ -713,9 +713,39 @@ async function handlePaidRoute(c: Context, xPayment: string): Promise<Response> 
     maxPriceAtomic,
   );
   if (!providerPaymentReqs) {
+    // Refusal-to-charge path: the live probe of the selected provider either
+    // failed (provider unreachable, timed out, returned non-402, or was
+    // suspended by its owner) OR returned a 402 that's missing the recipient/
+    // amount fields we need to build a v2 PaymentRequirements envelope.
+    //
+    // Non-custodial property: we have NOT charged the agent's wallet at this
+    // point. No facilitator settle call has been made. The agent's nonce is
+    // unused on-chain. They can retry the request (with the same wallet, same
+    // capability, possibly different idempotency-key) once the registry has a
+    // conformant provider for this capability. This refusal-to-charge under
+    // provider-conformance failures is documented in
+    // `phase4-paywall-design.md` § 7 ("Failure modes").
+    //
+    // Observed root causes for this 503 (logged at probe time in
+    // route-handlers.ts probeFor402Challenge):
+    //   - Provider's Render dyno is suspended-by-user (returns 503 with
+    //     suspend-by-user routing header — observed 2026-05-11)
+    //   - Provider needs POST but probe defaulted to GET (probe_config not
+    //     stored in providers.metadata.x402_probe_config — registry-curation
+    //     gap, v0.2.0 follow-up)
+    //   - Provider's accepts[0] envelope is missing recipient field
+    //   - Network/RPC timeout to the provider's host
+    //
+    // The probe outcome is logged on the merchant side (search server logs for
+    // `[probe]` lines) — that's where to start diagnosing if this fires.
     return c.json({
       error: 'provider_payment_requirements_unavailable',
-      detail: `selected provider ${chosen.provider_id} has no pay_to address recorded; not charging the routing fee`,
+      detail:
+        `selected provider ${chosen.provider_id} did not return a parseable x402 challenge to the live probe; ` +
+        `not charging the routing fee. agent wallet is unaffected. ` +
+        `causes can include: provider unreachable, provider suspended, GET-vs-POST mismatch, or non-conformant 402 envelope. ` +
+        `check server logs for [probe] lines.`,
+      provider: chosen.provider_id,
     }, 503);
   }
 

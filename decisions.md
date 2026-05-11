@@ -1,10 +1,32 @@
 # TrustBench Decisions Log
 
-A flat, dated record of non-trivial decisions. One line per decision plus a one-sentence reason. Five minutes a week of upkeep. The point isn't completeness — it's that the *why* behind a decision is readable when picking up the project cold months later.
+A flat, dated record of non-trivial decisions. The point isn't completeness — it's that the *why* behind a decision is readable when picking up the project cold months later. Plus (from 2026-05-11): the *assumption* and *leading indicator* behind each decision so calibration can be graded 90 days later.
 
-**Format:** `YYYY-MM-DD: <decision>. Reason: <one sentence>.`
+## Format
 
-Started 2026-05-08 per `phase6-reassessment-2026-05-07.md` § 9 D-2 ("decisions.md exists from day 1 and gets updated whenever a non-trivial decision is made").
+**Legacy format (2026-04-30 → 2026-05-10):** `YYYY-MM-DD: <decision>. Reason: <one sentence>.`
+
+**New format (2026-05-11 onward — Decision Journal entries):**
+
+```
+YYYY-MM-DD: <decision>. Reason: <one sentence>.
+  - assumption: <the load-bearing assumption this decision rests on>
+  - leading_indicator: <observable signal that will tell us right/wrong before full outcome>
+  - check_back_date: YYYY-MM-DD (90 days from decision date)
+  - status: open
+```
+
+When `check_back_date` arrives, grade the entry by appending one of:
+- `  - status: validated (YYYY-MM-DD). leading_indicator observed as predicted.`
+- `  - status: disproven (YYYY-MM-DD). assumption broke because <one sentence>.`
+- `  - status: rescheduled (YYYY-MM-DD → new_check_back_date). reason: <one sentence>. (max 3 reschedules)`
+- `  - status: superseded by <YYYY-MM-DD decision> (YYYY-MM-DD).`
+
+**Why richer entries:** historical entries (Apr-May 2026) capture *what* was decided. They don't force calibration on whether the decision turned out right. New entries do, via the assumption + leading indicator + 90-day callback. Pattern lifted from `ProjectAutonomous/VaultIntoBusinessSystem.md` and `lessons.md` 2026-05-10 entry. Historical entries are NOT retrofitted — they're frozen context.
+
+**Callback workflow (manual until Slice 1 of ProjectAutonomous lands):** every Monday morning during weekly review, scan decisions.md for entries with `status: open` AND `check_back_date ≤ today`. Grade each. Append to `lessons.md` if a disproven decision reveals a pattern worth keeping (e.g. recurring assumption-class failures). See `prompts/decision-journal.md` for the full prompt.
+
+Started 2026-05-08 per `phase6-reassessment-2026-05-07.md` (now header-marked SUPERSEDED) § 9 D-2. Upgraded to Decision Journal format 2026-05-11 per the Slice 1 plan in `ProjectAutonomous/01-slice-1-jarvis-brain.md`.
 
 ---
 
@@ -58,6 +80,18 @@ Started 2026-05-08 per `phase6-reassessment-2026-05-07.md` § 9 D-2 ("decisions.
 
 2026-05-08: Don't escalate Aggelos (QBT-Labs) to DM until he replies on the Reddit thread. Reason: public alignment is already valuable as social proof; escalation cadence should be earned by his response shape; if he proposes deeper conversation, DM is the right next move; if he just thanks and moves on, the public alignment stands.
 
+2026-05-11: Phase 4 v0.1.0 paywall flipped LIVE in prod on `/route` after § 1.3 + Days 1-3 push-through in one session. Reason: settle-test against CDP returned tx `0x5a558117...`, RLS smoke 5/5 green, prod paywall smoke S1 PASS confirming 402 envelope correctness and revenue-wallet routing. End-to-end paid `/route` call not yet validated tonight (paywall_smoke S2 503'd on a suspended Infopunks Render endpoint), but the refusal-to-charge behavior is itself a successful non-custodial-property test: agent wallet's nonce unburned, no money moved, the paywall correctly fails safe when the registry surfaces a non-conformant provider. Registry-conformance work scheduled as v0.2.0 (registry curation + POST-fallback live probe). Critic-pass verdict was upgraded to `acceptable` after v0.1.1 gates landed; both gates (per-paying-wallet rate limit, replayed_at marker) are deployed and active.
+  - assumption: Coinbase CDP facilitator stays available within 1K tx/mo free tier and continues to support Base mainnet `exact + eip155:8453` through v0.1.0
+  - leading_indicator: any week where CDP returns 5xx or rate-limits >5% of paywall settle calls signals we need to switch to a self-hosted facilitator (x402-rs or equivalent) or accept a v0.2.0 architectural shift
+  - check_back_date: 2026-08-09
+  - status: open
+
+2026-05-11: Provider `infopunks-cognition-layer-x402.onrender.com` no longer reachable; suspended-by-user per Render routing header. Reason: between P4-1b (2026-05-06) and the v0.1.0 prod paywall smoke (2026-05-11), Infopunks deliberately turned off their cognition layer on Render. This was the registry's most-reliable x402-conformant `data`-capability provider and now isn't. Doesn't block v0.1.0 launch — the paywall middleware correctly refused to charge the agent when the live probe failed. Does mean the v0.2.0 registry-curation work needs to (a) treat HEAD-probe liveness as a necessary-not-sufficient signal, (b) add a periodic POST/full-request live-conformance check, (c) deprioritize providers whose live probe returns non-402 statuses or carrier-platform suspend signals. The strategic Infopunks relationship is a separate concern — they offered "let's collab" on 2026-05-07; if they've sunset the cognition layer entirely, the compose-with-Infopunks framing in `partnership-day-record-2026-05-07.md` needs revisiting.
+  - assumption: Infopunks's Render suspension is a temporary infra move (free-tier cost / migration / pause), not a project shutdown
+  - leading_indicator: any post on @InfopunksHQ X feed announcing pivot or sunset, OR no new x402 activity from them for 30+ days
+  - check_back_date: 2026-08-09
+  - status: open
+
 2026-05-08: Defer x402-paywall implementation to a dedicated design pass before code. Reason: needs decisions on which endpoints to paywall first, free-tier signaling, wire-shape for being x402 server vs client; design before code is the correct sequencing for a revenue-bearing surface.
 
 2026-05-08: Paddock 7-night rollup CSV ETA committed for Monday 2026-05-11. Reason: Paddock thread had been waiting since 2026-05-04 (4 days); commitment with concrete date moves the relationship forward; Monday gives weekend buffer to build the rollup script or pull from existing probes data.
@@ -73,3 +107,7 @@ Started 2026-05-08 per `phase6-reassessment-2026-05-07.md` § 9 D-2 ("decisions.
 2026-05-08: Refund / dispute path deferred from v0.1.0 paywall. Reason: idempotency-key reuse + on-chain nonce dedup cover the main retry case; off-chain credit ledger design held until >5 dispute requests in any 30-day window. Watch trigger documented in `phase4-paywall-design.md` § Q9.
 
 2026-05-08: `paid_requests` table added in v0.1.0 paywall. Reason: revenue tracking + dogfood for the future `/compliance-export` endpoint; schema documented in `phase4-paywall-design.md` § Q10; RLS public-read-own-rows by wallet match, body-hash stored not body itself for privacy + storage cost.
+
+2026-05-09: Sent Infopunks follow-up DM at 08:54 (2 days after initial reply, past the 48h anti-anxiety window). Reason: real artifacts shipped since last contact (`@trustbench/verify-receipt` v0.1.0 on npm + paywall design pass closed) plus the prior DM left an explicit open thread (Johan asked permission to send a written summary while processing the offer-and-receipt extension implications). Follow-up closed that loop by naming the resolution (component-in-stack, not standalone), surfaced the artifacts, and offered the written one-pager as the next step. Closer reduced from "async whenever, or call when it feels right. no deadline." to "let me know your thoughts, no rush." per the no-calls-in-outreach rule.
+
+2026-05-09: Categorical rule logged: never propose calls/meetings in any outreach draft. Reason: Johan stated explicitly *"that is something I don't ever want to do"* after sending the Infopunks DM. Hardens the partnership-day async-first framing into a permanent constraint. Memory at `feedback_no_calls_in_outreach.md`. Applies even when partner asks for a call (defer to async; surface to Johan if they push twice).

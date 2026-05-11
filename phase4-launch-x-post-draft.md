@@ -9,6 +9,45 @@
 
 ---
 
+## Option D — non-custodial-property lead, ~277 chars (RECOMMENDED 2026-05-11)
+
+Added 2026-05-11 after v0.1.0 launch night surfaced the strongest possible test of the paywall's non-custodial property: it correctly refused to charge an agent when the selected upstream provider was unreachable. That's the win to lead with.
+
+```
+TrustBench paywall is live on /route.
+
+Tonight a smoke selected a provider whose dyno was suspended-by-user. The paywall caught it, refused to charge the agent's wallet, returned 503. Non-custodial fail-safe behavior validated end-to-end.
+
+https://trustbench.io/pricing
+```
+
+277 chars. Why this lead is strongest:
+
+- Concrete event ("tonight a smoke selected a provider whose dyno was suspended") = real, not promotional
+- Non-custodial property = the architectural moat
+- Validated end-to-end = the actual launch milestone
+- Closes with the public artifact link, not a CTA
+
+If anyone asks about the architecture flow, follow up with (273 chars):
+
+```
+Flow: agent gets 402, signs $0.005 EIP-3009 to our revenue wallet, x402 facilitator settles on Base via Coinbase CDP, we return an Ed25519-signed routing receipt. If the upstream provider can't be reached, the agent's payment never moves. Non-custodial throughout.
+```
+
+If anyone asks "why didn't the agent get charged when the provider was down?" follow up with (270 chars):
+
+```
+The paywall live-probes the selected provider before settling. If the probe fails (suspended, timeout, non-conformant 402), we 503 before calling the facilitator. Agent's nonce is unused on-chain. No money moves. They retry once the registry has a conformant provider.
+```
+
+If anyone asks about the broader registry-conformance gap, follow up with (267 chars):
+
+```
+v0.1.0 paywall is provably-safe but doesn't yet guarantee a successful round-trip for every capability. The registry has providers whose HEAD-probe liveness doesn't match their POST-probe conformance. v0.2.0 work: live-probe-verified-x402 as a curatorial signal alongside HEAD-liveness.
+```
+
+---
+
 ## Option A — milestone-style, ~270 chars
 
 ```

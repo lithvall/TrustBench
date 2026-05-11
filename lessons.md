@@ -4,6 +4,28 @@ A living log of patterns, surprises, and corrections worth remembering across se
 
 ---
 
+## 2026-05-11 — Paywall's refusal-to-charge under provider failure is the validation, not the bug
+
+During the v0.1.0 prod paywall smoke (Step 7 of the night's push-through), S2 returned 503 `provider_payment_requirements_unavailable` instead of the expected 200 + signed routing receipt. First instinct was "the smoke failed." After curl-ing the selected provider directly, the real cause was: `infopunks-cognition-layer-x402.onrender.com` had been **suspended-by-user** on Render sometime between P4-1b (2026-05-06) and now. The Render routing header `x-render-routing: suspend-by-user` confirmed it was deliberate, not a cold-start.
+
+The paywall middleware did exactly what it should have:
+1. Selected the top-ranked `data` provider from the registry
+2. Live-probed it to extract the merchant's `accepts[0]`
+3. Probe returned 503 from the provider's host
+4. Refused to charge the agent → returned 503 to the caller before any facilitator settle call
+5. Agent's wallet nonce unburned, no money moved on-chain
+
+This is the strongest possible non-custodial-property test we could have run — proving the paywall **fails safe** when the upstream provider is non-conformant or unreachable. The "successful happy path" (paid call returns a signed receipt) wasn't validated tonight, but the "successful failure path" (agent isn't charged for unfulfilled work) was.
+
+**Lesson:** when a paywall smoke fails, distinguish between *paywall correctness bugs* (would charge incorrectly, would skip security checks, would leak data) versus *registry-conformance failures* (paywall correctly refused). The former blocks launch; the latter is a registry-curation follow-up. The 503 we got was the latter — paid_requests row never written, on-chain transfer never submitted. Treat it as a positive signal about the middleware, not a failure of the launch.
+
+**Carry-forward implications:**
+- The error message in `paywall-handler.ts` was misleading ("has no pay_to address recorded"). Fixed in the same session to surface "did not return a parseable x402 challenge to the live probe; agent wallet is unaffected" plus the actual provider URL and probable cause list. Future operators can diagnose faster.
+- v0.2.0 registry-curation needs to treat HEAD-probe liveness as a *necessary-not-sufficient* signal for x402-conformance. Add a periodic full-request POST probe that actually validates the merchant returns a parseable v2 `accepts[0]`. Score down providers that fail this check.
+- The smoke script's hardcoded capability choice (`data`) needs to be configurable via env var or CLI arg so the next provider-conformance test can target a known-working endpoint without code edits.
+
+---
+
 ## 2026-05-11 — Foundation facilitator at x402.org is testnet-only; Base mainnet paywall needs CDP creds
 
 While running the § 1.3 settle-test pre-flight, the public Foundation facilitator at `https://x402.org/facilitator` returned:

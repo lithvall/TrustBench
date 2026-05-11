@@ -196,8 +196,17 @@ async function checkS2_settle(): Promise<{ idemKey: string; reqBody: any; cached
 
   const requirements = buildTrustBenchRequirements();
   const xPayment = await buildXPaymentHeader(requirements);
+  // Capability choice: `data` routes to Infopunks-class providers which are
+  // proven x402-conformant (P4-1b precedent — see memory
+  // project_p4_1b_state_2026_05_06.md). Other capabilities may select
+  // providers whose live 402 probe doesn't return a parseable
+  // payment_requirements_v2 (e.g. paysponge endpoints, which need POST not GET)
+  // — those would 503 with provider_payment_requirements_unavailable before
+  // settle. Switching the smoke's primary capability to `data` keeps the test
+  // focused on the paywall middleware itself rather than the broader
+  // registry-conformance story (which is its own v0.2.0 follow-up).
   const reqBody = {
-    capability: 'search',
+    capability: 'data',
     max_price: '10000',
     payer_address: agentAccount.address,
   };

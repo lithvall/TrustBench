@@ -15,7 +15,8 @@
 - `src/paywall-handler.ts` `build402()` accepts an optional `bazaarExtension` and embeds it at `body.extensions.bazaar` in the 402 response per CDP doc § Extension architecture.
 - `src/index.ts` attaches the per-route declaration to Hono context via a tiny inline middleware before `paywallGate`, so the production code path picks up the extension without any other touch points.
 - **The 402 wire shape is validated.** Direct curl against `/test/bazaar-spike` returned the canonical `BodyDiscoveryExtension` shape byte-for-byte (info.input + info.output + schema all present, `method: "POST"` injected correctly).
-- Two env flags default-OFF: `TRUSTBENCH_BAZAAR_EXTENSION_ENABLED` (production /route) and `TRUSTBENCH_BAZAAR_SPIKE_ENABLED` (throwaway spike route).
+- Two env flags default-OFF in code: `TRUSTBENCH_BAZAAR_EXTENSION_ENABLED` (production /route) and `TRUSTBENCH_BAZAAR_SPIKE_ENABLED` (throwaway spike route).
+- **Railway env state at session close (2026-05-11, end of day):** BOTH flags are FALSE in prod. Spike was briefly TRUE during the session for the wire-up smoke test, then flipped back to FALSE at closeout because the spike route can't serve traffic correctly given paywallGate's route-coupling (returns 400 `capability_invalid` to any caller; see § "What we learned today" item 5 + lessons.md 2026-05-11 entry). With both flags false the public surface is clean: `/route` runs the existing Phase 3+4 paywall path unchanged, and `/test/bazaar-spike` returns 404 (route is conditionally mounted only when the flag is true).
 - `scripts/bazaar-spike-smoke.ts` + `npm run smoke:bazaar-spike` exist as the smoke harness.
 
 ### Blocked (why the spike couldn't validate CDP indexing today)

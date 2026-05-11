@@ -20,9 +20,19 @@ const TIMEOUT_MS = 8000;
 // is up), 404/405 = wrong path/method but server responded.
 const ALIVE_STATUSES = new Set([200, 201, 204, 401, 402, 403, 404, 405, 429]);
 
+// Shape MUST match the probes table columns in schema.sql exactly.
+// Probes table has: id (bigserial, auto), provider_id, timestamp,
+// latency_ms, success, region. Any field not in that list will cause
+// Supabase to reject the insert with "column does not exist".
+//
+// 2026-05-11: removed `capability` from this interface. It was present
+// in the in-memory shape but absent from the table schema, so every
+// probe insert was being silently rejected since this version of the
+// prober shipped. The error was swallowed because the insert call
+// didn't capture the return value. probes table was empty as a result.
+// Fixed alongside adding error capture below at the insert/upsert sites.
 interface ProbeSample {
   provider_id: string;
-  capability: string;
   region: string;
   latency_ms: number;
   success: boolean;
@@ -71,9 +81,11 @@ async function probeProvider(provider: any): Promise<ProbeSample[]> {
 
   for (const region of REGIONS) {
     const { latency, success } = await probeOnce(targetUrl);
+    // Note: provider.capability is intentionally NOT included — the probes
+    // table doesn't have a capability column. Capability is read off the
+    // provider row at scoring time, not duplicated per-sample.
     results.push({
       provider_id: targetUrl,
-      capability: provider.capability,
       region,
       latency_ms: latency,
       success,
@@ -152,7 +164,15 @@ async function runFullProbeAndScore() {
     const results = await probeProvider(p);
     if (results.length === 0) continue;
 
-    await supabase.from('probes').insert(results);
+    // Error capture: previously this call discarded its return value, so any
+    // schema mismatch or RLS denial was invisible (CI runs went green while
+    // the table stayed empty). Now we log and throw — better to fail loud
+    // and have the workflow turn red than silently accumulate zero data.
+    const { error: probeInsertError } = await supabase.from('probes').insert(results);
+    if (probeInsertError) {
+      console.error(`[prober] probes insert failed for ${p.url}: ${probeInsertError.message}`);
+      throw probeInsertError;
+    }
 
     // --- compute real stats ---
     const successCount = results.filter(r => r.success).length;
@@ -180,7 +200,9 @@ async function runFullProbeAndScore() {
       `p50=${p50}ms p95=${p95}ms jitter=${jitterRatio.toFixed(2)}`
     );
 
-    await supabase.from('scorecards').upsert({
+    // Same defensive error capture as the probes insert above. Scorecards
+    // writes have been landing — this is a symmetry/future-proofing fix.
+    const { error: scorecardUpsertError } = await supabase.from('scorecards').upsert({
       provider_id: p.url,
       capability: p.capability,
       score,
@@ -189,6 +211,10 @@ async function runFullProbeAndScore() {
       uptime_7d: Math.round(successRate * 100),
       last_updated: new Date().toISOString()
     }, { onConflict: 'provider_id' });
+    if (scorecardUpsertError) {
+      console.error(`[prober] scorecards upsert failed for ${p.url}: ${scorecardUpsertError.message}`);
+      throw scorecardUpsertError;
+    }
   }
 
   console.log('Probe + scoring pipeline complete.');

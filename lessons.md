@@ -4,6 +4,28 @@ A living log of patterns, surprises, and corrections worth remembering across se
 
 ---
 
+## 2026-05-11 — Silent Supabase write failures (prober probes table empty for weeks)
+
+Surfaced while preparing the Paddock 7-night rollup CSV. Local query showed `probes` total = 0 despite GitHub Actions nightly pipeline runs being green for the last 5 nights (May 7-11, 9-14 minutes each, all probing 1000 endpoints to completion). Same Supabase project as prod (`lmblvvbegscwqzzsldmg.supabase.co`), service_role key correct (scorecards upserts landing fine, 1280 rows, fresh `last_updated`).
+
+**Root cause:** `interface ProbeSample` included a `capability` field that doesn't exist in the `probes` table schema. Supabase rejected every insert with "column 'capability' does not exist" — but `await supabase.from('probes').insert(results)` discarded its return value, so the error never surfaced. CI saw no exception → green run. Probes table accumulated zero rows since this version of the prober shipped.
+
+**Why scorecards survived:** the scorecards table *does* have a `capability` column, and the upsert object's shape matches it. Same key, same project, different table — the schema-shape was the only difference. So the bug was probes-specific even though both writes used the same client.
+
+**Fix:**
+1. Removed `capability` from `ProbeSample` (it was never read downstream anyway — capability is read off the provider row at scoring time).
+2. Added `const { error } = await ...insert(...); if (error) throw error;` on both the probes insert and the scorecards upsert. Better to fail loud than silently accumulate zero data.
+3. Annotated the `ProbeSample` interface with a "MUST match table columns" comment so future drift gets caught at code review.
+
+**Lesson:** **never discard Supabase client return values on writes.** RLS denials, schema mismatches, and constraint violations are all returned via the `error` field — they do not throw. A silent green run does not mean data landed. Audit every `.insert()`, `.upsert()`, `.update()`, `.delete()` call in the codebase the moment you add a new write site. Same pattern as the high-risk-surface self-review checklist: "what's the worst this could do if I got the wire shape wrong, and what would the failure mode look like?" Here the failure mode was invisible until a partner-facing deliverable (7-night CSV for Paddock) made it impossible to ignore.
+
+**Carry-forward implications:**
+- The probes table will start populating tomorrow at 03:00 UTC after the fix deploys. The 7-night rollup CSV for Paddock can only carry today's-run data until 7 nightly runs accumulate (next true 7-night view: 2026-05-18 onward).
+- `/analytics` historical trend visualizations (if any) were also blank; check whether they rendered correctly with empty data or just hid the chart.
+- Audit the rest of the codebase for the same swallowed-error pattern. The receipt-emission path is already error-checked (per Phase 3 closeout), but worth a sweep through paid-probe.ts, route-handlers.ts, crawler.ts, and the spend-cap reservation code.
+
+---
+
 ## 2026-05-06 — Defensive URL-path filter for Solana (P4-1d-heurist follow-up)
 
 Smoke against the Heurist crawler surfaced 92 mistagged rows: Agentic Market lists some `mesh.heurist.xyz/x402/solana/agents/*` URLs as Base (`metadata.networks=['base']`), but they're actually Solana endpoints. Trusting upstream metadata alone left them in /rankings as Base, where routing to them would 502 at quote time.
@@ -1056,3 +1078,109 @@ The discipline applies symmetrically: a *"the lane is closed"* claim also needs 
 4. **Only after verification, draft the concept doc.** The concept doc cites the verification as ground truth and stays calibrated to actual lane density.
 
 This is the pattern used successfully on 2026-05-07 to kill AgentLog cleanly (no engineering investment) and to reroute the reliability-pivot direction. Bake it into the workflow.
+
+---
+
+## 2026-05-10 — Critic pass workflow rule + founder-shape calibration added to CLAUDE.md
+
+**What changed.** Added two workflow rules to CLAUDE.md as the lightweight first-pass version of two patterns surfaced during the ProjectAutonomous strategic-read exercise:
+
+1. **Critic pass on high-risk diffs** (`CLAUDE.md` § "Critic pass on high-risk diffs (added 2026-05-10)" + new `prompts/critic.md` file). Before shipping any high-risk-surface change (signing, payment construction, idempotency, spend caps, receipts, public framing), run an adversarial review producing 3 specific rejection reasons + counter-thesis + named wedge competitor + hidden assumption + kill criterion + verdict. Strong-reject verdicts pause the change and require Johan approval.
+
+2. **Founder-shape calibration block** (`CLAUDE.md` § "Founder-shape calibration (added 2026-05-10)"). Explicit capital position, energy budget this quarter, skills building/avoiding, what bores me, risk tolerance. Applied during Critic passes and idea-scoping to filter wrong-shape suggestions before they consume solo-founder weeks.
+
+**Why now.** ProjectAutonomous Slice 2 (buildroom contract chain) will eventually ship a structured Critic agent with schema-backed receipts. That's a weekend of work. The lightweight CLAUDE.md version derisks the structured build: if the Critic pass surfaces real failure modes over the next 2-3 high-risk diffs, the structured version is validated. If it produces only vague pessimism or rubber-stamp verdicts, the prompt needs sharpening before committing infrastructure.
+
+**Carry-forward signals to watch.**
+- After 3 Critic passes on real high-risk diffs: are the rejection reasons specific (cite exact assumptions, real wedge competitors) or vague? If vague, sharpen the prompt before Slice 2 builds the schema-backed version.
+- If 3 consecutive Critic verdicts are `acceptable` / `endorsed`, run an alternative-model cross-check (Opus vs. Sonnet) to detect rubber-stamping.
+- Append a one-line entry to `lessons.md` after each Critic pass: `2026-MM-DD: Critic pass on {feature} — verdict {V} — hidden assumption: {one line}.`
+
+**What to revisit in 30 days.** Whether the Critic pass is producing real critique or has drifted toward agreement. The full ProjectAutonomous Slice 2 plan in `ProjectAutonomous/02-slice-2-buildroom.md` describes the structured version; revisit it once 5+ Critic passes have run and a calibrated read of value-vs-cost is possible.
+
+**Related files.**
+- `prompts/critic.md` — the prompt itself, with verdict definitions, anti-patterns, anti-rubber-stamp discipline, and a worked example.
+- `CLAUDE.md` § "Critic pass on high-risk diffs" — workflow integration.
+- `CLAUDE.md` § "Founder-shape calibration" — applied during Critic passes.
+- `ProjectAutonomous/02-slice-2-buildroom.md` — the structured Slice 2 buildroom design that the lightweight Critic pass derisks.
+
+---
+
+## 2026-05-10 — Project doc sweep: Phased plan rewrite + deprecated/superseded headers
+
+**What changed.** Materially stale docs were either rewritten in place, header-marked SUPERSEDED, or renamed with a `_deprecated_2026-05-10.md` suffix:
+
+1. **`CLAUDE.md` Phased plan section** — rewrote to reflect reality (Phases 0-3 DONE with dates, Phase 4 reframed around component-in-stack + paywalled API monetization + active listing sprint with target 2026-05-22, Phase 5 with AP2-compatibility addendum). The original framing predated the 2026-05-07 partnership-day reframe and was misleading future sessions.
+
+2. **`TrustBench-strategy.md`** — added a STATUS: SUPERSEDED-IN-PART header at the top. Parts 1-2 (the scoring fix diagnosis) remain authoritative; the strategic-direction sections were superseded by `partnership-day-record-2026-05-07.md`. Did not rename — too many cross-references would break.
+
+3. **Renamed `_deprecated_2026-05-10.md` (concept killed or workflow ended):**
+   - `agentlog-CLAUDE-draft.md`, `agentlog-concept-2026-05-07.md`, `agentlog-concept-2026-05-07_CHATGPT_INPUT.md`, `agentlog-concept-2026-05-07_GROK_INPUT.md` (AgentLog concept killed 2026-05-07)
+   - `phase3-grok-batch.md` (Phase 3 closed + Grok no longer touches code)
+   - `stitch-redesign-prompt.md` (site redesign shipped 2026-05-07)
+
+4. **SUPERSEDED header added (no rename — content has historical value or methodology reference value):**
+   - `phase6-beyond-strategy.md`, `phase6-reassessment-2026-05-07.md` + 2 input files (superseded by partnership-day-record)
+   - `trustbench-reliability-pivot-verification-2026-05-07.md` (pivot rerouted)
+   - `agentlog-competitor-verification-2026-05-07.md` (concept killed, but the methodology pattern is now standard workflow — kept under original name as a methodology reference)
+   - `# Phase 2 — Builder Conversations.md`, `# Competition Analysis — Recent Rev.md` (Phase 2 era snapshots cited by name in CLAUDE.md as evidence)
+
+5. **Left untouched (already current or already self-marked historical):**
+   - `phase3-handoff.md` (already self-marked HISTORICAL inline)
+   - `phase3-x402-construction-grok-rejected-2026-05-01.md` (already self-named with rejection date)
+   - `README.md` (verified current — has cross-network framing, Phase 3+4 dates, paywall in-flight)
+   - `llms.txt` (verified current — explicit cross-network coverage + Phase 4 in-flight callout)
+   - `skill.md` (current canonical agent-discovery surface)
+   - All `phase4-*.md` docs (active sprint references)
+   - All `partnership-day-*` and `phase5-*` docs (current canonical)
+
+**Why this matters.** Solo founders accumulate doc debt fast. A new session reading the OLD CLAUDE.md Phased plan would have orientated to the *Phase 2 era* strategic frame — completely wrong for the current Phase 4 listing sprint. The reframe doc was canonical (CLAUDE.md correctly pointed to `partnership-day-record-2026-05-07.md` as priority read at the top), but the deeper Phased plan section silently contradicted it. Sweeps like this should run after every meaningful strategic pivot.
+
+**Carry-forward — sweep cadence.** Run a sweep like this at the close of each phase. Triggers:
+- Any file whose status header says "this week" or "in flight" but is more than 30 days old.
+- Any file whose recommendations contradict the current canonical direction doc.
+- Any file referring to a concept (project, pivot, framework) that has been killed or superseded.
+
+For each candidate, three options: rewrite-in-place / rename `_deprecated_YYYY-MM-DD.md` with WHY header / add SUPERSEDED header keeping name. Choose rename only when the file has no live cross-references and no methodology-reference value. Choose SUPERSEDED-header when the analysis or methodology remains useful even though the conclusion is stale.
+
+**Verification done.** `tsc --noEmit` passed clean (no code regressions — only docs touched). All renamed files spot-checked via Read tool to confirm headers landed (Linux mount byte counts initially looked stale but Read tool against Windows path showed correct content).
+
+---
+
+## 2026-05-11 — Decision Journal pattern + HTML output rule + QUEUE/GENERATED folders
+
+**What changed.** Two source articles were added to `ProjectAutonomous/` (`ClaudeHTML.md` by Thariq Shihipar and `VaultIntoBusinessSystem.md`). Three high-leverage patterns from those articles were folded into the slice plans and one was scaffolded into TrustBench immediately:
+
+**ProjectAutonomous Slice 1 (`01-slice-1-jarvis-brain.md`):**
+1. **`QUEUE/` and `GENERATED/` folders** added to the vault structure (pattern from VaultIntoBusinessSystem). `QUEUE/` is the task-drop folder — drop a file describing what you need, automation picks it up, processes async, output lands in `GENERATED/`, queue file archived. `GENERATED/` is strict no-manual-edit territory. Separates "things to do" / "in progress" / "ready to consume" cleanly.
+2. **Decision Journal pattern** added (pattern from VaultIntoBusinessSystem). Daily-note `DECISION:` lines captured to `decision-journal/entries/` with assumption + leading_indicator + check_back_date (90 days out). Callback prompt walks entries daily and surfaces ones with check-back date ≤ today.
+3. **HTML output rule** for human-read briefings (pattern from ClaudeHTML). Friday Intelligence Briefing, Weekly Self-Mgmt, Monthly Synthesis all render as standalone HTML in `GENERATED/briefings/` with inline CSS and optional SVG. Markdown mirrors retained for grep/search. AGENTS.md, prompt files, JSON schemas, receipts stay text — they're parsed by prompts, not read by humans.
+4. **Current Weekly Focus** section added to AGENTS.md template — updated every Monday by the Sunday Self-Mgmt brief's recommendation; weights every Claude decision toward this week's actual priorities.
+5. **Daily-note convention keywords** added: `DECISION:`, `SHIPPED:`, `SIGNAL:`, `PARTNERSHIP-REPLY:`, `KILL:` — lightweight protocol for routing daily-note content to workflows.
+
+**ProjectAutonomous Slice 3 (`03-slice-3-sector-scanner.md`):**
+- Weekly sector heatmap output upgraded from markdown table to HTML+SVG. Radial chart visualization (size = volume, color = heat, distance = novelty) renders "which sectors are hot, accelerating, and novel" at-a-glance — markdown table version retained as mirror for Friday-brief synthesizer consumption.
+
+**TrustBench-now (applied immediately, not deferred to Slice 1):**
+- `decisions.md` upgraded to new Decision Journal format from 2026-05-11 onward (legacy entries NOT retrofitted — they remain frozen context). New entries include `assumption`, `leading_indicator`, `check_back_date`, `status` fields beneath the legacy one-liner.
+- `CLAUDE.md` § "Decision Journal capture + callback" workflow rule added alongside the Critic-pass clause. Non-negotiable for non-trivial decisions.
+- `prompts/decision-journal.md` created with both modes (capture + callback), anti-patterns, worked example using the paywall v0.1.0 dual-payment decision.
+- Manual weekly callback workflow until Slice 1 of ProjectAutonomous lands (Monday review scan).
+
+**Why this matters.** Pattern from VaultIntoBusinessSystem that I almost missed when first writing Slice 1: the QUEUE → process → GENERATED separation is the cleanest async-task pattern for vault-based workflows. Without it, "things to do" mixes with "in progress" mixes with "ready to consume," and the agent has to disambiguate every time. With it, the agent just walks each folder for its specific job.
+
+The Decision Journal pattern is the bigger win. Without it, the legacy `decisions.md` captures *what* and *why* but never grades whether the *why* was actually the driver of the outcome. Solo founders make many decisions per quarter; the ones that compound are the ones whose assumption-class failures get caught and named in `lessons.md`. The Decision Journal forces that loop.
+
+HTML output is the smallest of the three changes but the most visible — Friday briefings rendered as HTML+SVG are 10x more likely to be read carefully than markdown ones (per Thariq's observation, which I've verified holds in TrustBench's `/receipts/:id` and `/rankings` content-negotiated rendering).
+
+**Carry-forward — pattern to watch.** When the next promising-looking productivity source article appears, run this same audit: which patterns are new vs. already-present-in-the-plan? Which violate constraints (Claude-first, solo-founder maintainability, no custodial)? Which provide compounding value (eval loops, calibration, real-conversation bridges)? Which add only short-term comfort? Fold high-compounding-value, constraint-respecting patterns in. Skip the rest, even when they sound clever.
+
+**Verification done.** `tsc --noEmit` passed clean. Slice 1 now has 16 Decision Journal references, 11 QUEUE/GENERATED references, 9 HTML/SVG references. Slice 3 has 5 HTML/SVG references. `decisions.md` new format introduced. `prompts/decision-journal.md` created at 8.5KB. CLAUDE.md workflow rule added at line 112.
+
+**Related files.**
+- `prompts/decision-journal.md` — capture + callback prompts.
+- `CLAUDE.md` § "Decision Journal capture + callback" — workflow integration.
+- `decisions.md` § Format — new richer entry format.
+- `ProjectAutonomous/01-slice-1-jarvis-brain.md` — full Decision Journal automation when Slice 1 ships.
+- `ProjectAutonomous/03-slice-3-sector-scanner.md` — HTML+SVG heatmap.
+- `ProjectAutonomous/ClaudeHTML.md` and `ProjectAutonomous/VaultIntoBusinessSystem.md` — source articles for the patterns.

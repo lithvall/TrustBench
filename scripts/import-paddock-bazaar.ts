@@ -180,16 +180,20 @@ async function main() {
   let mergedCount = 0;
 
   for (const row of rows) {
-    const url = pick(row, 'endpoint_url', 'url');
+    // 2026-05-11: Paddock's actual export emits `canonical_url`, `origin`,
+    // and `pay_to_wallet` (vs. the `endpoint_url`/`domain`/`wallet_address`
+    // shapes the 2026-05-06 DM described). Aliases added below so the script
+    // tolerates either schema without a Paddock-side change.
+    const url = pick(row, 'endpoint_url', 'url', 'canonical_url');
     if (!url) {
       skippedInvalid += 1;
       continue;
     }
 
-    const domain = pick(row, 'domain');
+    const domain = pick(row, 'domain', 'origin');
     const networkRaw = pick(row, 'network');
     const priceUsdc = pick(row, 'price_usdc', 'price', 'price_in_usdc');
-    const wallet = pick(row, 'wallet_address', 'wallet', 'pay_to');
+    const wallet = pick(row, 'wallet_address', 'wallet', 'pay_to', 'pay_to_wallet');
     const lastUpdatedRaw = pick(row, 'last_updated', 'last_payment_timestamp', 'updated_at');
 
     const networkKey = networkRaw.toLowerCase().trim();

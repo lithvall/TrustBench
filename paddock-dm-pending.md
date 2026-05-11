@@ -1,6 +1,6 @@
 # Paddock DM — pending response
 
-**Status:** refined 2026-05-06 with full Reddit thread context. Ready to send pending one optional pre-flight (click-through `/paddock/market` for the UX read; can also be deferred to a follow-up DM).
+**Status:** refined 2026-05-11 — the 7-night rollup paragraph and pre-send checklist were rewritten after we surfaced a silent Supabase write bug while preparing the rollup (probes table empty since this prober version shipped; bug + fix documented in `lessons.md` 2026-05-11 entry). Today's deliverable is now a Day 1 baseline CSV; the real 7-night follow-up is conditional on Paddock responding.
 
 ## Full Reddit thread (2026-05-06)
 
@@ -24,19 +24,63 @@
 >
 > URL granularity: full path, not origin. We key on the endpoint URL (e.g. `https://infopunks-cognition-layer-x402.onrender.com/v1/coherence-score`). Agentic Market often emits multiple endpoints per service at different prices (Exa has `/search` and `/contents`), so matching by domain loses endpoint-level resolution. The 7-night CSV will include both `endpoint_url` and a parsed `domain` column so you can join at either level.
 >
-> Fifth bucket: yes, that's the one TrustBench has the most unique signal in. The four I proposed earlier (live+spending, live+not-spending, dead+spending, dead+not-spending) cover the registry-cross-listing space. Your fifth (paid + not in either registry) sits outside both registries entirely, which is exactly the gap that gets surfaced by spend telemetry alone. Infopunks's three cognition endpoints are the canonical example today (in our registry as a verified seed, not in Agentic Market as of the 2026-05-05 crawl, haven't checked CDP Bazaar yet). I'll grep the bazaar CSV when I pull it and either confirm or flag.
+> Fifth bucket: yes, that's the one TrustBench has the most unique signal in. The four I proposed earlier (live+spending, live+not-spending, dead+spending, dead+not-spending) cover the registry-cross-listing space. Your fifth (paid + not in either registry) sits outside both registries entirely, which is exactly the gap that gets surfaced by spend telemetry alone. Infopunks's three cognition endpoints are the canonical example today: in our registry as a verified seed, not in Agentic Market as of the 2026-05-05 crawl, and grepped against your CDP Bazaar export this morning with no hit. So they're transacting via x402 today (we've produced a signed paid receipt against them already) but they're invisible to both curation surfaces. Worth flagging on your side too, the gap might just be a Bazaar-side onboarding lag rather than the merchant opting out.
 >
 > Bazaar CSV: got the export URL. Will pull and ingest as a third source on our side (alongside Agentic Market and verified seeds). Useful both ways, your inventory enriches mine and vice versa.
 >
-> 7-night rollup: sending within a couple of days, once the Agentic Market crawler closes and the next nightly probe pass populates fresh metrics on the new rows. Planned columns: `endpoint_url`, `domain`, `network` (Base only on our side today), `capability` (search/inference/data/media/infra; we just landed Coinbase's 5-cat taxonomy alignment 2026-05-05), `integration_type` (1P/3P when Agentic Market knows, null otherwise), `x402_verified` (our live-probe bit), 7-day `success_rate` / `latency_p50` / `latency_p95` / `score`, `last_probed_at`. CSV by default; I can also dump JSON or a Postgres flatfile if either is easier on your side.
+> 7-night rollup: full transparency, surfaced a measurement bug on my side this morning while preparing it. The prober's insert into our probes table has been silently rejected for weeks (a column in the insert payload that didn't exist in the table schema, and the script wasn't checking the error return value). Scorecards still landed because they have a different schema, which is why /rankings has been current all along, but the historical per-probe samples never accumulated. Fixed today and writing to the lessons log so the same swallowed-error pattern doesn't recur.
+>
+> Day 1 CSV is up at https://github.com/lithvall/TrustBench/blob/main/data/rollup-2026-05-11.csv (raw bytes for programmatic ingest: https://raw.githubusercontent.com/lithvall/TrustBench/main/data/rollup-2026-05-11.csv). Same column shape we discussed: `endpoint_url`, `domain`, `network` (Base on our side today; Solana mesh stored but filtered out of /rankings until Pay.sh's wire layer matures), `capability` (search/inference/data/media/infra, Coinbase 5-cat alignment), `integration_type` (1P/3P from Agentic Market or empty), `x402_verified` (our live-probe bit), `success_rate_7d`, `latency_p50_7d`, `latency_p95_7d`, `samples_7d` (=3 across the board today, one fresh probe pass), `score`, `last_probed_at`. The column names still say `_7d` because that's the window the script aggregates over; today every row has 3 samples in that window, which is itself the disclosure. The probe pass ran from my local host in Sweden this morning rather than the usual GH Actions ubuntu runner, so latencies are a touch Europe-skewed; tomorrow's nightly cron resumes from the ubuntu runner and that bias washes out as samples accumulate.
+>
+> If today's slice already gives you what you need for the join, perfect. If you'd want a real 7-night version once the nightly cron has actually accumulated history, ping me around May 18 and I'll send a refreshed CSV through.
 >
 > One more thing: agree on the labeling discipline. "TrustBench liveness" and "Paddock spend" stay as distinct columns on the published artifact; neither brand claims the other's data. Keeps the pay-to-rank reading off the table for both of us.
 
-## Pre-send checklist
+## Pre-send checklist (updated 2026-05-11)
 
-- [ ] (Optional, ≤2 min) Click through `/paddock/market` and capture UX feedback for a follow-up DM. Either send the refined reply now and split the UX feedback into a separate message, or hold the reply until UX feedback is ready and bundle. Recommend split — keeps the technical asks moving while the UX read takes its own pass.
-- [ ] (Optional, before send) Pull `breakthecubicle.com/api/paddock/export/bazaar` once and grep for `infopunks-cognition-layer-x402`. If present, edit the "haven't checked CDP Bazaar yet" sentence to reflect what you found. If absent, leave the sentence as-is.
-- [ ] Send via Reddit DM to @Reasonable-Degree101.
+The sequence below depends on the prober fix landing first. Run from PowerShell, project root.
+
+```powershell
+# 1. Typecheck the prober fix (should be clean).
+npm run typecheck
+
+# 2. Re-run the Paddock import with the field-name aliases we added today
+#    (canonical_url / pay_to_wallet / origin). Should now upsert ~1200 rows.
+npm run import-paddock-bazaar
+
+# 3. Local pipeline run. Probes will actually land in the table this time.
+#    Takes ~10-15 minutes. Watch for errors; the new error-capture will throw
+#    loud if anything is still off.
+npm run pipeline
+
+# 4. Verify probes landed. Expect ~3000-ish rows (1000+ providers × 3 samples).
+npx tsx -e "import('dotenv/config').then(async () => { const { createClient } = await import('@supabase/supabase-js'); const s = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY); const { count } = await s.from('probes').select('*', { count: 'exact', head: true }); console.log('probes total after local run:', count); });"
+
+# 5. Export the Day 1 CSV (bypasses npm's preamble noise).
+npx tsx scripts/export-7-night.ts > rollup-2026-05-11.csv
+
+# 6. Sanity check the CSV: header + a couple of rows + total line count.
+Get-Content rollup-2026-05-11.csv -TotalCount 3
+(Get-Content rollup-2026-05-11.csv).Count
+
+# 7. Resolves the "haven't checked CDP Bazaar yet" line in the DM body.
+Select-String -Path rollup-2026-05-11.csv -Pattern "infopunks-cognition-layer-x402"
+```
+
+After Step 7:
+- If the grep returns rows for `infopunks-cognition-layer-x402` AND the row's `network` or any other column reveals CDP Bazaar presence (look for the metadata source — we set `paddock_cdp_bazaar` on imports), edit the "Fifth bucket" paragraph in the DM body to confirm Infopunks's status in CDP Bazaar.
+- If the grep returns no Bazaar-flagged Infopunks rows, leave the "haven't checked CDP Bazaar yet" sentence as-is.
+
+Then:
+
+- [ ] Send via Reddit DM to @Reasonable-Degree101 with `rollup-2026-05-11.csv` attached.
+- [ ] (Optional, can defer to follow-up) Click through `/paddock/market` and capture UX feedback for a separate DM.
+
+## If Paddock responds within 7 days
+
+Send the real 7-night CSV around 2026-05-18 once the nightly cron has accumulated history. Same export command, same delivery channel. The DM body already commits to this conditionally ("ping me around May 18 and I'll send a refreshed CSV through").
+
+If Paddock goes silent, no follow-up owed — the Day 1 CSV honored the within-a-couple-of-days commit and the bug-disclosure is its own complete artifact.
 
 ## Companion deliverables (separate from the DM itself)
 

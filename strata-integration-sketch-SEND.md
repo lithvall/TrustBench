@@ -241,6 +241,52 @@ When you have the schema ready, send it whenever convenient — even a stripped-
 
 ---
 
+## Status update — 2026-05-11 (locked-after-corrections)
+
+Strata replied with four corrections to §3 and §7. The locked annotation shape, after their feedback, is below. Original §3 above kept as historical record so the diff is legible.
+
+**Locked annotation shape:**
+
+```json
+"trust_signals": [
+  {
+    "source": "strata.usestrata.dev",
+    "kind": "x402_trust",
+    "trusted": false,
+    "security_score": 45,
+    "risk_level": "medium",
+    "payment_endpoint": {
+      "amount_usd": 2.50,
+      "currency": "USDC",
+      "network": "base"
+    },
+    "actionable_flags": ["drain_risk"],
+    "captured_at": "2026-05-10T14:23:41.000Z",
+    "ref": "https://usestrata.dev/api/v1/x402/verify?url=..."
+  }
+]
+```
+
+**Resolved against §7 questions:**
+
+1. Field names: `security_score` (int 0-100, kept at native scale, no rescaling), `trusted` (bool, primary signal), `risk_level` (string).
+2. Score artifact format: plain JSON over HTTPS today, no artifact-level signing. Reference-by-URL path confirmed (vs. embedded signed bytes). TrustBench receipt signature is the only signature wrapping this annotation.
+3. `score_id`: does not exist. Cache is keyed on canonical URL with a 24h window. Reference uses `(ref URL + captured_at)` instead, where `captured_at` mirrors Strata's `last_checked_at`.
+4. 24h cache behavior: same score returned within window, re-probed after.
+5. `unverified_domain` flag: filtered at receipt-emission time. Reason: Strata's WHOIS is a v1 stub; the flag appears on almost every endpoint and means "unverifiable," not "suspicious." Filtering avoids baking a noisy v1-stub signal into an immutable receipt artifact. Field renamed `actionable_flags` to make the filter explicit and forward-compatible (pending Strata confirmation; raised in 2026-05-11 reply).
+
+**Resolved against §6 open commercial questions:**
+
+- Reciprocal `score-provider` (data-exchange offset): confirmed by Strata, "data exchange offset makes sense."
+- Pricing unit: atomic-unit USDC confirmed (vs. USD).
+
+**Open after 2026-05-11 reply:**
+
+- `actionable_flags` vs. `flags` field name (small, raised in reply).
+- Move to §8 step 3 (tiers) pending Strata's response.
+
+---
+
 ## 8. Concrete next steps
 
 If the shape above looks right to you:

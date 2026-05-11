@@ -22,10 +22,8 @@ import { renderPricingHtml, buildPricingJson } from './pricing-html.js';
 import { paywallGate } from './paywall-handler.js';
 import { renderAnalyticsHtml, type AnalyticsData, type CategoryCard } from './analytics-html.js';
 import {
-  routeBazaarServerMw,
-  routeBazaarDiscoveryMw,
-  spikeBazaarServerMw,
-  spikeBazaarDiscoveryMw,
+  routeBazaarExtension,
+  spikeBazaarExtension,
   isBazaarExtensionEnabled,
   isBazaarSpikeEnabled,
   spikeHandler,
@@ -257,11 +255,29 @@ app.get('/route', async (c) => {
 // FAILURE MODE: if @x402/extensions/bazaar isn't installed or named exports
 // don't match the CDP-doc shape, the middlewares no-op (see
 // src/bazaar-extension.ts comments). Existing /route behavior preserved.
-if (isBazaarExtensionEnabled()) {
-  // Bazaar middlewares passed as individual named arguments (not array
-  // spread) so Hono's variadic overload resolves correctly — array spreads
-  // trigger TS2345 by selecting the path-less overload.
-  app.post('/route', routeBazaarServerMw, routeBazaarDiscoveryMw, paywallGate, requireAgent, withIdempotency, requireWithinSpendCap, quoteHandler);
+// Bazaar discovery wire-up: when the env flag is on AND the package built a
+// declaration successfully, attach the declaration to the Hono context BEFORE
+// paywallGate runs so the 402 response builder can embed `extensions.bazaar`
+// in the body. Per CDP docs § Extension architecture, this is the v2 wire
+// shape; the CDP facilitator extracts the discovery info from the payment
+// payload + requirements at verify/settle time and catalogs the route.
+//
+// FAILURE MODE: if @x402/extensions/bazaar isn't installed or named exports
+// don't match the new types contract, routeBazaarExtension is null and the
+// middleware below is a no-op. Existing /route behavior preserved.
+if (isBazaarExtensionEnabled() && routeBazaarExtension) {
+  app.post(
+    '/route',
+    async (c, next) => {
+      // `as never` on the key: Hono's typed Variables map rejects untyped
+      // keys at compile time. Read side in paywall-handler.ts uses the same
+      // cast; type discipline is maintained via the value type narrowing on
+      // the read side rather than declaring a project-wide Variables interface.
+      c.set('bazaarExtension' as never, routeBazaarExtension as never);
+      await next();
+    },
+    paywallGate, requireAgent, withIdempotency, requireWithinSpendCap, quoteHandler,
+  );
 } else {
   app.post('/route', paywallGate, requireAgent, withIdempotency, requireWithinSpendCap, quoteHandler);
 }
@@ -299,10 +315,17 @@ if (isBazaarExtensionEnabled()) {
 //
 // CLEANUP: delete this route block and the TRUSTBENCH_BAZAAR_SPIKE_ENABLED
 // flag after the spike passes and the production /route extension is live.
-if (isBazaarSpikeEnabled()) {
-  // Same named-args pattern as on /route above — avoid array-spread for
-  // Hono's variadic overload resolution.
-  app.post('/test/bazaar-spike', spikeBazaarServerMw, spikeBazaarDiscoveryMw, paywallGate, spikeHandler);
+if (isBazaarSpikeEnabled() && spikeBazaarExtension) {
+  // Same context-attach pattern as /route above. paywallGate reads the
+  // bazaarExtension from context and embeds it in the 402 response body.
+  app.post(
+    '/test/bazaar-spike',
+    async (c, next) => {
+      c.set('bazaarExtension' as never, spikeBazaarExtension as never);
+      await next();
+    },
+    paywallGate, spikeHandler,
+  );
 }
 
 // ---------------------------------------------------------------------------

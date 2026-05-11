@@ -345,34 +345,55 @@ type SignedRoutingResponse = {
 // -----------------------------------------------------------------------------
 // 402 emitter — what we return when paywall is on and no X-PAYMENT was given.
 // -----------------------------------------------------------------------------
-function build402(revenueWallet: string): {
+function build402(
+  revenueWallet: string,
+  bazaarExtension?: { bazaar: unknown } | null,
+): {
   status: 402;
-  body: { x402Version: number; error: string; accepts: PaymentRequirements[] };
-} {
-  return {
-    status: 402,
-    body: {
-      x402Version: 2,
-      error: 'payment_required',
-      accepts: [
-        {
-          scheme: 'exact',
-          network: BASE_NETWORK_CAIP,
-          asset: BASE_USDC_ADDRESS,
-          amount: ROUTING_FEE_ATOMIC,
-          payTo: revenueWallet,
-          maxTimeoutSeconds: MAX_TIMEOUT_SECONDS,
-          // USDC v2 EIP-712 domain — required by the facilitator's verify side
-          // to reconstruct the domain separator. Matches x402-ecosystem-state.md.
-          extra: {
-            name: 'USD Coin',
-            version: '2',
-            description: 'TrustBench routing fee. Pays for the differentiated routing decision and signed routing receipt. Provider payment is a separate x402 transaction, paid directly to the provider after this call.',
-          },
-        },
-      ],
-    },
+  body: {
+    x402Version: number;
+    error: string;
+    accepts: PaymentRequirements[];
+    extensions?: Record<string, unknown>;
   };
+} {
+  // Optional `extensions` field per CDP Bazaar docs (v2 wire format). When
+  // present, the CDP facilitator extracts the bazaar metadata at settle time
+  // and catalogs the route into agentic.market / Bazaar. Absent on routes
+  // not declared discoverable (existing /route behavior, no /route paywall
+  // surface drift). See src/bazaar-extension.ts for the declaration source.
+  const body: {
+    x402Version: number;
+    error: string;
+    accepts: PaymentRequirements[];
+    extensions?: Record<string, unknown>;
+  } = {
+    x402Version: 2,
+    error: 'payment_required',
+    accepts: [
+      {
+        scheme: 'exact',
+        network: BASE_NETWORK_CAIP,
+        asset: BASE_USDC_ADDRESS,
+        amount: ROUTING_FEE_ATOMIC,
+        payTo: revenueWallet,
+        maxTimeoutSeconds: MAX_TIMEOUT_SECONDS,
+        // USDC v2 EIP-712 domain — required by the facilitator's verify side
+        // to reconstruct the domain separator. Matches x402-ecosystem-state.md.
+        extra: {
+          name: 'USD Coin',
+          version: '2',
+          description: 'TrustBench routing fee. Pays for the differentiated routing decision and signed routing receipt. Provider payment is a separate x402 transaction, paid directly to the provider after this call.',
+        },
+      },
+    ],
+  };
+
+  if (bazaarExtension && typeof bazaarExtension === 'object' && 'bazaar' in bazaarExtension) {
+    body.extensions = bazaarExtension;
+  }
+
+  return { status: 402, body };
 }
 
 // -----------------------------------------------------------------------------
@@ -879,6 +900,11 @@ export const paywallGate: MiddlewareHandler = async (c: Context, next: Next) => 
     console.error('[paywall] paywall enabled but TRUSTBENCH_REVENUE_WALLET_ADDRESS missing; returning 503');
     return c.json({ error: 'paywall_misconfigured', detail: 'revenue wallet not configured' }, 503);
   }
-  const { status, body } = build402(revenueWallet);
+  // Read Bazaar declaration from Hono context if set by an upstream middleware
+  // (see src/index.ts /route + /test/bazaar-spike wire-up). When present,
+  // build402 embeds `extensions.bazaar` in the response body so the CDP
+  // facilitator catalogs the route at settle time.
+  const bazaarExtension = c.get('bazaarExtension' as never) as { bazaar: unknown } | null | undefined;
+  const { status, body } = build402(revenueWallet, bazaarExtension);
   return c.json(body, status);
 };

@@ -1,6 +1,6 @@
 {
   "name": "TrustBench",
-  "description": "Non-custodial routing and policy layer for x402 paid agent calls. Wraps x402-conforming providers with idempotency keys, hard spend caps, Ed25519-signed audit receipts, and a queryable receipt endpoint. Agents sign their own EIP-3009 transferWithAuthorization with their own wallet (Coinbase Agentic Wallet recommended); TrustBench constructs the quote, routes to a probed and scored provider, observes the on-chain settlement, and emits a receipt that any third party can verify offline against the published public key.",
+  "description": "Non-custodial routing and audit layer for x402 that produces signed evidence rather than opinion. Every paid /route call emits an Ed25519-signed receipt covering the routing decision and the on-chain settlement reference, verifiable offline against a published public key with no dependency on TrustBench being online or honest. Hard spend caps, idempotency keys, and a fail-safe paywall (refuses to charge when the upstream merchant is non-conformant, so money never moves on bad routes) are bundled in. Agents sign their own EIP-3009 transferWithAuthorization with their own wallet (Coinbase Agentic Wallet recommended); TrustBench constructs the quote, routes to a probed and scored provider, observes the on-chain settlement, and emits the signed receipt.",
   "version": "0.1.0",
   "phase": "phase-4",
   "homepage": "https://trustbench.io",
@@ -160,10 +160,12 @@
   },
   "pricing": {
     "model": "x402-native paywalled API",
-    "description": "Endpoints are paywalled via x402 with per-call USDC settlement on Base through the public Foundation facilitator at x402.org/facilitator. No subscriptions, no contracts. Full tier table at /pricing (HTML and JSON).",
+    "description": "Endpoints are paywalled via x402 with per-call USDC settlement on Base through the Coinbase CDP facilitator at api.cdp.coinbase.com/platform/v2/x402. No subscriptions, no contracts. Full tier table at /pricing (HTML and JSON).",
     "publishedTiers": "https://trustbench.io/pricing",
     "liveInV010": "POST /route at $0.005 per call (score-provider tier)",
-    "publicFacilitator": "https://x402.org/facilitator",
+    "facilitator": "Coinbase CDP facilitator",
+    "facilitatorUrl": "https://api.cdp.coinbase.com/platform/v2/x402",
+    "facilitatorDocs": "https://docs.cdp.coinbase.com/x402/welcome",
     "providerVerificationBond": "refundable, pay-to-list, never pay-to-rank",
     "partnerCredit": "Existing partner agreements override the published table for that partner. Reach out via GitHub for partner-volume credit before integration locks in."
   },

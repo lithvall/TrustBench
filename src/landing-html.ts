@@ -32,7 +32,7 @@ export type LandingStats = {
 
 export function renderLandingHtml(stats: LandingStats): string {
   const title = 'TrustBench — Cross-network registry + live telemetry for x402 endpoints';
-  const description = 'Cross-network registry of x402-style endpoints across Base and Solana, with nightly liveness telemetry, signed receipts, and a non-custodial smart router for agent payments. Multi-protocol on the roadmap (x402, p402, MPP).';
+  const description = 'Non-custodial routing and audit layer for x402: signed receipts with on-chain settlement evidence, fail-safe paywall, hard spend caps. Cross-network registry of endpoints across Base and Solana, with nightly liveness telemetry. Multi-protocol on the roadmap (x402, p402, MPP).';
 
   const stat = (label: string, value: string) => `
     <div class="p-6">
@@ -61,7 +61,7 @@ ${renderNav('home')}
       Base today, Solana next; protocol-agnostic across x402, p402, MPP.
     </h1>
     <p class="mt-6 text-lg text-muted max-w-2xl mx-auto leading-relaxed">
-      Honest measurement, signed receipts, hard spend caps. Built solo, useful for any agent builder.
+      Signed receipts with on-chain settlement evidence, fail-safe paywall, hard spend caps. Honest measurement. Built solo, useful for any agent builder.
     </p>
     <div class="mt-8 flex flex-wrap justify-center gap-3">
       <a href="/rankings?capability=search" class="bg-primary hover:bg-primary-dark text-white px-6 py-3 rounded font-medium transition-colors">View rankings</a>
@@ -93,8 +93,8 @@ ${renderNav('home')}
         <p class="text-sm text-ink leading-relaxed">Every routed call returns an Ed25519-signed receipt with on-chain settlement reference. Verifiable by anyone.</p>
       </div>
       <div class="bg-surface border border-border rounded-lg p-6">
-        <div class="label-caps text-primary mb-3">Spend Caps + Idempotency</div>
-        <p class="text-sm text-ink leading-relaxed">Hard server-side spend caps per agent + per call. Idempotency keys protect retries from double-charging.</p>
+        <div class="label-caps text-primary mb-3">Fail-Safe Paywall</div>
+        <p class="text-sm text-ink leading-relaxed">Hard server-side spend caps per agent and per call. Idempotency keys protect retries from double-charging. If the upstream merchant is non-conformant, the agent isn't charged: money never moves on bad routes.</p>
       </div>
     </div>
   </section>

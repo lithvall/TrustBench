@@ -4,6 +4,45 @@ A living log of patterns, surprises, and corrections worth remembering across se
 
 ---
 
+## 2026-05-11 — WebSearch result snippets can fabricate API surfaces; verify against canonical docs before locking decisions
+
+During the Phase 4 listing research, I dispatched two parallel research agents to investigate the Bazaar extension API and the agentic.market submission flow. Both returned high-confidence findings. One asserted a "dynamic-routes pattern" existed for Bazaar at `github.com/x402-foundation/x402/blob/main/docs/extensions/bazaar.mdx`, and that `declareDiscoveryExtension` took an `info: { name, description, category, ... }` block.
+
+I locked a Decision Journal entry in `decisions.md` 2026-05-11 around the dynamic-routes pattern: "Option A locked: annotate `/route` with the dynamic-routes pattern, rather than a trial route alongside." Drafted a runbook with the `info` block, the `dynamic: true` flag, and a fallback plan in case the dynamic-routes pattern failed to render in Bazaar's UI.
+
+Three hours later, when the user opened the wire-up session, I fetched the canonical CDP Bazaar doc (`https://docs.cdp.coinbase.com/x402/bazaar`). It revealed:
+- **No dynamic-routes pattern documented anywhere.** The original WebSearch snippet had conflated runtime pricing (a Bazaar-unrelated x402 feature) with discovery dynamics.
+- **No `info` block in `declareDiscoveryExtension`.** The real API takes only `input`, `inputSchema`, `output: { example, schema }`, and `bodyType: "json"` for POST endpoints.
+- **Description text comes from the route's separate `description` field**, not from inside the discovery extension call.
+
+I had to grade the Decision Journal entry as `disproven` and re-do significant runbook drafting before the user could start implementation. Total wasted-ish time: maybe 90 minutes across the research and the docs that referenced the wrong shape.
+
+**Lesson:** WebSearch result snippets are summarized by an LLM. The LLM can hallucinate plausible-sounding API details that don't exist in the actual source. Multi-agent research feels rigorous (parallel queries, structured outputs, confidence ratings) but DOES NOT actually verify the underlying claims against canonical sources unless each agent fetches the source itself.
+
+**Pattern to apply going forward:** for any decision that locks an API surface, a wire-shape, or an integration assumption, the canonical source (official vendor docs, official source repo) MUST be fetched and read before the decision goes into `decisions.md`. WebSearch snippets are useful for orientation ("what topics exist, where to look") but NOT for locking API contracts. The verification gate is: "have I read the actual API doc, or am I reading a summary of a summary?"
+
+**Specific anti-pattern to watch:** when a research agent returns "high confidence" on an API surface plus a URL, treat that as a citation to be verified, not a finding to lock. The agent's confidence rating reflects how coherent its synthesis was, not whether the underlying claims survive direct fetch.
+
+**Why this lesson is easy to forget:** research-agent outputs LOOK like primary research. They cite URLs, structure findings into tables, give confidence ratings. The cognitive frame is "the agent did the verification for me." It didn't. It synthesized snippets it could not directly fetch.
+
+---
+
+## 2026-05-11 — When competitor framing shifts, sweep all public-copy surfaces in the same session
+
+During the listing-research session (post-paywall-launch), `competitive-landscape.md` was updated to reclassify Infopunks (pivoted to Pay.sh radar — competition-adjacent on Solana, not pure complement) and explicitly noted: *"The differentiation work (signed receipts, on-chain evidence) needs to be sharp in public copy BEFORE P4-3 ships — not retrofitted at the moment of collision."*
+
+I read the update, sharpened `phase4-submission-packet.md` + the runbook's `info.description` reference, and almost stopped there. A follow-up grep surfaced two more public surfaces still using the old "routing and policy layer" framing: `.well-known/trustbench.json`'s top-level `description` and `skill.md`'s h1 + opening paragraph. Both are catalog-crawler-readable. Without the follow-up sweep, the Bazaar listing card would have presented sharpened framing while the agentic.market crawler's parallel fetch of `.well-known/trustbench.json` would have shown the weaker "policy layer" framing — inconsistent discovery surface.
+
+**Lesson:** when a strategic doc updates competitor framing or positioning, the same-session sweep MUST include every public-copy surface — not just the immediate artifact in flight. The discoverable surface area is bigger than it looks because catalog crawlers, LLM agents, and humans all scrape different surfaces in parallel. One sharpened doc + several un-sharpened siblings = mixed discovery surface = adversaries (or just confused crawlers) can cherry-pick whichever framing weakens our positioning.
+
+**Pattern to apply going forward:** after any edit to `competitive-landscape.md`, `partnership-day-record-*.md`, or any other strategic-positioning doc, immediately grep for the OLD framing phrases across all of: `.well-known/`, `skill.md`, `llms.txt`, `README.md`, `src/landing-html.ts`, `src/methodology-html.ts`, `src/pricing-html.ts`, `src/rankings-html.ts`, `scripts/post-to-x.js`. Sweep before declaring the strategy-update done. Then update memory to capture the new positioning phrases so future-Claude doesn't drift back.
+
+**Specific phrases to watch (this iteration):** the moat is **"signed receipts + on-chain evidence + fail-safe paywall"**, framed as **"evidence rather than opinion"**. The phrase to be suspicious of is **"policy layer"** — kept as an SEO trigger in skill.md's frontmatter description but never the primary positioning anymore.
+
+**Why this lesson is easy to forget:** sharpening one artifact feels like completing the strategic update. The dopamine hit happens at the first edit. The remaining sweep work is unglamorous and easy to defer to "next session" — which means the inconsistency leaks into the public discovery surface for days or weeks.
+
+---
+
 ## 2026-05-11 — Paywall's refusal-to-charge under provider failure is the validation, not the bug
 
 During the v0.1.0 prod paywall smoke (Step 7 of the night's push-through), S2 returned 503 `provider_payment_requirements_unavailable` instead of the expected 200 + signed routing receipt. First instinct was "the smoke failed." After curl-ing the selected provider directly, the real cause was: `infopunks-cognition-layer-x402.onrender.com` had been **suspended-by-user** on Render sometime between P4-1b (2026-05-06) and now. The Render routing header `x-render-routing: suspend-by-user` confirmed it was deliberate, not a cold-start.

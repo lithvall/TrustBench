@@ -21,6 +21,15 @@ import { renderMethodologyHtml } from './methodology-html.js';
 import { renderPricingHtml, buildPricingJson } from './pricing-html.js';
 import { paywallGate } from './paywall-handler.js';
 import { renderAnalyticsHtml, type AnalyticsData, type CategoryCard } from './analytics-html.js';
+import {
+  routeBazaarServerMw,
+  routeBazaarDiscoveryMw,
+  spikeBazaarServerMw,
+  spikeBazaarDiscoveryMw,
+  isBazaarExtensionEnabled,
+  isBazaarSpikeEnabled,
+  spikeHandler,
+} from './bazaar-extension.js';
 
 // ---------------------------------------------------------------------------
 // Agent-discovery static assets (P4-skill, P4-llmstxt, P4-wellknown).
@@ -238,7 +247,63 @@ app.get('/route', async (c) => {
 // it falls through to the existing chain. See src/paywall-handler.ts for the
 // full failure-mode analysis. Default flag value is false → behavior unchanged
 // from Phase 3 until ops explicitly flips the flag on Railway.
-app.post('/route', paywallGate, requireAgent, withIdempotency, requireWithinSpendCap, quoteHandler);
+// Bazaar discovery extension on POST /route. Per CDP docs, the
+// bazaarResourceServerExtension + declareDiscoveryExtension middlewares MUST
+// sit BEFORE the paywall middleware so the extension can inspect the request
+// shape first. The flag default is false; flip on Railway after the spike
+// route (see /test/bazaar-spike below) validates EXTENSION-RESPONSES:
+// processing on a real CDP-mediated settle.
+//
+// FAILURE MODE: if @x402/extensions/bazaar isn't installed or named exports
+// don't match the CDP-doc shape, the middlewares no-op (see
+// src/bazaar-extension.ts comments). Existing /route behavior preserved.
+if (isBazaarExtensionEnabled()) {
+  // Bazaar middlewares passed as individual named arguments (not array
+  // spread) so Hono's variadic overload resolves correctly — array spreads
+  // trigger TS2345 by selecting the path-less overload.
+  app.post('/route', routeBazaarServerMw, routeBazaarDiscoveryMw, paywallGate, requireAgent, withIdempotency, requireWithinSpendCap, quoteHandler);
+} else {
+  app.post('/route', paywallGate, requireAgent, withIdempotency, requireWithinSpendCap, quoteHandler);
+}
+
+// Throwaway spike route for the 30-min pre-commit Bazaar spike (runbook § 2).
+// Wrapped with the Bazaar extension AND the paywallGate so a real
+// CDP-mediated x402 settle against /test/bazaar-spike triggers Bazaar
+// indexing — which is the only thing that exercises the extension's strict
+// JSON Schema validation and produces the EXTENSION-RESPONSES header.
+//
+// Per CDP docs, "the first successful settlement for a Bazaar-enabled route
+// is when CDP catalogs it." A spike without payment would not trigger any
+// indexing path, so the test would be meaningless. With the paywall gate in
+// place, a real settle from a test wallet validates the entire extension
+// wiring before we touch the production /route flag.
+//
+// When called without X-PAYMENT, paywallGate returns a 402 with payment
+// requirements pointing at TRUSTBENCH_REVENUE_WALLET. When called with a
+// signed X-PAYMENT envelope, paywallGate handles the settle inline through
+// the CDP facilitator and returns a 200 — at which point CDP also sees the
+// declared Bazaar metadata on this route and (if validation passes) starts
+// indexing. The spikeHandler is only invoked if the paywall is disabled.
+//
+// FAILURE MODES:
+//   - TRUSTBENCH_PAYWALL_ENABLED=false → paywallGate falls through, spike
+//     handler returns plain echo, NO indexing happens. Spike requires
+//     BOTH flags on: TRUSTBENCH_PAYWALL_ENABLED=true AND
+//     TRUSTBENCH_BAZAAR_SPIKE_ENABLED=true.
+//   - EXTENSION-RESPONSES: rejected on the settle response → metadata
+//     failed strict JSON Schema validation. Inspect rejection reason in
+//     logs, fix the schema in src/bazaar-extension.ts, redeploy, retry.
+//   - agentic.market/validate doesn't index within 15 min → CDP cache delay
+//     is 10 min documented; budget 15. If still not indexed after 1 hour
+//     with EXTENSION-RESPONSES: processing returned, escalate to CDP.
+//
+// CLEANUP: delete this route block and the TRUSTBENCH_BAZAAR_SPIKE_ENABLED
+// flag after the spike passes and the production /route extension is live.
+if (isBazaarSpikeEnabled()) {
+  // Same named-args pattern as on /route above — avoid array-spread for
+  // Hono's variadic overload resolution.
+  app.post('/test/bazaar-spike', spikeBazaarServerMw, spikeBazaarDiscoveryMw, paywallGate, spikeHandler);
+}
 
 // ---------------------------------------------------------------------------
 // POST /route/settle — Phase 3 settle (Step 2).

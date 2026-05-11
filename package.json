@@ -17,6 +17,7 @@
     "facilitator-settle-test": "tsx scripts/facilitator-settle-test.ts",
     "smoke:paid-requests": "tsx scripts/smoke-paid-requests.ts",
     "smoke:paywall": "tsx scripts/paywall-smoke.ts",
+    "smoke:bazaar-spike": "tsx scripts/bazaar-spike-smoke.ts",
     "export-7-night": "tsx scripts/export-7-night.ts",
     "import-paddock-bazaar": "tsx scripts/import-paddock-bazaar.ts",
     "smoke:c3": "tsx scripts/smoke-c3-concurrency.ts"
@@ -28,6 +29,7 @@
     "@coinbase/x402": "^0.6.0",
     "@x402/core": "^2.11.0",
     "@x402/evm": "^2.11.0",
+    "@x402/extensions": "^2.11.0",
     "dotenv": "^16.4.5",
     "hono": "^4.4.0",
     "ioredis": "^5.4.1",

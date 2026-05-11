@@ -2,9 +2,9 @@ name: trustbench-policy-router
 description: Add server-side spend caps, idempotency, and signed audit receipts to any x402 paid call across networks. Use when the agent needs to enforce a budget cap per call or per day, when retries on a flaky network must not double-charge, when the user asks for a verifiable record of what the agent paid for, when the user mentions audit, compliance, governance, policy layer, signed receipts, signed audit, idempotency, double-charge, duplicate charge, spend cap, budget cap, hard cap, dollar cap, USDC cap, cross-network routing, multi-network payment, or non-custodial routing for agents. Augments the existing Coinbase Agentic Market / Agentic Wallet (Base) and Solana Foundation Pay.sh / Heurist Mesh (Solana) flows rather than replacing them: the agent sets up its preferred wallet first per agentic.market/skill.md or pay.sh, then routes its paid calls through TrustBench's quote and settle endpoints to get the policy layer plus a signed receipt for free. TrustBench routes Base today and registers Solana endpoints; Solana settlement is the next sprint. TrustBench never holds funds. The agent's wallet signs the payment authorization, the merchant submits the on-chain transaction, TrustBench observes the result and emits an Ed25519-signed receipt that anyone can verify with the published public key. Phase 4 access is invite-only during the build, request a key by direct messaging @TrustBench on X.
 ---
 
-# TrustBench: cross-network spend caps + audit receipts on top of x402
+# TrustBench: signed receipts + on-chain evidence + fail-safe paywall on top of x402
 
-TrustBench is a cross-network routing and policy layer that sits in front of Coinbase Agentic Market (Base), Solana x402 facilitators like Pay.sh / Heurist Mesh (registry today, routing next), and other x402 services. Use TrustBench when the agent has a real reason to want any of these: server-side spend caps, idempotency on retries, a signed audit trail of paid calls, or a stable third-party verifier for receipts.
+TrustBench is a non-custodial routing and audit layer that sits in front of Coinbase Agentic Market (Base), Solana x402 facilitators like Pay.sh / Heurist Mesh (registry today, routing next), and other x402 services. It produces signed evidence rather than opinion: every paid call emits an Ed25519-signed receipt covering the routing decision and the on-chain settlement reference, verifiable offline against a published public key. The paywall is fail-safe by design: if the upstream merchant is non-conformant or down, the agent isn't charged, so money never moves on bad routes. Use TrustBench when the agent has a real reason to want any of these: signed evidence of what was paid for, server-side spend caps, idempotency on retries, or a stable third-party verifier for receipts.
 
 If the agent just needs to make a paid call with no budget or audit requirements, the existing Agentic Wallet flow at agentic.market/skill.md is enough. TrustBench adds value when the call is part of a budgeted workflow, a compliance-bound process, or anywhere a verifiable record of "what was paid, to whom, for what" matters later.
 
@@ -172,7 +172,7 @@ endpoints:
     description: Signed multi-receipt CSV/JSON bundle.
 ```
 
-Paid endpoints respond `402 Payment Required` with x402 payment requirements pointing at TrustBench's revenue wallet on Base. The agent signs an EIP-3009 `transferWithAuthorization` for the listed price and retries with an `X-PAYMENT` header. Settlement runs through the public x402 facilitator at `x402.org/facilitator`; TrustBench never holds funds. Differentiated-work paid responses (routing, scoring, verification, audit replay) are Ed25519-signed and verifiable with `@trustbench/verify-receipt` or the reference verifier in the repo. Existing partner agreements override the published table for that partner.
+Paid endpoints respond `402 Payment Required` with x402 payment requirements pointing at TrustBench's revenue wallet on Base. The agent signs an EIP-3009 `transferWithAuthorization` for the listed price and retries with an `X-PAYMENT` header. Settlement runs through the Coinbase CDP facilitator at `api.cdp.coinbase.com/platform/v2/x402` (the public `x402.org/facilitator` is testnet-only and not used for mainnet Base traffic); TrustBench never holds funds. Differentiated-work paid responses (routing, scoring, verification, audit replay) are Ed25519-signed and verifiable with `@trustbench/verify-receipt` or the reference verifier in the repo. Existing partner agreements override the published table for that partner.
 
 The v0.1.0 paywall is rolling out behind a feature flag; until the flag flips, `POST /route` continues to use the existing Bearer-`tb_live_…` auth path described above. When the flag flips, both auth paths will coexist during the transition window. Watch `/pricing` and `/.well-known/trustbench.json` for the canonical live state.
 
@@ -201,13 +201,5 @@ To add a provider to TrustBench's registry, the provider self-attests with Trust
 - LLM-grounded reference: `https://trustbench.io/llms.txt`
 - CDP docs (the underlying x402 stack): `https://docs.cdp.coinbase.com/llms.txt`
 - Agentic Market agent guide: `https://agentic.market/llms.txt`
-- Strategy and roadmap: `https://github.com/trustbench/trustbench` (README and `TrustBench-strategy.md`)
-- Phase 4 API access: direct message @TrustBench on X to request a key.
-gs?capability=search`
-- Public key for receipt verification: `https://trustbench.io/.well-known/trustbench-pubkey`
-- Machine-readable manifest of TrustBench's surfaces: `https://trustbench.io/.well-known/trustbench.json`
-- LLM-grounded reference: `https://trustbench.io/llms.txt`
-- CDP docs (the underlying x402 stack): `https://docs.cdp.coinbase.com/llms.txt`
-- Agentic Market agent guide: `https://agentic.market/llms.txt`
-- Strategy and roadmap: `https://github.com/trustbench/trustbench` (README and `TrustBench-strategy.md`)
+- Strategy and roadmap: `https://github.com/lithvall/TrustBench` (README and `TrustBench-strategy.md`)
 - Phase 4 API access: direct message @TrustBench on X to request a key.

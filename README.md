@@ -1,9 +1,15 @@
 # TrustBench
 
-A cross-network, non-custodial smart router and payment-plumbing layer for
-x402 agents. Routes Base today, registers Solana endpoints (Heurist Mesh,
-Pay.sh skills), Solana settlement next; protocol-agnostic over time across
-x402, p402, and MPP.
+A non-custodial routing and audit layer for x402 that produces signed
+evidence rather than opinion. Every paid call emits an Ed25519-signed
+receipt covering the routing decision and the on-chain settlement
+reference, verifiable offline against a published public key. The paywall
+is fail-safe by design: if the upstream merchant is non-conformant, the
+agent isn't charged, so money never moves on bad routes.
+
+Cross-network: routes Base today, registers Solana endpoints (Heurist
+Mesh, Pay.sh skills), Solana settlement next; protocol-agnostic over time
+across x402, p402, and MPP.
 
 ## What's live today
 - Public registry of x402 endpoints across Base (Coinbase Agentic Market,
@@ -48,8 +54,9 @@ x402, p402, and MPP.
 - v0.1.0 ships `POST /route` at $0.005 per call (score-provider tier); full
   tier table at [/pricing](https://trustbench.io/pricing) (HTML for humans,
   JSON for agents via `Accept: application/json` or `?format=json`)
-- Settlement through the public x402 Foundation facilitator at
-  `x402.org/facilitator`. TrustBench never holds funds; the agent's wallet
+- Settlement through the Coinbase CDP facilitator at
+  `api.cdp.coinbase.com/platform/v2/x402` (the public `x402.org/facilitator`
+  is testnet-only). TrustBench never holds funds; the agent's wallet
   signs and the facilitator submits on-chain.
 - Existing partner agreements override the published table for that partner.
   Reach out for partner-volume credit before integration.
@@ -133,7 +140,7 @@ Existing receipts remain verifiable — the public key and JCS canonicalization 
 1. Agent calls `POST /route` with no `X-PAYMENT` header.
 2. TrustBench responds `402 Payment Required` with x402 payment requirements pointing at the TrustBench revenue wallet on Base. Price: $0.005 USDC.
 3. Agent signs an EIP-3009 `transferWithAuthorization` for the routing fee and retries the call with an `X-PAYMENT` header carrying the signed envelope (use any x402 client; the modular `@x402/core` + `@x402/evm` SDKs are the reference).
-4. TrustBench verifies the payment with the public Foundation facilitator at `x402.org/facilitator`, settles it on-chain, selects the best provider via the live registry, and returns 200 with an Ed25519-signed routing receipt plus payment requirements for the agent's NEXT call (to the upstream provider).
+4. TrustBench verifies the payment with the Coinbase CDP facilitator at `api.cdp.coinbase.com/platform/v2/x402`, settles it on-chain, selects the best provider via the live registry, and returns 200 with an Ed25519-signed routing receipt plus payment requirements for the agent's NEXT call (to the upstream provider).
 5. The agent then pays the provider directly via a second x402 transaction. TrustBench is out of the loop after step 4.
 
 Two payments per call (TrustBench fee + provider fee), both non-custodial. Receipts cover the routing decision; the provider transaction is a separate x402 envelope the agent owns end-to-end.
@@ -153,7 +160,7 @@ trustbench-verify-receipt ./routing-receipt.json --check-chain   # also re-verif
 - **Per-paying-wallet hourly rate limit.** Default 60 paid calls per hour per `agent_address`. Tunable via `TRUSTBENCH_PAYWALL_HOURLY_LIMIT` (set to 0 to disable). Returns 429 with `Retry-After: 60` when exceeded.
 - **Idempotency-key replay with `replayed_at` marker.** `Idempotency-Key` header (16-128 chars) honored on every paywalled call. Same key + same body within 24 hours returns the original signed receipt with a top-level `replayed_at` field added outside the signed bytes — original signature stays valid, downstream consumers can distinguish fresh from replayed. Same key + different body returns 409.
 
-**Failure modes.** Documented in detail in the Critic-pass header at the top of [`src/paywall-handler.ts`](./src/paywall-handler.ts). Hidden assumption: the public Foundation facilitator at `x402.org/facilitator` stays stable and within free-tier (1K tx/mo) limits. Kill criterion: if the facilitator returns 5xx or rate-limits >5% of calls in the first 4 weeks, switch to Coinbase CDP (one env-var change).
+**Failure modes.** Documented in detail in the Critic-pass header at the top of [`src/paywall-handler.ts`](./src/paywall-handler.ts). Live facilitator is the Coinbase CDP facilitator at `api.cdp.coinbase.com/platform/v2/x402`; the original "Foundation facilitator first, swap to CDP later" plan was disproven on 2026-05-11 when settle-tests confirmed the Foundation facilitator is testnet-only (see `lessons.md` 2026-05-11 entry). Current hidden assumption: CDP facilitator stays stable and within plan limits. Kill criterion: if CDP returns 5xx or auth-errors >5% of calls in the first 4 weeks, fall back to PayAI-mediated settlement.
 
 ## What Phase 3 deliberately does not do
 

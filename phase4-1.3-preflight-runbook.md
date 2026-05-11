@@ -35,7 +35,9 @@ Go to Railway → TrustBench project → Variables tab. Add these three:
 |---|---|---|
 | `TRUSTBENCH_REVENUE_WALLET_ADDRESS` | `0x...` from Step 1 | The receive address. Public. No private key. |
 | `TRUSTBENCH_PAYWALL_ENABLED` | `false` | Keep paywall OFF until middleware lands on Sprint Day 3. Don't flip until the smoke test in Sprint Day 4 passes. |
-| `TRUSTBENCH_FACILITATOR_URL` | `https://x402.org/facilitator` | Public Foundation facilitator. No CDP credentials needed. Switch to Coinbase CDP later if rate limits bite (1K tx/mo free, $0.001/tx after). |
+| `CDP_API_KEY_ID` | `organizations/<uuid>/apiKeys/<uuid>` | Coinbase CDP API key ID. Required for Base mainnet. Provision at https://portal.cdp.coinbase.com → API Keys → Create API Key. Ed25519 signature algorithm. |
+| `CDP_API_KEY_SECRET` | Ed25519 PEM (one line, escape \n) | The matching private key. Shown ONCE at creation time — save to password manager immediately. Never paste in chat. |
+| `TRUSTBENCH_FACILITATOR_URL` | `https://x402.org/facilitator` | FALLBACK ONLY — used when CDP creds above are unset. The Foundation facilitator is testnet-only (Base Sepolia + Solana Devnet); production Base mainnet REQUIRES CDP. |
 
 Optional: also add `BASE_RPC_URL` if you have a dedicated Base RPC endpoint (Alchemy, Infura, Coinbase Node). The settle test defaults to `https://mainnet.base.org` which works but rate-limits. For one-off pre-flight, the default is fine.
 

@@ -25,6 +25,7 @@
     "@hono/node-server": "^1.11.0",
     "@node-rs/argon2": "^2.0.2",
     "@supabase/supabase-js": "^2.43.4",
+    "@coinbase/x402": "^0.6.0",
     "@x402/core": "^2.11.0",
     "@x402/evm": "^2.11.0",
     "dotenv": "^16.4.5",

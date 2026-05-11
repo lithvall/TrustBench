@@ -4,6 +4,36 @@ A living log of patterns, surprises, and corrections worth remembering across se
 
 ---
 
+## 2026-05-11 — Foundation facilitator at x402.org is testnet-only; Base mainnet paywall needs CDP creds
+
+While running the § 1.3 settle-test pre-flight, the public Foundation facilitator at `https://x402.org/facilitator` returned:
+
+```
+unexpected_error: No facilitator registered for scheme: exact and network: eip155:8453
+```
+
+That's the Critic-pass hidden assumption firing on day 0. The kill criterion I wrote was "If the public Foundation facilitator returns 5xx or rate-limits more than 5% of paywall calls in the first 4 weeks → switch to Coinbase CDP." It fired immediately, not in 4 weeks.
+
+**Root cause:** the SDK README example (`new HTTPFacilitatorClient({ url: 'https://x402.org/facilitator' })`) was illustrative, not a Base-mainnet-capable production endpoint. Per CDP docs "Facilitator URLs" table, x402.org is testnet-only (Base Sepolia + Solana Devnet). Production Base mainnet requires Coinbase CDP at `api.cdp.coinbase.com/platform/v2/x402`, which needs JWT auth via CDP API key.
+
+**Fix:** `npm install @coinbase/x402` and import its pre-built `facilitator` config:
+
+```typescript
+import { facilitator as cdpFacilitatorConfig } from '@coinbase/x402';
+const client = new HTTPFacilitatorClient(cdpFacilitatorConfig);
+```
+
+The `@coinbase/x402` package reads `CDP_API_KEY_ID` + `CDP_API_KEY_SECRET` from env, signs an Ed25519 JWT per request (2-min expiry, regenerated automatically), and routes calls to the CDP facilitator. Both `src/paywall-handler.ts` and `scripts/facilitator-settle-test.ts` now branch on the presence of CDP env vars: CDP path when set, Foundation fallback when unset (with a loud `console.warn` documenting that the fallback is testnet-only).
+
+**Lesson:** **don't assume a URL works just because it's in an SDK README example.** When the SDK quickstart shows a URL, hit its `/supported` endpoint to confirm which `(scheme, network)` tuples it actually handles before building production architecture around it. The Critic-pass kill criterion is what saved us here — the discipline of writing "what would kill this" up front meant the day-0 failure mapped to a documented recovery path instead of a surprise.
+
+**Carry-forward implications:**
+- The Critic pass works. Three rejection reasons + a load-bearing assumption + a kill criterion was the right shape — not vague pessimism. Run it on every high-risk-surface diff going forward.
+- CDP creds are a non-negotiable for v0.1.0 paywall. The runbook (Step 2) and `.env.example` now reflect that.
+- Future hidden assumptions: anywhere an SDK README example URL has substituted for "production-grade endpoint," verify with the `/supported` endpoint before relying on it.
+
+---
+
 ## 2026-05-11 — Critic pass caught a "stale DB column" bug in the paywall handler
 
 While writing the v0.1.0 paywall handler (`src/paywall-handler.ts`), I drafted `buildProviderPaymentRequirements` to look up `providers.pay_to` from the database. The Critic pass surfaced the bug before I shipped: `providers.pay_to` is `null` for the dominant Agentic Market crawler path (`crawler.ts:152`) because Agentic Market does not expose payTo on its catalog. The existing Bearer `/route` flow learns pay_to via a LIVE 402 probe at request time (`route-handlers.ts probeFor402Challenge`). My paywall handler would have 503'd for the vast majority of providers in production.

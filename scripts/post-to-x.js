@@ -88,6 +88,20 @@ const METHODOLOGY_NOTES = [
 // receipt, npm package, GitHub release, etc.). Drop or comment out entries
 // older than ~30 days so the rotation doesn't recycle stale "shipped" claims.
 const BUILD_IN_PUBLIC = [
+  // Paywall v0.1.0 — design + code shipped, flag still off in prod.
+  // After TRUSTBENCH_PAYWALL_ENABLED=true in prod, swap this entry for the
+  // "live" variant in the comment block below.
+  `Paywall design and code landed in main. /pricing page is live. ` +
+    `7-row tier table, v0.1.0 ships POST /route at $0.005 per call. ` +
+    `x402-native, non-custodial, settled via the public Foundation facilitator. ` +
+    `Flag-off until the v0.1.1 gates' first prod smoke.\n\n${BASE_URL}/pricing`,
+
+  // PAYWALL-LIVE VARIANT (uncomment + delete the above after flag flip):
+  // `Paywall is live. POST /route returns 402, agent signs an EIP-3009 ` +
+  //   `transferWithAuthorization for $0.005, x402 facilitator settles on Base, ` +
+  //   `we return an Ed25519-signed routing receipt. Non-custodial end-to-end. ` +
+  //   `Full tier table at ${BASE_URL}/pricing.`,
+
   `Shipped @trustbench/verify-receipt v0.1.0 on npm. ` +
     `Standalone third-party verifier, 64-byte Ed25519 signatures, JCS canonicalization. ` +
     `Means you can audit any TrustBench receipt without trusting our hosted endpoint.\n\n` +

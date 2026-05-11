@@ -43,6 +43,7 @@ import { ulid } from 'ulid';
 import { ExactEvmScheme } from '@x402/evm';
 import { HTTPFacilitatorClient } from '@x402/core/server';
 import type { PaymentRequirements, PaymentPayload } from '@x402/core/types';
+import { facilitator as cdpFacilitatorConfig } from '@coinbase/x402';
 
 // -----------------------------------------------------------------------------
 // Constants — same anchors as paid-probe.ts
@@ -196,7 +197,25 @@ async function main() {
   console.log(`[facilitator-test] payload signed (x402Version=${result.x402Version}, payloadKeys=${Object.keys(result.payload).join(',')})`);
 
   // 5. Verify via facilitator. Read-only; no money moves.
-  const facilitator = new HTTPFacilitatorClient({ url: facilitatorUrl });
+  //
+  // Facilitator selection (caught 2026-05-11): the public Foundation
+  // facilitator at x402.org/facilitator does NOT support Base mainnet
+  // exact+eip155:8453 — it's testnet-only. For production we must use
+  // Coinbase CDP's hosted facilitator. The @coinbase/x402 package exports
+  // a pre-built FacilitatorConfig that handles JWT auth automatically;
+  // we use it whenever CDP_API_KEY_ID + CDP_API_KEY_SECRET are set in env.
+  const hasCdp = !!process.env.CDP_API_KEY_ID && !!process.env.CDP_API_KEY_SECRET;
+  const facilitator = hasCdp
+    ? new HTTPFacilitatorClient(cdpFacilitatorConfig)
+    : new HTTPFacilitatorClient({ url: facilitatorUrl });
+  console.log(
+    `[facilitator-test] facilitator mode: ${hasCdp ? 'CDP (Base mainnet capable)' : `fallback URL ${facilitatorUrl} (testnet only)`}`,
+  );
+  if (!hasCdp) {
+    console.warn(
+      '[facilitator-test] WARN: CDP creds not set; this test will FAIL on Base mainnet with "No facilitator registered" — provision CDP creds for production paywall',
+    );
+  }
 
   console.log('[facilitator-test] POST /verify ...');
   let verifyResp;

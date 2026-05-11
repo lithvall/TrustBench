@@ -155,6 +155,7 @@ import { createHash } from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import { HTTPFacilitatorClient } from '@x402/core/server';
 import type { PaymentRequirements, PaymentPayload } from '@x402/core/types';
+import { facilitator as cdpFacilitatorConfig } from '@coinbase/x402';
 import { selectProvider } from './provider-selection.js';
 import { signWithEd25519 } from './scorer.js';
 import { jcsCanonicalize } from './idempotency.js';
@@ -201,12 +202,41 @@ const supabase = createClient(
   { auth: { persistSession: false, autoRefreshToken: false } },
 );
 
-// Facilitator client — single instance for all calls. The default URL points
-// at the public Foundation facilitator; override via TRUSTBENCH_FACILITATOR_URL
-// to switch to Coinbase CDP (requires CDP creds and the createAuthHeaders hook).
-const facilitator = new HTTPFacilitatorClient({
-  url: process.env.TRUSTBENCH_FACILITATOR_URL || DEFAULT_FACILITATOR_URL,
-});
+// Facilitator client — single instance for all calls.
+//
+// CRITICAL (caught 2026-05-11 during § 1.3 settle test): the public Foundation
+// facilitator at x402.org/facilitator does NOT support Base mainnet
+// `exact + eip155:8453`. It's a testnet-only reference facilitator
+// (Base Sepolia + Solana Devnet per CDP docs § "Facilitator URLs"). For
+// production Base mainnet paywall traffic, we must use Coinbase CDP's
+// hosted facilitator at api.cdp.coinbase.com/platform/v2/x402, which
+// requires JWT auth via CDP API key.
+//
+// The @coinbase/x402 package exports a pre-built FacilitatorConfig that
+// handles all the JWT-signing boilerplate (Ed25519, 2-min expiry,
+// per-request regeneration) — we just import and pass to HTTPFacilitatorClient.
+// It reads CDP_API_KEY_ID + CDP_API_KEY_SECRET from process.env on each call.
+//
+// Fallback path: if CDP creds are NOT set, we use the configurable URL
+// (defaulting to the Foundation facilitator at x402.org/facilitator). That
+// fallback ONLY works for testnet calls — Base Sepolia `eip155:84532` and
+// Solana Devnet. Production paywall traffic on Base mainnet will fail with
+// "No facilitator registered for scheme: exact and network: eip155:8453"
+// without CDP creds. The setup is documented in phase4-1.3-preflight-runbook.md.
+function buildFacilitator(): HTTPFacilitatorClient {
+  const hasCdp = !!process.env.CDP_API_KEY_ID && !!process.env.CDP_API_KEY_SECRET;
+  if (hasCdp) {
+    return new HTTPFacilitatorClient(cdpFacilitatorConfig);
+  }
+  const url = process.env.TRUSTBENCH_FACILITATOR_URL || DEFAULT_FACILITATOR_URL;
+  console.warn(
+    `[paywall] CDP_API_KEY_ID / CDP_API_KEY_SECRET not set; falling back to ${url}. ` +
+      `Base mainnet (eip155:8453) settle calls WILL fail against the Foundation facilitator. ` +
+      `Set CDP env vars before flipping TRUSTBENCH_PAYWALL_ENABLED=true in prod.`,
+  );
+  return new HTTPFacilitatorClient({ url });
+}
+const facilitator = buildFacilitator();
 
 // -----------------------------------------------------------------------------
 // Header / body helpers

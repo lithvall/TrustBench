@@ -45,8 +45,14 @@ x402, p402, and MPP.
 ## Pricing model
 - x402-native paywalled API endpoints, per-call USDC settlement on Base
 - No subscriptions, no contracts, no per-seat or per-month charge
-- Specific per-call tiers are in active validation with first integration
-  partners and not yet published. Reviewable based on real volume.
+- v0.1.0 ships `POST /route` at $0.005 per call (score-provider tier); full
+  tier table at [/pricing](https://trustbench.io/pricing) (HTML for humans,
+  JSON for agents via `Accept: application/json` or `?format=json`)
+- Settlement through the public x402 Foundation facilitator at
+  `x402.org/facilitator`. TrustBench never holds funds; the agent's wallet
+  signs and the facilitator submits on-chain.
+- Existing partner agreements override the published table for that partner.
+  Reach out for partner-volume credit before integration.
 - Refundable provider verification bond — pay-to-list, never pay-to-rank
 
 ## Stack
@@ -75,7 +81,8 @@ Public (no auth):
 - `GET /methodology` — full description of what the probe does and does not measure
 - `GET /skill.md` — agent skill file in the [agentic.market/skill.md](https://agentic.market/skill.md) format. Paste into Claude Code, Codex, Gemini CLI, Hermes, Cursor, Claude Desktop, Cherry Studio, or ChatGPT to teach the agent the TrustBench quote/settle flow as an additive policy + receipt layer on top of Coinbase Agentic Wallet.
 - `GET /llms.txt` — LLM-grounded research summary in [llmstxt.org](https://llmstxt.org) format
-- `GET /.well-known/trustbench.json` — machine-readable manifest of TrustBench's public surfaces, capabilities, signing scheme, and discovery references
+- `GET /pricing` — public, honest pricing for paid endpoints. Content-negotiated: HTML for humans, JSON for agents via `Accept: application/json` or `?format=json`. Returns a 7-row tier table with `live` / `planned (v0.2.0)` / `planned (v0.3.0)` status badges per endpoint.
+- `GET /.well-known/trustbench.json` — machine-readable manifest of TrustBench's public surfaces, capabilities, signing scheme, and discovery references. Includes an `endpoints` array with paid annotations matching `/pricing`.
 - `GET /.well-known/trustbench-pubkey` — Ed25519 public key (PEM) for verifying scorecards and receipts
 
 Authenticated (Phase 3, in build):
@@ -118,6 +125,35 @@ What it temporarily loses while the API is down:
 - Signed receipts for any calls made during the outage.
 
 Existing receipts remain verifiable — the public key and JCS canonicalization rules are stable, and the receipt's `audit_url` is a hint, not a dependency.
+
+## Paywall (Phase 4 v0.1.0)
+
+`POST /route` is paywalled when `TRUSTBENCH_PAYWALL_ENABLED=true` on the deployment. The flow is x402-native end-to-end:
+
+1. Agent calls `POST /route` with no `X-PAYMENT` header.
+2. TrustBench responds `402 Payment Required` with x402 payment requirements pointing at the TrustBench revenue wallet on Base. Price: $0.005 USDC.
+3. Agent signs an EIP-3009 `transferWithAuthorization` for the routing fee and retries the call with an `X-PAYMENT` header carrying the signed envelope (use any x402 client; the modular `@x402/core` + `@x402/evm` SDKs are the reference).
+4. TrustBench verifies the payment with the public Foundation facilitator at `x402.org/facilitator`, settles it on-chain, selects the best provider via the live registry, and returns 200 with an Ed25519-signed routing receipt plus payment requirements for the agent's NEXT call (to the upstream provider).
+5. The agent then pays the provider directly via a second x402 transaction. TrustBench is out of the loop after step 4.
+
+Two payments per call (TrustBench fee + provider fee), both non-custodial. Receipts cover the routing decision; the provider transaction is a separate x402 envelope the agent owns end-to-end.
+
+**Discovery.** Paid endpoints carry `paid: true` annotations alongside the free ones in [`/skill.md`](https://trustbench.io/skill.md) and [`/.well-known/trustbench.json`](https://trustbench.io/.well-known/trustbench.json). v0.2.0+ endpoints are listed with `available_in` tags so agent builders see the roadmap shape.
+
+**Verifying a routing receipt.** Same Ed25519 + JCS canonicalization as Phase 3 settlement receipts, with `kind: "paid_response.route"`. Use the npm verifier:
+
+```bash
+npm install @trustbench/verify-receipt
+trustbench-verify-receipt ./routing-receipt.json
+trustbench-verify-receipt ./routing-receipt.json --check-chain   # also re-verify the on-chain tx
+```
+
+**Server-side controls (v0.1.1).** Two safeguards run on every paywalled call:
+
+- **Per-paying-wallet hourly rate limit.** Default 60 paid calls per hour per `agent_address`. Tunable via `TRUSTBENCH_PAYWALL_HOURLY_LIMIT` (set to 0 to disable). Returns 429 with `Retry-After: 60` when exceeded.
+- **Idempotency-key replay with `replayed_at` marker.** `Idempotency-Key` header (16-128 chars) honored on every paywalled call. Same key + same body within 24 hours returns the original signed receipt with a top-level `replayed_at` field added outside the signed bytes — original signature stays valid, downstream consumers can distinguish fresh from replayed. Same key + different body returns 409.
+
+**Failure modes.** Documented in detail in the Critic-pass header at the top of [`src/paywall-handler.ts`](./src/paywall-handler.ts). Hidden assumption: the public Foundation facilitator at `x402.org/facilitator` stays stable and within free-tier (1K tx/mo) limits. Kill criterion: if the facilitator returns 5xx or rate-limits >5% of calls in the first 4 weeks, switch to Coinbase CDP (one env-var change).
 
 ## What Phase 3 deliberately does not do
 

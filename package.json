@@ -14,6 +14,9 @@
     "verify-receipt": "node scripts/verify-receipt.js",
     "mock-provider": "tsx scripts/mock-provider.ts",
     "paid-probe": "tsx scripts/paid-probe.ts",
+    "facilitator-settle-test": "tsx scripts/facilitator-settle-test.ts",
+    "smoke:paid-requests": "tsx scripts/smoke-paid-requests.ts",
+    "smoke:paywall": "tsx scripts/paywall-smoke.ts",
     "export-7-night": "tsx scripts/export-7-night.ts",
     "import-paddock-bazaar": "tsx scripts/import-paddock-bazaar.ts",
     "smoke:c3": "tsx scripts/smoke-c3-concurrency.ts"

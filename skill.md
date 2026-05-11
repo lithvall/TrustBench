@@ -1,10 +1,10 @@
 name: trustbench-policy-router
-description: Add server-side spend caps, idempotency, and signed audit receipts to any x402 paid call. Use when the agent needs to enforce a budget cap per call or per day, when retries on a flaky network must not double-charge, when the user asks for a verifiable record of what the agent paid for, when the user mentions audit, compliance, governance, policy layer, signed receipts, signed audit, idempotency, double-charge, duplicate charge, spend cap, budget cap, hard cap, dollar cap, USDC cap, or non-custodial routing for agents. Augments the existing Agentic Market and Agentic Wallet flow rather than replacing them: the agent sets up Coinbase Agentic Wallet first per agentic.market/skill.md, then routes its paid calls through TrustBench's quote and settle endpoints to get the policy layer plus a signed receipt for free. TrustBench never holds funds. The agent's wallet signs the payment authorization, the merchant submits the on-chain transaction, TrustBench observes the result and emits an Ed25519-signed receipt that anyone can verify with the published public key. Phase 4 access is invite-only during the build, request a key by direct messaging @TrustBench on X.
+description: Add server-side spend caps, idempotency, and signed audit receipts to any x402 paid call across networks. Use when the agent needs to enforce a budget cap per call or per day, when retries on a flaky network must not double-charge, when the user asks for a verifiable record of what the agent paid for, when the user mentions audit, compliance, governance, policy layer, signed receipts, signed audit, idempotency, double-charge, duplicate charge, spend cap, budget cap, hard cap, dollar cap, USDC cap, cross-network routing, multi-network payment, or non-custodial routing for agents. Augments the existing Coinbase Agentic Market / Agentic Wallet (Base) and Solana Foundation Pay.sh / Heurist Mesh (Solana) flows rather than replacing them: the agent sets up its preferred wallet first per agentic.market/skill.md or pay.sh, then routes its paid calls through TrustBench's quote and settle endpoints to get the policy layer plus a signed receipt for free. TrustBench routes Base today and registers Solana endpoints; Solana settlement is the next sprint. TrustBench never holds funds. The agent's wallet signs the payment authorization, the merchant submits the on-chain transaction, TrustBench observes the result and emits an Ed25519-signed receipt that anyone can verify with the published public key. Phase 4 access is invite-only during the build, request a key by direct messaging @TrustBench on X.
 ---
 
-# TrustBench: spend caps + audit receipts on top of x402
+# TrustBench: cross-network spend caps + audit receipts on top of x402
 
-TrustBench is a routing and policy layer that sits in front of Agentic Market and other x402 services. Use TrustBench when the agent has a real reason to want any of these: server-side spend caps, idempotency on retries, a signed audit trail of paid calls, or a stable third-party verifier for receipts.
+TrustBench is a cross-network routing and policy layer that sits in front of Coinbase Agentic Market (Base), Solana x402 facilitators like Pay.sh / Heurist Mesh (registry today, routing next), and other x402 services. Use TrustBench when the agent has a real reason to want any of these: server-side spend caps, idempotency on retries, a signed audit trail of paid calls, or a stable third-party verifier for receipts.
 
 If the agent just needs to make a paid call with no budget or audit requirements, the existing Agentic Wallet flow at agentic.market/skill.md is enough. TrustBench adds value when the call is part of a budgeted workflow, a compliance-bound process, or anywhere a verifiable record of "what was paid, to whom, for what" matters later.
 
@@ -108,7 +108,73 @@ TrustBench's router currently routes the following capabilities (aligned with Co
 - **media** (image, video, audio generation)
 - **infra** (storage, compute, networking primitives for agents)
 
-Settlement is on **Base** in **USDC**. Solana and other networks are roadmap items. If the agent needs a network TrustBench does not yet support, fall back to the Agentic Wallet direct path.
+Routing and settlement today are on **Base** in **USDC**. The registry already covers Solana endpoints (Heurist Mesh, ~150; Pay.sh `pay-skills` on the roadmap), and Solana settlement is the next-up sprint after the first paid receipts (see TrustBench's `phase4-p4-3-timing.md`). If the agent needs a network TrustBench does not yet route, fall back to the Agentic Wallet direct path on Base, or Pay.sh / Heurist mesh on Solana.
+
+## Paid endpoints (Phase 4 v0.1.0 paywall)
+
+TrustBench is rolling out an x402-native paywall on differentiated-work endpoints. v0.1.0 ships `POST /route` at $0.005 per call; the rest of the table below is designed and listed for roadmap clarity but ships in v0.2.0 and v0.3.0. The full tier table is at `https://trustbench.io/pricing` (HTML for humans, JSON for agents via `Accept: application/json` or `?format=json`).
+
+```yaml
+endpoints:
+  - path: /route
+    method: POST
+    paid: true
+    pricing_tier: score-provider
+    price_usdc: 0.005
+    amount_atomic: 5000
+    available_in: v0.1.0
+    payment_required_doc: https://trustbench.io/pricing#tiers
+    description: Non-custodial routing decision with Ed25519-signed routing receipt.
+  - path: /route/settle
+    method: POST
+    paid: false
+    available_in: v0.1.0
+    description: Step 2 of the quote/settle flow; the settle fee is included in the quote-time paywall on /route.
+  - path: /rankings
+    method: GET
+    paid_html: false
+    paid_json_above_quota: v0.2.0
+    pricing_tier: read
+    description: HTML free permanently. JSON free under 60 req/IP/min quota in v0.2.0, $0.0005 per call above quota.
+  - path: /receipts/:id
+    method: GET
+    paid_html: false
+    paid_json_above_quota: v0.2.0
+    pricing_tier: read
+    description: HTML free permanently. JSON free under quota in v0.2.0.
+  - path: /score-provider
+    method: POST
+    paid: true
+    pricing_tier: score-provider
+    price_usdc: 0.005
+    available_in: v0.2.0
+    description: Reads liveness telemetry plus risk annotations for any registered URL.
+  - path: /verify
+    method: POST
+    paid: true
+    pricing_tier: verify
+    price_usdc: 0.002
+    available_in: v0.2.0
+    description: Hosted verifier for externally-provided TrustBench receipts.
+  - path: /receipts/:id?replay=true
+    method: GET
+    paid: true
+    pricing_tier: audit-replay
+    price_usdc: 0.01
+    available_in: v0.2.0
+    description: Re-verifies signature and on-chain settlement against current chain state.
+  - path: /compliance-export
+    method: POST
+    paid: true
+    pricing_tier: compliance-export
+    price_usdc: "0.50 single, 2.00 bundle <=100, negotiated >100"
+    available_in: v0.3.0
+    description: Signed multi-receipt CSV/JSON bundle.
+```
+
+Paid endpoints respond `402 Payment Required` with x402 payment requirements pointing at TrustBench's revenue wallet on Base. The agent signs an EIP-3009 `transferWithAuthorization` for the listed price and retries with an `X-PAYMENT` header. Settlement runs through the public x402 facilitator at `x402.org/facilitator`; TrustBench never holds funds. Differentiated-work paid responses (routing, scoring, verification, audit replay) are Ed25519-signed and verifiable with `@trustbench/verify-receipt` or the reference verifier in the repo. Existing partner agreements override the published table for that partner.
+
+The v0.1.0 paywall is rolling out behind a feature flag; until the flag flips, `POST /route` continues to use the existing Bearer-`tb_live_…` auth path described above. When the flag flips, both auth paths will coexist during the transition window. Watch `/pricing` and `/.well-known/trustbench.json` for the canonical live state.
 
 ## Service discovery
 
@@ -130,6 +196,14 @@ To add a provider to TrustBench's registry, the provider self-attests with Trust
 
 - Methodology, what the probe does and does not measure: `https://trustbench.io/methodology`
 - Public scoring rankings: `https://trustbench.io/rankings?capability=search`
+- Public key for receipt verification: `https://trustbench.io/.well-known/trustbench-pubkey`
+- Machine-readable manifest of TrustBench's surfaces: `https://trustbench.io/.well-known/trustbench.json`
+- LLM-grounded reference: `https://trustbench.io/llms.txt`
+- CDP docs (the underlying x402 stack): `https://docs.cdp.coinbase.com/llms.txt`
+- Agentic Market agent guide: `https://agentic.market/llms.txt`
+- Strategy and roadmap: `https://github.com/trustbench/trustbench` (README and `TrustBench-strategy.md`)
+- Phase 4 API access: direct message @TrustBench on X to request a key.
+gs?capability=search`
 - Public key for receipt verification: `https://trustbench.io/.well-known/trustbench-pubkey`
 - Machine-readable manifest of TrustBench's surfaces: `https://trustbench.io/.well-known/trustbench.json`
 - LLM-grounded reference: `https://trustbench.io/llms.txt`

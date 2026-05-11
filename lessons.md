@@ -4,6 +4,28 @@ A living log of patterns, surprises, and corrections worth remembering across se
 
 ---
 
+## 2026-05-11 — Critic pass caught a "stale DB column" bug in the paywall handler
+
+While writing the v0.1.0 paywall handler (`src/paywall-handler.ts`), I drafted `buildProviderPaymentRequirements` to look up `providers.pay_to` from the database. The Critic pass surfaced the bug before I shipped: `providers.pay_to` is `null` for the dominant Agentic Market crawler path (`crawler.ts:152`) because Agentic Market does not expose payTo on its catalog. The existing Bearer `/route` flow learns pay_to via a LIVE 402 probe at request time (`route-handlers.ts probeFor402Challenge`). My paywall handler would have 503'd for the vast majority of providers in production.
+
+**Fix:** Exported `probeFor402Challenge` + `loadProbeConfig` from `route-handlers.ts` and reused them in the paywall handler instead of querying the DB. The paywall now does the same live-probe-then-extract-accepts[0] flow the Bearer chain has done since Phase 3.
+
+**Lesson:** **before reading a DB column, check whether the production-shape data is actually there.** "There's a column, therefore data" is wrong for nullable columns whose primary writer doesn't populate them. The crawler.ts comment at line 152 (`// Agentic Market does not expose payTo on the catalog row; we learn it via the live 402 probe`) was the load-bearing piece of context I missed on first draft. The Critic discipline forced re-reading the crawler to verify rejection reason #2 was real, which is exactly the kind of "trust but verify" sweep the prompt is designed to provoke.
+
+**Carry-forward implications:**
+- Any future paywall feature (`/score-provider`, `/verify`, `/audit-replay`) that needs provider-side data should default to live-probing, not DB lookup, until/unless we add a "is this column reliably populated" annotation to the schema.
+- The Critic prompt at `prompts/critic.md` worked exactly as designed — it surfaced a specific, named, verifiable bug that nearly shipped. Keep running it on every high-risk-surface diff; do not be tempted to skip "because the code looks fine."
+
+Critic verdict (initial): weak-reject. Acceptable to ship behind `TRUSTBENCH_PAYWALL_ENABLED=false`, NOT acceptable to flip the flag until two v0.1.1 follow-ups land: (a) per-paying-wallet rate limit to substitute for the spend caps the X-PAYMENT branch bypasses, (b) `replay: true` field inside the cached receipt body so signed receipts copied out of logs can be distinguished from fresh ones.
+
+**Both gates closed same session (2026-05-11).** Rate limit shipped as `countRecentPaidRequests` + 429 branch in `handlePaidRoute` step 4b (default 60/hour, env-tunable `TRUSTBENCH_PAYWALL_HOURLY_LIMIT`). Replay marker shipped as `replayed_at` field added OUTSIDE the signed bytes at the idempotency-cache return site. Smoke S3 updated to validate both. Verdict upgraded to **acceptable**. Hidden assumption + kill criterion remain in force.
+
+Critic log lines:
+- `2026-05-11: Critic pass on paywall v0.1.0 — verdict weak-reject — hidden assumption: x402.org/facilitator stable + within free-tier for v0.1.0 volume.`
+- `2026-05-11: v0.1.1 follow-ups landed same session (rate limit + replayed_at marker); verdict upgraded to acceptable.`
+
+---
+
 ## 2026-05-11 — Silent Supabase write failures (prober probes table empty for weeks)
 
 Surfaced while preparing the Paddock 7-night rollup CSV. Local query showed `probes` total = 0 despite GitHub Actions nightly pipeline runs being green for the last 5 nights (May 7-11, 9-14 minutes each, all probing 1000 endpoints to completion). Same Supabase project as prod (`lmblvvbegscwqzzsldmg.supabase.co`), service_role key correct (scorecards upserts landing fine, 1280 rows, fresh `last_updated`).
@@ -1184,3 +1206,48 @@ HTML output is the smallest of the three changes but the most visible — Friday
 - `ProjectAutonomous/01-slice-1-jarvis-brain.md` — full Decision Journal automation when Slice 1 ships.
 - `ProjectAutonomous/03-slice-3-sector-scanner.md` — HTML+SVG heatmap.
 - `ProjectAutonomous/ClaudeHTML.md` and `ProjectAutonomous/VaultIntoBusinessSystem.md` — source articles for the patterns.
+
+---
+
+## 2026-05-11 — JarvisBrain Slice 1 scaffolded
+
+**What landed.** Complete file scaffolding for JarvisBrain Slice 1 at `C:\Users\Lithv\Documents\Claude\Projects\JarvisBrain\` (sibling to TrustBench). 45 files total:
+
+- `README.md` + `SETUP-NEXT.md` (top-level orientation + activation steps)
+- `AGENTS.md` (the constitution — founder-shape calibrated, Current Weekly Focus, Decision Journal convention, HTML output rule, privacy allowlist)
+- 13 prompt files in `ops/prompts/` (daily-ingest, daily-evolution, competitor-monitor, industry-aggregator, customer-intel, horizon-scanner, friday-briefing [HTML], weekly-self-management [HTML], monthly-synthesis [HTML], red-team, conversations-needed, memory-staleness, decision-journal)
+- `ops/templates/briefing-template.html` (reusable HTML chrome with inline CSS for callout/warning/eval-prompt patterns)
+- `ops/budget.md`, `ops/degraded-mode.md`, `ops/lessons.md`, `ops/scheduled-tasks/README.md` (operational infrastructure)
+- 12 folder README files explaining purpose + boundaries (inbox, notes, ideas, projects, market-intelligence, briefings, QUEUE, GENERATED, decision-journal, conversations-needed, private, ops)
+- `ideas/2026-thesis.md` (the calibration anchor — current operating thesis with leading indicators that can be graded)
+- Market-intelligence placeholders: industry-watch, customer-signals, horizon-scan, kill-log (with cross-project seeds from TrustBench)
+- 3 competitor placeholders: infopunks, strata, spendgate (with current partnership posture + what-to-watch)
+- `contradictions.md`, `briefings/eval-stamps.md`, `decision-journal/callback-queue.md` (empty with format docs)
+- `smoke-runbook.md` (14-item end-to-end verification checklist)
+
+**Why this matters for TrustBench specifically.** The JarvisBrain Slice 1 work doesn't ship anything in TrustBench, but it tests three patterns that TrustBench will eventually benefit from:
+
+1. **Decision Journal pattern is now running in TWO places** (TrustBench `decisions.md` lightweight + JarvisBrain full automation when activated). The lightweight version is the experiment that derisks the full automation. If 90-day callbacks on real TrustBench decisions produce useful disproven entries by 2026-08-11, the pattern is validated.
+
+2. **HTML briefing rendering pattern is documented in production-ready form** in `ops/templates/briefing-template.html`. When TrustBench eventually wants to render `/analytics` or partnership-facing reports more richly, the template is reusable.
+
+3. **AGENTS.md as a constitution pattern** (founder-shape calibration, Current Weekly Focus, daily-note convention keywords, privacy allowlist) is now demonstrated in a complete form. TrustBench's CLAUDE.md is partially this pattern but less formal; if JarvisBrain's AGENTS.md proves higher-leverage in practice, the structure can be backported to CLAUDE.md.
+
+**Carry-forward — what to watch.** The single biggest unknown: whether the eval-stamp loop survives my discipline. If I don't stamp briefs in the first 2 weeks of operation, the brain goes blind and the whole calibration story collapses. Sunday Self-Mgmt's explicit "0 stamps this week" flag is the canary; honor it.
+
+The second biggest unknown: whether HTML briefings actually get read more carefully than markdown. ClaudeHTML.md claims yes (per Thariq's observation). In TrustBench, content-negotiated `/receipts/:id` and `/rankings` show the pattern works for verification surfaces. JarvisBrain's Friday brief HTML is the first test of the pattern for *strategic* surfaces. If the eval-stamps from the first 4 weeks show no improvement in "useful" rate vs. the markdown baseline (which doesn't exist — I haven't run a markdown version), then we can't conclude. But if "surfaced-something-i-missed" appears at least once per 4 weeks, the format earned its 2-4x token cost.
+
+**Setup state.** Scaffolding complete from this TrustBench Cowork session. Activation requires:
+- New Cowork project pointed at `C:\Users\Lithv\Documents\Claude\Projects\JarvisBrain`
+- Tier 1 scheduled tasks created (4 tasks: daily-ingest, daily-evolution, friday-briefing, weekly-self-mgmt)
+- First Friday brief by 2026-05-15, eval-stamped, then Tier 2-4 added if Tier 1 produces signal
+
+Setup playbook at `JarvisBrain/SETUP-NEXT.md`. Estimated setup time: ~3-4 hours active + 2 weeks observation.
+
+**Related files (in TrustBench).**
+- `ProjectAutonomous/01-slice-1-jarvis-brain.md` — authoritative design
+- `ProjectAutonomous/ROADMAP.md` — Reassess Gate 1 conditions before Slice 2
+- `ProjectAutonomous/04-portable-from-trustbench.md` — what to fork pattern
+- `prompts/decision-journal.md` — TrustBench-side decision journal prompt
+- `prompts/critic.md` — TrustBench-side Critic prompt (mirrored at JarvisBrain `ops/prompts/red-team.md`)
+- `CLAUDE.md` § "Decision Journal" + § "Critic pass" + § "Founder-shape calibration" — workflow rules that informed JarvisBrain's AGENTS.md

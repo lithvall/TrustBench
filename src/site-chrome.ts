@@ -14,7 +14,7 @@
 // public site; can be replaced with a precompiled stylesheet later.
 
 // Active-nav identifier for highlighting the current page in the top bar.
-export type ActiveNav = 'home' | 'rankings' | 'methodology' | 'analytics' | 'github' | 'receipt';
+export type ActiveNav = 'home' | 'rankings' | 'methodology' | 'pricing' | 'analytics' | 'github' | 'receipt';
 
 // Inline SVG bench-and-shield mark. Brand-green on transparent so it works
 // on white nav and any light surface. 32×32 with viewBox so it scales cleanly.
@@ -111,6 +111,7 @@ export function renderNav(active: ActiveNav): string {
     <div class="hidden md:flex items-center gap-7">
       ${link('rankings', '/rankings?capability=search', 'Rankings')}
       ${link('methodology', '/methodology', 'Methodology')}
+      ${link('pricing', '/pricing', 'Pricing')}
       ${link('analytics', '/analytics', 'Analytics')}
       <a href="https://github.com/lithvall/TrustBench" target="_blank" rel="noopener noreferrer" class="text-muted hover:text-primary transition-colors text-sm">GitHub</a>
     </div>
@@ -134,6 +135,7 @@ export function renderFooter(): string {
       <span class="label-caps text-primary">Product</span>
       <a href="/rankings?capability=search" class="text-sm text-muted hover:text-primary">Rankings</a>
       <a href="/methodology" class="text-sm text-muted hover:text-primary">Methodology</a>
+      <a href="/pricing" class="text-sm text-muted hover:text-primary">Pricing</a>
       <a href="/analytics" class="text-sm text-muted hover:text-primary">Analytics</a>
     </div>
     <div class="flex flex-col gap-2">

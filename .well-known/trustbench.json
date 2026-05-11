@@ -20,8 +20,87 @@
     "receipt": "https://trustbench.io/receipts/:id",
     "analytics": "https://trustbench.io/analytics",
     "methodology": "https://trustbench.io/methodology",
+    "pricing": "https://trustbench.io/pricing",
     "mcpTools": "https://trustbench.io/mcp/tools"
   },
+  "endpoints": [
+    {
+      "path": "/route",
+      "method": "POST",
+      "paid": true,
+      "pricing_tier": "score-provider",
+      "price_usdc": "0.005",
+      "amount_atomic": "5000",
+      "available_in": "v0.1.0",
+      "payment_required_doc": "https://trustbench.io/pricing#tiers",
+      "auth": "Bearer tb_live_<key> today; x402 payment-as-auth when TRUSTBENCH_PAYWALL_ENABLED=true",
+      "description": "Non-custodial routing decision with Ed25519-signed routing receipt."
+    },
+    {
+      "path": "/route/settle",
+      "method": "POST",
+      "paid": false,
+      "available_in": "v0.1.0",
+      "description": "Step 2 of the two-step quote/settle flow; settle fee is paid at quote time via the /route paywall."
+    },
+    {
+      "path": "/rankings",
+      "method": "GET",
+      "paid_html": false,
+      "paid_json_above_quota": "v0.2.0 (60 req/IP/min free, then $0.0005 per call)",
+      "pricing_tier": "read",
+      "available_in": "v0.1.0",
+      "description": "HTML responses free permanently. JSON paid above per-IP free-tier quota starting in v0.2.0."
+    },
+    {
+      "path": "/receipts/:id",
+      "method": "GET",
+      "paid_html": false,
+      "paid_json_above_quota": "v0.2.0 (60 req/IP/min free, then $0.0005 per call)",
+      "pricing_tier": "read",
+      "available_in": "v0.1.0",
+      "description": "Public, immutable receipt envelope. HTML free permanently."
+    },
+    {
+      "path": "/score-provider",
+      "method": "POST",
+      "paid": true,
+      "pricing_tier": "score-provider",
+      "price_usdc": "0.005",
+      "amount_atomic": "5000",
+      "available_in": "v0.2.0",
+      "description": "Reads liveness telemetry plus risk annotations for any registered URL."
+    },
+    {
+      "path": "/verify",
+      "method": "POST",
+      "paid": true,
+      "pricing_tier": "verify",
+      "price_usdc": "0.002",
+      "amount_atomic": "2000",
+      "available_in": "v0.2.0",
+      "description": "Hosted verifier for externally-provided TrustBench receipts."
+    },
+    {
+      "path": "/receipts/:id?replay=true",
+      "method": "GET",
+      "paid": true,
+      "pricing_tier": "audit-replay",
+      "price_usdc": "0.01",
+      "amount_atomic": "10000",
+      "available_in": "v0.2.0",
+      "description": "Re-verifies signature and on-chain settlement against current chain state."
+    },
+    {
+      "path": "/compliance-export",
+      "method": "POST",
+      "paid": true,
+      "pricing_tier": "compliance-export",
+      "price_usdc": "0.50 single, 2.00 bundle <=100, negotiated >100",
+      "available_in": "v0.3.0",
+      "description": "Signed multi-receipt export bundle for compliance / audit consumers."
+    }
+  ],
   "authenticatedEndpoints": {
     "routeQuote": {
       "url": "https://trustbench.io/route",
@@ -81,9 +160,12 @@
   },
   "pricing": {
     "model": "x402-native paywalled API",
-    "description": "Endpoints are paywalled via x402 with per-call USDC settlement on Base. No subscriptions, no contracts. Specific per-call tiers are in active validation with first integration partners and not yet published.",
+    "description": "Endpoints are paywalled via x402 with per-call USDC settlement on Base through the public Foundation facilitator at x402.org/facilitator. No subscriptions, no contracts. Full tier table at /pricing (HTML and JSON).",
+    "publishedTiers": "https://trustbench.io/pricing",
+    "liveInV010": "POST /route at $0.005 per call (score-provider tier)",
+    "publicFacilitator": "https://x402.org/facilitator",
     "providerVerificationBond": "refundable, pay-to-list, never pay-to-rank",
-    "phase4Status": "invite-only during the build; access via direct message to @TrustBench on X"
+    "partnerCredit": "Existing partner agreements override the published table for that partner. Reach out via GitHub for partner-volume credit before integration locks in."
   },
   "policyPrimitives": {
     "idempotencyKeys": "16-128 char header on every POST /route. Same key + same body = cached replay. Same key + different body = 409.",

@@ -919,7 +919,12 @@ type ProbeOutcome = {
   raw_accepts: PaymentRequirementsV2 | null;
 };
 
-async function probeFor402Challenge(
+// Exported 2026-05-11 for src/paywall-handler.ts reuse. The paywall path
+// needs the same live-probe → merchant-accepts[0] extraction the Bearer flow
+// does. Database providers.pay_to is null for the dominant Agentic Market
+// path (see crawler.ts:152 — "Agentic Market does not expose payTo on the
+// catalog row; we learn it via the live 402 probe").
+export async function probeFor402Challenge(
   providerUrl: string,
   config?: X402ProbeConfig | null,
 ): Promise<ProbeOutcome | null> {
@@ -1068,7 +1073,8 @@ if (resp.status !== 402) return null;
  * GET-only probe, preserving Phase 3 behavior for every existing provider
  * row that doesn't carry the new metadata fields.
  */
-async function loadProbeConfig(providerId: string): Promise<X402ProbeConfig | null> {
+// Exported 2026-05-11 alongside probeFor402Challenge — paired use only.
+export async function loadProbeConfig(providerId: string): Promise<X402ProbeConfig | null> {
   const { data, error } = await supabase
     .from('providers')
     .select('metadata')

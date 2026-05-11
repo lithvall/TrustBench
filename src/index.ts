@@ -18,6 +18,8 @@ import type { SignedReceipt } from './receipt-generator.js';
 import { renderRankingsHtml, type RankingRow } from './rankings-html.js';
 import { renderLandingHtml, type LandingStats } from './landing-html.js';
 import { renderMethodologyHtml } from './methodology-html.js';
+import { renderPricingHtml, buildPricingJson } from './pricing-html.js';
+import { paywallGate } from './paywall-handler.js';
 import { renderAnalyticsHtml, type AnalyticsData, type CategoryCard } from './analytics-html.js';
 
 // ---------------------------------------------------------------------------
@@ -229,7 +231,14 @@ app.get('/route', async (c) => {
 // Step 1 of the two-step x402 protocol — see phase3-x402-construction.md.
 // Returns a route_id + payment_required challenge for the agent to sign.
 // ---------------------------------------------------------------------------
-app.post('/route', requireAgent, withIdempotency, requireWithinSpendCap, quoteHandler);
+// Paywall gate mounts FIRST. When TRUSTBENCH_PAYWALL_ENABLED=true and an
+// X-PAYMENT header is present, it handles the request inline and returns 200
+// without calling next() — completely bypassing the Bearer + spend-cap chain.
+// When the flag is off, or X-PAYMENT is absent but Authorization is present,
+// it falls through to the existing chain. See src/paywall-handler.ts for the
+// full failure-mode analysis. Default flag value is false → behavior unchanged
+// from Phase 3 until ops explicitly flips the flag on Railway.
+app.post('/route', paywallGate, requireAgent, withIdempotency, requireWithinSpendCap, quoteHandler);
 
 // ---------------------------------------------------------------------------
 // POST /route/settle — Phase 3 settle (Step 2).
@@ -463,6 +472,32 @@ app.get('/receipts/:id', async (c) => {
 // The new layout mandates the "What this measurement does NOT tell you"
 // callout (formerly inline) per the honest-framing rule in CLAUDE.md.
 app.get('/methodology', (c) => c.html(renderMethodologyHtml()));
+
+// ---------------------------------------------------------------------------
+// Pricing page — Phase 4 v0.1.0 paywall (phase4-paywall-design.md § Q7).
+// Content-negotiated same as /rankings + /receipts/:id: browsers (Accept:
+// text/html) get the polished page; agents (Accept: application/json or
+// ?format=json) get the programmatic tier table.
+//
+// Source of truth for both shapes is src/pricing-html.ts — tier rows are
+// declared once and rendered into either HTML or JSON. To change a price,
+// edit PRICING_TIERS in pricing-html.ts and bump PRICING_VERSION.
+//
+// Cache hint: pricing changes are rare and announced via the visible
+// "last_updated" stamp, so 1h public cache is comfortable. Bumping the
+// version invalidates cached pages naturally as agents see the new value.
+// ---------------------------------------------------------------------------
+app.get('/pricing', (c) => {
+  const wantsHtml = preferHtml(c.req.header('Accept'), c.req.query('format') ?? null);
+  if (wantsHtml) {
+    return c.html(renderPricingHtml(), 200, {
+      'Cache-Control': 'public, max-age=3600',
+    });
+  }
+  return c.json(buildPricingJson(), 200, {
+    'Cache-Control': 'public, max-age=3600',
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Partner exports (/exports/<filename>.csv) — added 2026-05-11.

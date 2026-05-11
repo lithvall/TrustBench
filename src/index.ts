@@ -464,6 +464,40 @@ app.get('/receipts/:id', async (c) => {
 // callout (formerly inline) per the honest-framing rule in CLAUDE.md.
 app.get('/methodology', (c) => c.html(renderMethodologyHtml()));
 
+// ---------------------------------------------------------------------------
+// Partner data exports (/data/<filename>.csv) — added 2026-05-11.
+// ---------------------------------------------------------------------------
+// Static-file serving for ad-hoc partner deliverables committed under data/
+// in the repo (e.g. the Paddock 7-night rollup). Read at request time, not
+// boot, so a freshly-committed snapshot is available without a redeploy
+// after Railway pulls the new commit.
+//
+// Why this route exists at all: Reddit DMs block raw.githubusercontent.com
+// URLs by default, and even github.com blob links sometimes trip spam
+// filters in partner DMs. Serving from the canonical trustbench.io domain
+// gives us a branded URL pattern that partners can ingest cleanly.
+//
+// Security: filename is restricted to `[A-Za-z0-9._-]+\.csv` to block path
+// traversal and accidental exposure of non-CSV files in the data/ directory.
+// Anything outside that pattern returns 404 with no filesystem read.
+//
+// Failure mode: missing file → 404 plain-text. The route never throws and
+// never leaks the underlying filesystem error to the caller.
+app.get('/data/:filename', (c) => {
+  const filename = c.req.param('filename');
+  if (!/^[A-Za-z0-9._-]+\.csv$/.test(filename)) {
+    return c.text('Not found', 404);
+  }
+  try {
+    const content = readFileSync(path.resolve(process.cwd(), 'data', filename), 'utf-8');
+    c.header('Content-Type', 'text/csv; charset=utf-8');
+    c.header('Cache-Control', 'public, max-age=300');
+    return c.body(content);
+  } catch {
+    return c.text('Not found', 404);
+  }
+});
+
 // Analytics dashboard — Phase 4 redesign in src/analytics-html.ts.
 // Three category cards (Search/Inference/Data) backed by getRankings(),
 // each rendered with a 7-day latency-trend sparkline derived from the

@@ -333,6 +333,8 @@ Don't ship versions ahead of trigger. Solo-founder rule.
 
 ## 5. Compose hooks (integration paths for partners)
 
+> **Update 2026-05-11 (post-launch):** the Infopunks compose-hook below is now historical context. Infopunks suspended their `infopunks-cognition-layer-x402.onrender.com` Render deployment between this doc's writing (2026-05-08) and the v0.1.0 paywall launch (2026-05-11), and pivoted to `radar.infopunks.fun` — a Pay.sh-on-Solana provider-intelligence layer with explicit "routing recommendations." That's competition-adjacent on Solana, not the pure complement we'd modeled here. The Strata + QBT + CLU_AGENT compose hooks below remain accurate as written. See memory `project_infopunks_pivot_to_paysh_radar_2026_05_11.md` for the full read and recommended posture (do not chase; watch for Infopunks Radar to add EVM support as the trigger to revisit). The compose-hook prose below is preserved as the 2026-05-08 strategic snapshot.
+
 The paywall design above composes cleanly with each of the three live partnership signals plus the QBT-Labs/x402 read.
 
 ### QBT-Labs/x402 (Aggelos Kappos)

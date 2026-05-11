@@ -21,7 +21,9 @@
 //     version: "0.1.0",
 //     base_currency: "USDC",
 //     network: "Base (eip155:8453)",
-//     facilitator: "https://x402.org/facilitator",
+//     facilitator: "Coinbase CDP facilitator",
+//     facilitator_url: "https://api.cdp.coinbase.com/platform/v2/x402",
+//     facilitator_docs: "https://docs.cdp.coinbase.com/x402/welcome",
 //     tiers: [
 //       { name, price_usdc, endpoints[], status, available_in? },
 //       ...
@@ -148,7 +150,9 @@ export function buildPricingJson(): unknown {
     version: PRICING_VERSION,
     base_currency: 'USDC',
     network: 'Base (eip155:8453)',
-    facilitator: 'https://x402.org/facilitator',
+    facilitator: 'Coinbase CDP facilitator',
+    facilitator_url: 'https://api.cdp.coinbase.com/platform/v2/x402',
+    facilitator_docs: 'https://docs.cdp.coinbase.com/x402/welcome',
     last_updated: PRICING_LAST_UPDATED,
     disclaimer:
       'Prices are anchors, not contracts. They may change with public notice on this page. Existing partner agreements override the table for that partner. Read /methodology for what TrustBench actually measures.',
@@ -215,7 +219,7 @@ ${renderNav('pricing')}
         <ul class="space-y-3 text-ink">
           <li class="flex gap-3"><span class="text-primary mt-1">▸</span><span>Paid endpoints respond <span class="mono text-sm bg-mono px-1.5 py-0.5 rounded">402 Payment Required</span> with x402 payment requirements pointing at TrustBench's revenue wallet on Base.</span></li>
           <li class="flex gap-3"><span class="text-primary mt-1">▸</span><span>Agents sign an EIP-3009 <span class="mono text-sm bg-mono px-1.5 py-0.5 rounded">transferWithAuthorization</span> for the listed price and retry with an <span class="mono text-sm bg-mono px-1.5 py-0.5 rounded">X-PAYMENT</span> header.</span></li>
-          <li class="flex gap-3"><span class="text-primary mt-1">▸</span><span>The x402 facilitator at <span class="mono text-sm">x402.org/facilitator</span> verifies the signature and submits the transfer on-chain. TrustBench never holds agent funds.</span></li>
+          <li class="flex gap-3"><span class="text-primary mt-1">▸</span><span>The <a href="https://docs.cdp.coinbase.com/x402/welcome" target="_blank" rel="noopener noreferrer" class="text-primary underline">Coinbase CDP facilitator</a> verifies the signature and submits the transfer on-chain. TrustBench never holds agent funds.</span></li>
           <li class="flex gap-3"><span class="text-primary mt-1">▸</span><span>Differentiated-work endpoints (routing, scoring, verification, audit replay) return an Ed25519-signed response envelope. Verify it with the public <a href="https://www.npmjs.com/package/@trustbench/verify-receipt" target="_blank" rel="noopener noreferrer" class="text-primary underline">@trustbench/verify-receipt</a> npm package or the reference verifier in the GitHub repo.</span></li>
           <li class="flex gap-3"><span class="text-primary mt-1">▸</span><span><span class="mono text-sm bg-mono px-1.5 py-0.5 rounded">Idempotency-Key</span> headers are honored. Same key plus same body within 24 hours replays the cached response without re-charging.</span></li>
         </ul>

@@ -465,31 +465,39 @@ app.get('/receipts/:id', async (c) => {
 app.get('/methodology', (c) => c.html(renderMethodologyHtml()));
 
 // ---------------------------------------------------------------------------
-// Partner data exports (/data/<filename>.csv) — added 2026-05-11.
+// Partner exports (/exports/<filename>.csv) — added 2026-05-11.
 // ---------------------------------------------------------------------------
-// Static-file serving for ad-hoc partner deliverables committed under data/
-// in the repo (e.g. the Paddock 7-night rollup). Read at request time, not
-// boot, so a freshly-committed snapshot is available without a redeploy
-// after Railway pulls the new commit.
+// Static-file serving for ad-hoc partner deliverables committed under
+// exports/ in the repo (e.g. the Paddock 7-night rollup). Read at request
+// time, not boot, so a freshly-committed snapshot is available as soon as
+// Railway pulls the new commit. No redeploy beat needed.
 //
 // Why this route exists at all: Reddit DMs block raw.githubusercontent.com
 // URLs by default, and even github.com blob links sometimes trip spam
 // filters in partner DMs. Serving from the canonical trustbench.io domain
 // gives us a branded URL pattern that partners can ingest cleanly.
 //
+// Why `exports/` and not `data/`: initial implementation used data/, but on
+// this Windows machine a brand-new CSV in data/ was invisible to git
+// (test-file in the same dir was tracked fine, ReadOnly attr on data/
+// directory, none of the usual ignore-rule explanations fired). Switched
+// to exports/ which behaves normally. Worth investigating later but the
+// rename is the right semantic name regardless.
+//
 // Security: filename is restricted to `[A-Za-z0-9._-]+\.csv` to block path
-// traversal and accidental exposure of non-CSV files in the data/ directory.
-// Anything outside that pattern returns 404 with no filesystem read.
+// traversal and accidental exposure of non-CSV files in the exports
+// directory. Anything outside that pattern returns 404 with no filesystem
+// read.
 //
 // Failure mode: missing file → 404 plain-text. The route never throws and
 // never leaks the underlying filesystem error to the caller.
-app.get('/data/:filename', (c) => {
+app.get('/exports/:filename', (c) => {
   const filename = c.req.param('filename');
   if (!/^[A-Za-z0-9._-]+\.csv$/.test(filename)) {
     return c.text('Not found', 404);
   }
   try {
-    const content = readFileSync(path.resolve(process.cwd(), 'data', filename), 'utf-8');
+    const content = readFileSync(path.resolve(process.cwd(), 'exports', filename), 'utf-8');
     c.header('Content-Type', 'text/csv; charset=utf-8');
     c.header('Cache-Control', 'public, max-age=300');
     return c.body(content);

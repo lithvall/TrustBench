@@ -24,7 +24,7 @@ export function renderMethodologyHtml(): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
-${siteHead(title, description)}
+${siteHead(title, description, 'methodology')}
 </head>
 <body class="bg-bg text-ink">
 ${renderNav('methodology')}

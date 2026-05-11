@@ -34,13 +34,29 @@ export const BENCH_LOGO_SVG = `<svg width="28" height="28" viewBox="0 0 32 32" x
   <text x="16" y="13.4" text-anchor="middle" font-family="Inter, sans-serif" font-weight="700" font-size="8.5" fill="#FFFFFF">T</text>
 </svg>`;
 
-// Shared <head> contents — Tailwind config, fonts, base styles.
-// Pages append their own <title> / meta tags after this.
+// Identifier for a per-page OG/Twitter card image. Each value maps to a
+// PNG at /og/<name>.png served by src/index.ts (whitelisted, year-immutable
+// cache). Add a new card by (1) generating the PNG via
+// scripts/generate-og-cards.py, (2) committing it to public/og/, (3) adding
+// the key to OG_CARDS in src/index.ts, and (4) extending this union.
+export type OgCard = 'home' | 'methodology' | 'rankings' | 'pricing' | 'receipt';
+
+// Canonical, absolute base URL. Hard-coded to the production hostname so
+// social-card meta tags resolve to a real HTTPS URL regardless of which
+// host the response was served from (Railway internal hostname, preview
+// deploys, etc.). X/Slack/Discord require absolute URLs for og:image.
+const SITE_ORIGIN = 'https://trustbench.io';
+
+// Shared <head> contents — Tailwind config, fonts, base styles, social card
+// meta tags. Pages append their own page-specific <link>s or <meta>s after
+// this. The optional `ogCard` arg selects the per-page card; default 'home'
+// is fine for any page that doesn't have a dedicated card yet.
 //
 // Tailwind config note: only the design tokens that pages actually use are
 // declared here. If a page introduces a new token, add it here so every page
 // renders consistently.
-export function siteHead(title: string, description: string): string {
+export function siteHead(title: string, description: string, ogCard: OgCard = 'home'): string {
+  const ogImageUrl = `${SITE_ORIGIN}/og/${ogCard}.png`;
   return `<meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
@@ -48,9 +64,16 @@ export function siteHead(title: string, description: string): string {
 <meta property="og:type" content="website">
 <meta property="og:title" content="${escapeHtml(title)}">
 <meta property="og:description" content="${escapeHtml(description)}">
-<meta name="twitter:card" content="summary">
+<meta property="og:image" content="${ogImageUrl}">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:alt" content="${escapeHtml(title)}">
+<meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="${escapeHtml(title)}">
 <meta name="twitter:description" content="${escapeHtml(description)}">
+<meta name="twitter:image" content="${ogImageUrl}">
+<meta name="twitter:image:alt" content="${escapeHtml(title)}">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">

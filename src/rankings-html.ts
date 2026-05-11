@@ -64,7 +64,7 @@ export function renderRankingsHtml(rankings: RankingRow[], capability: string): 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
-${siteHead(title, desc)}
+${siteHead(title, desc, 'rankings')}
 </head>
 <body class="bg-bg text-ink">
 ${renderNav('rankings')}

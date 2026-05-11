@@ -52,6 +52,46 @@ const SKILL_MD_BODY = loadStatic('skill.md');
 const LLMS_TXT_BODY = loadStatic('llms.txt');
 const WELL_KNOWN_TRUSTBENCH_JSON_BODY = loadStatic('.well-known/trustbench.json');
 
+// Binary-safe variant of loadStatic for assets served as image/png etc.
+// Same boot-on-disk-or-503 semantics — we never crash boot on a missing card.
+//
+// Returns Uint8Array<ArrayBuffer> (not Buffer, not Uint8Array<ArrayBufferLike>)
+// so the body passes the Web `BodyInit` type check cleanly. Three facts collide:
+//   1. Node's readFileSync returns Buffer<ArrayBufferLike> (its pool is
+//      generically typed to leave room for SharedArrayBuffer).
+//   2. `new Uint8Array(buf)` inherits that ArrayBufferLike parameterization.
+//   3. lib.dom.d.ts's BodyInit accepts only Uint8Array<ArrayBuffer>.
+// Allocating a fresh-by-length Uint8Array gives a guaranteed plain
+// ArrayBuffer backing; `.set()` copies the bytes in. One-time cost at boot.
+function loadStaticBinary(relPath: string): Uint8Array<ArrayBuffer> | null {
+  try {
+    const buf = readFileSync(path.resolve(process.cwd(), relPath));
+    const u8 = new Uint8Array(buf.byteLength);
+    u8.set(buf);
+    return u8;
+  } catch (err: any) {
+    console.warn(`[boot] static binary ${relPath} not loaded: ${err.message}; route will serve 404`);
+    return null;
+  }
+}
+
+// OG / Twitter card images. Per-page 1200x630 PNGs rendered offline by
+// scripts/generate-og-cards.py and committed under public/og/. Loaded once
+// at boot (5 small PNGs, ~250KB total) and served by /og/:name with
+// year-long immutable cache, since the file name is the cache key — to
+// update a card, regenerate the PNG and redeploy (the same content URL is
+// fine; X re-fetches roughly weekly anyway).
+//
+// The Record itself is the path-traversal whitelist: nothing outside this
+// map can be requested, no matter what the :name param contains.
+const OG_CARDS: Record<string, Uint8Array<ArrayBuffer> | null> = {
+  home: loadStaticBinary('public/og/home.png'),
+  methodology: loadStaticBinary('public/og/methodology.png'),
+  rankings: loadStaticBinary('public/og/rankings.png'),
+  pricing: loadStaticBinary('public/og/pricing.png'),
+  receipt: loadStaticBinary('public/og/receipt.png'),
+};
+
 // Top-level Supabase client for the public-facing endpoints in this file
 // (currently /receipts/:id). Other modules own their own clients to keep
 // boot lazy. Same env-var convention as the rest of the codebase:
@@ -483,6 +523,43 @@ app.get('/.well-known/trustbench.json', (c) => {
   return c.text(WELL_KNOWN_TRUSTBENCH_JSON_BODY, 200, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'public, max-age=3600',
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /og/:name — per-page OG/Twitter card image.
+// Returns the PNG corresponding to a page (home, methodology, rankings,
+// pricing, receipt) for inclusion in <meta property="og:image"> and
+// <meta name="twitter:image"> on the HTML pages of this site.
+//
+// Whitelist via OG_CARDS Record: any :name not in the keyset returns 404,
+// so the route is path-traversal-proof by construction.
+// The `.png` suffix is accepted but optional — agents and link-preview
+// crawlers typically request the exact URL emitted in the meta tag, so the
+// meta tag should include `.png` for clarity.
+//
+// Caching: `public, max-age=31536000, immutable`. The URL is the cache key,
+// so to invalidate a card, regenerate it and let normal CDN/X re-crawl pick
+// it up (X refetches OG images roughly weekly); for a hard invalidate, add
+// a `?v=2` query string in the meta tag.
+// ---------------------------------------------------------------------------
+app.get('/og/:name', (c) => {
+  const raw = c.req.param('name');
+  const key = raw.replace(/\.png$/i, '');
+  const body = OG_CARDS[key];
+  if (!body) {
+    return c.text('Not found', 404, { 'Content-Type': 'text/plain; charset=utf-8' });
+  }
+  // Bypass Hono's c.body() overloads (which don't cleanly accept Node Buffer
+  // and fall through to the `T extends null` overload, breaking tsc). Use
+  // the Web Response constructor directly: BodyInit accepts ArrayBufferView,
+  // and Buffer extends Uint8Array which is an ArrayBufferView. No copy.
+  return new Response(body, {
+    status: 200,
+    headers: {
+      'Content-Type': 'image/png',
+      'Cache-Control': 'public, max-age=31536000, immutable',
+    },
   });
 });
 

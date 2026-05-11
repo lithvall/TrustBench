@@ -184,7 +184,7 @@ export function renderPricingHtml(): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
-${siteHead(title, description)}
+${siteHead(title, description, 'pricing')}
 </head>
 <body class="bg-bg text-ink">
 ${renderNav('pricing')}

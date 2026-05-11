@@ -246,7 +246,7 @@ export function renderReceiptHtml(envelope: SignedReceipt, verify: VerifyCache):
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
-${siteHead(title, desc)}
+${siteHead(title, desc, 'receipt')}
 </head>
 <body class="bg-bg text-ink">
 ${renderNav('receipt')}

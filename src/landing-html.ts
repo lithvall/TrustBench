@@ -45,7 +45,7 @@ export function renderLandingHtml(stats: LandingStats): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
-${siteHead(title, description)}
+${siteHead(title, description, 'home')}
 </head>
 <body class="bg-bg text-ink">
 ${renderNav('home')}

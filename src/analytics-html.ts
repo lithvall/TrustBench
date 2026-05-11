@@ -45,7 +45,7 @@ export function renderAnalyticsHtml(data: AnalyticsData): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
-${siteHead(title, description)}
+${siteHead(title, description, 'home')}
 </head>
 <body class="bg-bg text-ink">
 ${renderNav('analytics')}

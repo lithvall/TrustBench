@@ -129,3 +129,15 @@ Started 2026-05-08 per `phase6-reassessment-2026-05-07.md` (now header-marked SU
   - leading_indicator: the agentic.market card for TrustBench, post-indexing, shows facilitator info consistent with what was in our public surfaces at first-settle time
   - check_back_date: 2026-08-09
   - status: open
+
+2026-05-11 (end of day): Ship Bazaar wire-up infrastructure to prod default-OFF; defer CDP-indexing validation to a follow-up session. Reason: 3-hour focused wire-up session reached the point where the 402 wire shape (`body.extensions.bazaar = { info, schema }`) is validated against the canonical `BodyDiscoveryExtension` interface via direct curl, but actual indexing cannot be tested today because (a) `paywallGate` is route-coupled and rejects the spike's body shape before settle, AND (b) no live conformant upstream provider exists for the primary capabilities right now (Infopunks suspended; others unverified). The infrastructure is correct and fires automatically when the next conformant /route call lands; this is a "ship-in-pieces" outcome that is honest about what's ready vs. what's blocked. Full handoff in `phase4-bazaar-handoff-2026-05-11.md`. Two follow-up paths documented: Path P (pragmatic 2-3 hour session — find a working provider, validate end-to-end via /route directly) and Path R (principled multi-week refactor — decouple paywallGate from /route, fix registry conformance).
+  - assumption: a future /route call from a paying agent against a capability with a conformant provider will trigger CDP cataloging automatically with no further code changes
+  - leading_indicator: the first paid /route call after `TRUSTBENCH_BAZAAR_EXTENSION_ENABLED=true` is flipped on Railway shows up in `https://api.cdp.coinbase.com/platform/v2/x402/discovery/merchant?payTo=<revenue-wallet>` within 60 minutes
+  - check_back_date: 2026-08-09
+  - status: open
+
+2026-05-11 (end of day): Defer the `paywallGate` refactor (decoupling from /route-specific body validation + provider selection) to Phase 5. Reason: the refactor is correct work but it's 4-6 hours of careful surgery on revenue-bearing code with idempotency + spend-cap + receipt-signature invariants to preserve; doing it during a listing-focused sprint inverts the risk/reward ratio (one validated listing today is more valuable than a clean architecture in two weeks). Full design + read-list documented in `phase4-bazaar-handoff-2026-05-11.md` § Path R. Schedule alongside the v0.2.0 registry-conformance work since both are unblocks for the Bazaar spike to function as originally designed.
+  - assumption: the production /route path can produce a real CDP-mediated settle through some capability without the refactor, eventually surfacing the indexing signal
+  - leading_indicator: any successful real /route call with TRUSTBENCH_BAZAAR_EXTENSION_ENABLED=true → confirmed cataloging on agentic.market within 1 hour
+  - check_back_date: 2026-08-09
+  - status: open

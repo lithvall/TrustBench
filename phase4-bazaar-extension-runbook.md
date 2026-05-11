@@ -1,9 +1,26 @@
 # Phase 4 — Bazaar extension wire-up runbook
 
-**Status:** Plan-only artifact. No code changes in this doc.
-**For:** the next focused 2-4 hour session where the Bazaar extension actually gets wired.
+> **PARTIALLY SUPERSEDED 2026-05-11 (end of day).** Most of this runbook was
+> designed against an API shape that didn't match the shipped
+> `@x402/extensions` v2.11.0 package. The corrections, the actual integration
+> as shipped, the pragmatic next-session path, and the principled refactor
+> are all consolidated in **`phase4-bazaar-handoff-2026-05-11.md`** — read
+> THAT FIRST for any future Bazaar work.
+>
+> Sections that survived the day are § 1 (Pre-read links — still useful) and
+> § 8 (Out of scope — still binding). § 2 (spike) and § 3 (composition)
+> describe an API surface that doesn't exist in the shipped package; their
+> replacements live in `src/bazaar-extension.ts` + `phase4-bazaar-handoff-2026-05-11.md`
+> § Path P + Path R.
+>
+> Do NOT delete this file — it has historical value as the design pass that
+> exposed the doc/package divergence. The lesson is captured in `lessons.md`
+> 2026-05-11 "WebSearch result snippets can fabricate API surfaces".
+
+**Status:** Partially superseded (see banner above).
+**For:** historical reference of the original design + the doc/package divergence story.
 **Created:** 2026-05-11 (after `phase4-listing-research.md` locked the listing path).
-**Prerequisite:** read `phase4-listing-research.md` and the 2026-05-11 entries in `decisions.md` first.
+**Prerequisite for any actual Bazaar work:** read `phase4-bazaar-handoff-2026-05-11.md` first.
 
 ---
 

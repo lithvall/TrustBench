@@ -4,6 +4,30 @@ A living log of patterns, surprises, and corrections worth remembering across se
 
 ---
 
+## 2026-05-11 (end of day) — "Throwaway spike route" doesn't work when the paywall is route-coupled
+
+The original Bazaar listing runbook (`phase4-bazaar-extension-runbook.md` § 2) called for a 30-min pre-commit spike against a throwaway route (`/test/bazaar-spike`) to validate the extension wiring before touching production `/route`. The pattern is sound in principle — test the schema with a tiny example before exposing the full route's schema surface.
+
+It didn't work. `paywallGate` (in `src/paywall-handler.ts`) validates `/route`-specific body fields (the `capability` enum, `max_price`, `payer_address`) BEFORE doing any payment processing. The spike route's `{ message: string }` body fails validation with HTTP 400 (`capability_invalid`), so no settle happens, no CDP cataloging happens, the spike validates nothing.
+
+We only discovered this at end-of-day after the package was installed, the wire-up was written, the 402 wire shape was validated via direct curl, and the smoke harness was run for the first time. The 402 envelope was correct; the request just couldn't proceed past `paywallGate`.
+
+**The architectural finding:** `paywallGate` is misnamed. It's not a generic paywall middleware; it's the body-validation + provider-selection + verify-settle + receipt-build logic for `/route` specifically, mounted as middleware. A real paywall middleware should only do verify+settle and pass the result to the next handler.
+
+**Lesson:** before designing a throwaway-spike pattern around a middleware, verify the middleware is generic. Read the middleware's source end-to-end and look for route-coupled assumptions:
+- Does it validate request body fields? (Should be the route handler's job.)
+- Does it select downstream services? (Should be the route handler's job.)
+- Does it build the response shape? (Should be the route handler's job.)
+- Does it return its own 200, or call next()? (Generic middlewares call next() with state in context.)
+
+If any of those are yes, the middleware is route-coupled. A spike against a different route through the same middleware won't actually work without a refactor.
+
+**Pattern to apply going forward:** treat naming as a hypothesis. `paywallGate` SOUNDED generic, but the only way to verify was reading the implementation. Whenever planning to reuse a middleware on a new route, do a 5-min source skim FIRST. The cost of skipping that skim was a wasted spike + a session that didn't reach end-to-end validation. The principled refactor (Phase R-A in `phase4-bazaar-handoff-2026-05-11.md`) is the right fix but it's 4-6 hours of careful surgery on revenue-bearing code — much more expensive than the 5-min skim that would have caught the coupling at design time.
+
+**Pre-existing context this didn't surface:** `phase4-paywall-design.md` § Q-something probably described paywallGate's responsibilities clearly. I designed the spike route without re-reading that doc, on the implicit assumption that "paywall" = generic payment middleware. The lesson is a generalization of: when a doc names what a thing does, re-read the doc before assuming the name maps to the same concept in your head.
+
+---
+
 ## 2026-05-11 — WebSearch result snippets can fabricate API surfaces; verify against canonical docs before locking decisions
 
 During the Phase 4 listing research, I dispatched two parallel research agents to investigate the Bazaar extension API and the agentic.market submission flow. Both returned high-confidence findings. One asserted a "dynamic-routes pattern" existed for Bazaar at `github.com/x402-foundation/x402/blob/main/docs/extensions/bazaar.mdx`, and that `declareDiscoveryExtension` took an `info: { name, description, category, ... }` block.

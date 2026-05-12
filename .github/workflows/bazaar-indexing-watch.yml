@@ -1,0 +1,78 @@
+name: Bazaar Indexing Watch
+
+# Daily probe to detect when CDP Bazaar indexes trustbench.io/route.
+#
+# Wraps `scripts/check-bazaar-indexed.ts` which hits the CDP discovery
+# merchant endpoint with the TrustBench revenue wallet's payTo. The script
+# exits 0 when indexed, 1 when not indexed (expected daily case until
+# indexing lands), 2 on real infrastructure error (fetch failure, HTTP 5xx,
+# malformed JSON).
+#
+# Workflow contract:
+#   - Exit 0 (indexed) → workflow passes AND emits a GitHub Actions notice
+#     that surfaces clearly in the run summary so the transition is visible.
+#   - Exit 1 (not indexed) → workflow passes silently. This is the expected
+#     case every day until CDP indexes us. Failing the workflow on this
+#     would spam noise mail until indexing landed.
+#   - Exit 2 (real error) → workflow fails so the failure is investigated.
+#
+# Background (2026-05-12)
+#   - Phase 4 Path P session 2026-05-12 shipped FIX-PAYMENT-REQUIRED-HEADER
+#     (the final indexing blocker per the agentic.market/validate diagnostic).
+#     Five paid settles burned through the corrected wire shape. Validator
+#     reports 11/11 green ("Implementation Looks Correct"). CDP discovery
+#     still returned 404 at session close (~T+10min) and at T+18h next morning.
+#   - First-index latency for new (payTo, URL) pairs is unknown; the validator
+#     claim of "a few minutes" was over-optimistic in our case. This watch
+#     observes the transition without burning further $0.005 settles to check.
+
+on:
+  schedule:
+    - cron: '0 12 * * *'    # Daily 12:00 UTC (different slot from the 03:00 UTC nightly pipeline)
+  workflow_dispatch:        # Manual trigger from the Actions tab
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Run the probe and translate exit codes to workflow outcomes.
+      # `set +e` so we can capture the exit code without bash aborting first.
+      - name: Probe CDP Bazaar indexing
+        run: |
+          set +e
+          npx tsx scripts/check-bazaar-indexed.ts
+          code=$?
+          set -e
+
+          case "$code" in
+            0)
+              # Indexed. Make this loud — this is the milestone we've been
+              # waiting for; the run summary and notification both need to
+              # surface it. ::notice:: renders as a green banner in the
+              # Actions UI run summary and triggers a notification.
+              echo "::notice title=Bazaar indexing landed::trustbench.io/route is now indexed in CDP Bazaar. Confirm via curl 'https://api.cdp.coinbase.com/platform/v2/x402/discovery/merchant?payTo=0x552000Ffb06445D2dD7F4264c6595B4b11C33C35' and trigger amplification."
+              exit 0
+              ;;
+            1)
+              # Expected daily case until indexing lands. Pass quietly.
+              echo "Not indexed yet (expected until CDP processes the merchant). No action needed."
+              exit 0
+              ;;
+            *)
+              # Real error: bad HTTP, malformed JSON, fetch threw. Fail loud.
+              echo "::error title=Bazaar indexing probe error::Probe exited with code $code (real error, not a 'not indexed' signal). Investigate."
+              exit 1
+              ;;
+          esac

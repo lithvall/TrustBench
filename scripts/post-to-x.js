@@ -88,6 +88,19 @@ const METHODOLOGY_NOTES = [
 // receipt, npm package, GitHub release, etc.). Drop or comment out entries
 // older than ~30 days so the rotation doesn't recycle stale "shipped" claims.
 const BUILD_IN_PUBLIC = [
+  // Phase 4 Path P push-through 2026-05-12. If Bazaar indexing lands before
+  // this rotation slot fires, swap or edit to reflect that — comment below.
+  `Yesterday on TrustBench: three real paid /route settles confirmed on-chain ($0.015 USDC, three signed receipts). ` +
+    `Two bug fixes shipped: idempotency replay is now byte-identical, /route 402 emits resource field for v2 spec compliance. ` +
+    `Bazaar indexing still pending, first-index latency for a new payTo+URL looks longer than the docs' ~10min. ` +
+    `Honest signal beats theater.`,
+
+  // POST-INDEXING VARIANT (uncomment + delete the above once /route appears on
+  // agentic.market):
+  // `TrustBench /route is now listed on agentic.market. Non-custodial routing ` +
+  //   `with signed receipts, on-chain settlement, fail-safe paywall. Routes ` +
+  //   `Base today, Solana endpoints in the registry, routing next sprint.\n\n${BASE_URL}`,
+
   // Paywall v0.1.0 — design + code shipped, flag still off in prod.
   // After TRUSTBENCH_PAYWALL_ENABLED=true in prod, swap this entry for the
   // "live" variant in the comment block below.

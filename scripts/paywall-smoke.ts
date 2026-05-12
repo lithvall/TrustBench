@@ -127,12 +127,31 @@ function buildTrustBenchRequirements(): PaymentRequirements {
 }
 
 // Sign a PaymentPayload as agent and base64-encode the X-PAYMENT header.
+//
+// FIX 2026-05-12 (P4-followup, Path P PaymentPayload-resource hypothesis):
+// PaymentPayload.resource is OPTIONAL per @x402/core mechanisms-*.d.ts:601-607
+// but is the ONLY documented source CDP's extractDiscoveryInfo can pull
+// resourceUrl from (since PaymentRequirements has no resource field per
+// :585-593). Without resource in the envelope, CDP's facilitator may settle
+// the payment successfully but skip cataloging. Adding it here mirrors what
+// a well-implemented agent SDK would do after reading the 402 (which now
+// includes resource per FIX-RESOURCE 2026-05-12 in build402).
+//
+// The inner `payload.authorization` (EIP-3009) is what's signed; the envelope
+// resource field is metadata and adding it does NOT change signature recovery.
 async function buildXPaymentHeader(requirements: PaymentRequirements): Promise<string> {
   const evmScheme = new ExactEvmScheme(agentAccount as any);
   const result = await evmScheme.createPaymentPayload(2, requirements);
   const payload: PaymentPayload = {
     ...result,
     accepted: requirements,
+    // Match exactly what /route's 402 emits in resource — see build402 in
+    // src/paywall-handler.ts. Description text kept identical for predictability.
+    resource: {
+      url: `${BASE_URL}/route`,
+      description: 'TrustBench: non-custodial routing and audit layer for x402. Returns a signed routing receipt with on-chain settlement reference, verifiable offline against a published Ed25519 key.',
+      mimeType: 'application/json',
+    },
   };
   return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
 }

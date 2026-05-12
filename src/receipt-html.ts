@@ -316,10 +316,10 @@ ${renderNav('receipt')}
 
       <section>
         <h3 class="label-caps text-faint mb-3">Verify yourself</h3>
-        <p class="text-sm text-muted mb-3">The signature is detached and verifiable by anyone with the published Ed25519 public key.</p>
+        <p class="text-sm text-muted mb-3">The signature is detached and verifiable by anyone with the published Ed25519 public key. <code class="mono text-xs">@trustbench/verify-receipt</code> on npm is the one-line third-party verifier (no repo clone needed).</p>
         <div class="space-y-2">
-          <div class="bg-mono border border-border rounded p-3 mono text-xs break-all">npm run verify-receipt -- ${escapeHtml(r.receipt_id)}</div>
-          <div class="bg-mono border border-border rounded p-3 mono text-xs break-all">npm run verify-receipt -- ${escapeHtml(r.receipt_id)} --check-chain</div>
+          <div class="bg-mono border border-border rounded p-3 mono text-xs break-all">npx @trustbench/verify-receipt ${escapeHtml(r.receipt_id)}</div>
+          <div class="bg-mono border border-border rounded p-3 mono text-xs break-all">npx @trustbench/verify-receipt ${escapeHtml(r.receipt_id)} --check-chain</div>
         </div>
         <p class="mt-3 text-xs text-faint">
           Signed Ed25519 · key_id <code class="mono">${escapeHtml(s.key_id)}</code><br>

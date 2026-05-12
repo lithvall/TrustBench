@@ -247,31 +247,52 @@ app.get('/rankings', async (c) => {
   return c.json({ success: true, data, source: 'TrustBench' });
 });
 
-// Router v1 (public GET kept for backward compatibility — score-only readout)
-app.get('/route', async (c) => {
-  const capability = c.req.query('capability') || 'search';
-  const rankings = await getRankings(capability as any);
-
-  if (!rankings || rankings.length === 0) {
-    return c.json({ success: false, error: 'No providers available' }, 404);
-  }
-
-  const best = rankings[0];
-  const fallback = rankings.length > 1 ? rankings[1] : null;
-
-  return c.json({
-    success: true,
-    capability,
-    recommended_provider: best.provider_id,
-    score: best.score,
-    latency_p50: best.latency_p50,
-    fallback_provider: fallback ? fallback.provider_id : null,
-    fallback_score: fallback ? fallback.score : null,
-    message: `Best current provider for ${capability} is ${best.provider_id} (score: ${best.score}).`,
-    full_rankings_url: `https://trustbench.io/rankings?capability=${capability}`,
-    signed_scorecards: rankings.map(signScorecard)
-  });
-});
+// ---------------------------------------------------------------------------
+// GET /route — 405 Method Not Allowed.
+//
+// This endpoint used to return a "score-only readout" (best provider per
+// capability + signed scorecards) on GET, kept for Phase 3 backward compat.
+// Two issues motivated this change to 405:
+//   1. Spec citizenship — `agentic.market/validate` flagged GET /route as "no
+//      x402 setup detected" because we returned 200 with non-x402 content
+//      rather than 402 or 405. Competitor `x402route.vercel.app/v1/route`
+//      uses 405 on the same surface; their behavior is the spec norm.
+//   2. The data is fully redundant. `/rankings?capability=X` serves the same
+//      rankings + signed scorecards publicly with the same cache headers,
+//      better-documented contract, and no x402-discoverability ambiguity.
+//
+// Empirical signal at decision time (2026-05-12): zero GET /route hits in
+// the post-deploy HTTP-log window. Railway flushes HTTP logs per deploy so
+// 7-day history wasn't observable, but post-deploy gives us a fast-feedback
+// loop: if any unknown consumer surfaces, we'll see 405 entries pile up and
+// can flip back to the legacy 200 path in a single-commit revert.
+//
+// Failure mode: if a previously-unknown consumer was relying on the legacy
+// 200 + signed_scorecards response, they break at this cutover. Recovery is
+// either (a) revert this handler (1-line edit), or (b) point them at
+// `/rankings?capability=<...>` which serves byte-equivalent data. No
+// data-leak risk introduced — the response body still emits the redirect
+// hint, no agent identifiers, no internal state.
+//
+// HEAD /route: Hono treats HEAD as GET by default, so HEAD also returns 405.
+// That's correct (HEAD inherits the method's contract).
+//
+// Full decision rationale in `phase4-get-route-behavior-handoff.md` and the
+// 2026-05-12 entry in `decisions.md`.
+// ---------------------------------------------------------------------------
+app.get('/route', (c) =>
+  c.json(
+    {
+      error: 'method_not_allowed',
+      allow: 'POST',
+      detail:
+        'GET on /route is not supported. For free rankings + signed scorecards, use /rankings?capability=<search|inference|data|media|infra>. For paid routing, POST to /route with an x402 X-PAYMENT header.',
+      rankings_url: 'https://trustbench.io/rankings',
+    },
+    405,
+    { Allow: 'POST' },
+  ),
+);
 
 // ---------------------------------------------------------------------------
 // POST /route — Phase 3 authenticated + idempotent + spend-capped quote.

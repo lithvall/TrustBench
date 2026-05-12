@@ -189,3 +189,9 @@ Started 2026-05-08 per `phase6-reassessment-2026-05-07.md` (now header-marked SU
   - leading_indicator: within 48h of deploy (2026-05-12 ~12:55 UTC), CDP merchant-discovery returns our route's entry OR the daily 12:00 UTC Bazaar-indexing-watch cron fires its ::notice:: banner
   - check_back_date: 2026-08-10
   - status: open
+
+2026-05-12 (Day 6, GET /route): Replace legacy GET /route 200 (score-only readout) with 405 Method Not Allowed, mirroring x402route's spec posture. Reason: `agentic.market/validate` flagged GET /route as "no x402 setup detected" because we returned 200 with non-x402 content. The data was fully redundant with `/rankings?capability=X` (same rankings, same signed scorecards, same cache headers). Empirical signal at decision time: zero GET /route hits in the post-deploy Railway HTTP-log window. Railway flushes HTTP logs per deploy so 7-day history wasn't observable, but post-deploy gives a fast-feedback loop: any unknown consumer would surface as 405 entries piling up within hours. Reversion is a one-commit revert. Body includes redirect hint to /rankings. `Allow: POST` header per HTTP spec. HEAD also returns 405 (Hono treats HEAD as GET). Full rationale in `phase4-get-route-behavior-handoff.md` (Option C path).
+  - assumption: no real consumer is hitting GET /route on the legacy 200 path — the post-deploy HTTP log signal (zero hits in the observable window) plus the lack of any public surface advertising GET /route (skill.md, llms.txt, .well-known, README all reference POST or /rankings only) are sufficient evidence
+  - leading_indicator: within 14 days post-deploy, fewer than 10 unique IPs hit GET /route → 405 (signaling the only consumers are x402 discovery probes which expect 4xx). If we observe a previously-unknown consumer hitting it consistently, revert to Option A or migrate to Option B with a deprecation header
+  - check_back_date: 2026-08-10
+  - status: open

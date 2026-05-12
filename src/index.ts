@@ -14,6 +14,11 @@ import { requireWithinSpendCap } from './spend-caps.js';
 import { quoteHandler, settleHandler } from './route-handlers.js';
 import { startPendingSweep } from './pending-sweep.js';
 import { renderReceiptHtml, getOrComputeVerifyResults } from './receipt-html.js';
+import {
+  renderRoutingReceiptHtml,
+  getOrComputeRoutingVerifyResults,
+  type SignedRoutingEnvelope,
+} from './routing-receipt-html.js';
 import type { SignedReceipt } from './receipt-generator.js';
 import { renderRankingsHtml, type RankingRow } from './rankings-html.js';
 import { renderLandingHtml, type LandingStats } from './landing-html.js';
@@ -663,6 +668,28 @@ app.get('/receipts/:id', async (c) => {
       // than emit a half-envelope.
       console.error(`[receipts] rrcpt response_body malformed for ${id}`);
       return c.json({ error: 'receipt_unavailable' }, 503);
+    }
+
+    // Content negotiation. Defaults to JSON for every existing programmatic
+    // client (curl with no Accept, the npm verifier, paid-probe, etc.); only
+    // serves HTML when Accept prefers text/html OR ?format=html. If HTML
+    // rendering or chain-verify throws, fall back to JSON so the response is
+    // never 500 just because the polished view broke. Receipt envelope is the
+    // load-bearing artifact; the page is presentation.
+    const wantsHtml = preferHtml(c.req.header('Accept'), c.req.query('format') ?? null);
+    if (wantsHtml) {
+      try {
+        const envelope = { receipt, signature } as SignedRoutingEnvelope;
+        const verify = await getOrComputeRoutingVerifyResults(envelope);
+        const html = renderRoutingReceiptHtml(envelope, verify);
+        return c.html(html, 200, {
+          'Cache-Control': 'public, max-age=86400, immutable',
+        });
+      } catch (err: any) {
+        console.error(`[receipts] rrcpt HTML render failed for ${id}: ${err?.message ?? err}`);
+        // Fall through to JSON — never 500 a working receipt just because the
+        // HTML path tripped.
+      }
     }
 
     return c.json({ receipt, signature }, 200, {

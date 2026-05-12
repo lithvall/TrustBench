@@ -579,7 +579,15 @@ app.get('/og/:name', (c) => {
 //   - `?format=json` overrides Accept and forces JSON. `?format=html` does
 //     the inverse. Unambiguous escape hatches.
 // ---------------------------------------------------------------------------
-const RECEIPT_ID_RE = /^rcpt_[0-9A-HJKMNP-TV-Z]{26}$/;
+// Accept both receipt-id namespaces:
+//   rcpt_*  — Phase 3 settlement receipts (receipt-generator.ts), stored in
+//             the `receipts` table with full Phase 3 ReceiptObject shape.
+//   rrcpt_* — Phase 4 paywall routing receipts (paywall-handler.ts:905),
+//             stored inside paid_requests.response_body as a SignedRoutingResponse.
+//             Different receipt body shape (kind='paid_response.route'); no
+//             settlement/pricing block.
+// The optional second `r` matches both prefixes without a separate regex.
+const RECEIPT_ID_RE = /^r?rcpt_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 // Decide whether the client wants HTML or JSON. Strict rule designed to keep
 // every existing programmatic client unchanged: HTML only when explicitly
@@ -601,6 +609,70 @@ app.get('/receipts/:id', async (c) => {
     return c.json({ error: 'receipt_id_invalid' }, 400);
   }
 
+  // ---------------------------------------------------------------------------
+  // rrcpt_ branch — Phase 4 paywall routing receipts.
+  //
+  // Why this branch exists: rrcpt_*-prefixed receipts are emitted by
+  // paywall-handler.ts on every successful /route paywall settle. They are NOT
+  // inserted into the `receipts` table — instead the entire SignedRoutingResponse
+  // envelope (receipt + signature + next_step) is persisted as
+  // paid_requests.response_body (jsonb). Before this fix, the public read path
+  // 400'd every rrcpt_ URL because the regex rejected the prefix AND the read
+  // query targeted the wrong table. That broke the trust-layer differentiation
+  // story (signed receipts that are publicly verifiable) and may have blocked
+  // CDP Bazaar indexing if the indexer fetches a sample receipt URL after settle.
+  //
+  // What this branch returns: { receipt, signature } extracted from
+  // response_body. next_step is intentionally stripped — it's transient payment
+  // requirements for the next call, not part of the signed audit artifact. The
+  // signature on `receipt` is over the canonical bytes of `receipt`; verifiers
+  // (scripts/verify-receipt.js and @trustbench/verify-receipt on npm) re-derive
+  // JCS canonical bytes before verifying, so wire-byte order on this path is
+  // not load-bearing.
+  //
+  // HTML rendering is JSON-only for v1. receipt-html.ts is hard-coded to the
+  // Phase 3 ReceiptObject shape (accesses r.settlement.*, r.pricing.*) and
+  // would crash on a RoutingReceipt. Sibling renderer is queued as follow-up.
+  //
+  // Failure mode: if the JSONB filter is mis-shaped, all rrcpt_ lookups 503
+  // (Supabase error). Existing rcpt_ flow is unchanged so no regression on
+  // Phase 3 receipts. Noticed via smoke fetch of the 5 known rrcpt_ IDs after
+  // deploy. Privacy: only response_body.receipt and response_body.signature
+  // are emitted; payer/payee addresses + tx_hash are inside the signed receipt
+  // body by design (they're the public audit artifact).
+  // ---------------------------------------------------------------------------
+  if (id.startsWith('rrcpt_')) {
+    const { data, error } = await supabase
+      .from('paid_requests')
+      .select('response_body')
+      .filter('response_body->receipt->>receipt_id', 'eq', id)
+      .maybeSingle<{ response_body: any }>();
+
+    if (error) {
+      console.error('[receipts] rrcpt lookup failed:', error.message);
+      return c.json({ error: 'receipt_unavailable' }, 503);
+    }
+    if (!data || !data.response_body) {
+      return c.json({ error: 'receipt_not_found' }, 404);
+    }
+
+    const { receipt, signature } = data.response_body;
+    if (!receipt || !signature) {
+      // Row exists but inner envelope missing/malformed — shouldn't happen
+      // under the current paywall-handler emit path, but fail loud rather
+      // than emit a half-envelope.
+      console.error(`[receipts] rrcpt response_body malformed for ${id}`);
+      return c.json({ error: 'receipt_unavailable' }, 503);
+    }
+
+    return c.json({ receipt, signature }, 200, {
+      'Cache-Control': 'public, max-age=86400, immutable',
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // rcpt_ branch — Phase 3 settlement receipts. Unchanged.
+  // ---------------------------------------------------------------------------
   const { data, error } = await supabase
     .from('receipts')
     .select('receipt_json')

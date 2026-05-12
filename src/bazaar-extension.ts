@@ -102,7 +102,7 @@ function enrichForPost(inner: any): any {
 // Output of declareDiscoveryExtension is `{ bazaar: { info, schema } }`.
 // We unwrap → enrich for POST → re-wrap.
 
-function buildDeclaration(config: unknown): { bazaar: any } | null {
+function buildDeclaration(config: unknown, routeTemplate: string): { bazaar: any } | null {
   if (!declareDiscoveryExtensionImpl) return null;
   try {
     const decl = declareDiscoveryExtensionImpl(config);
@@ -112,7 +112,28 @@ function buildDeclaration(config: unknown): { bazaar: any } | null {
     }
     const inner = (decl as any).bazaar;
     const enriched = enrichForPost(inner);
-    return { bazaar: enriched };
+    // ---------------------------------------------------------------------
+    // routeTemplate injection — added 2026-05-12 after reading the actual
+    // @x402/extensions type file. Without this field at the bazaar-extension
+    // top level, the CDP facilitator catalogs DiscoveredHTTPResource with
+    // routeTemplate=undefined; their validation (`isValidRouteTemplate` at
+    // d.ts line 413+) returns false and the entry is skipped from the index.
+    //
+    // The Express paymentMiddleware injects this automatically from the
+    // route-pattern key (e.g. "GET /weather/:city" → "/weather/:city"). We
+    // hand-rolled paywall-handler.ts, so we missed it. Fix here is to pass
+    // the route pattern explicitly per-declaration.
+    //
+    // For static routes (no `:param`), routeTemplate equals the literal path
+    // (e.g. "/route"). The validator accepts: starts with /, no "..", no
+    // "://", safe char set (alphanumeric + _:/.-~%).
+    //
+    // Failure mode: if this string is empty or fails isValidRouteTemplate,
+    // the facilitator validation fails and the route is skipped from indexing
+    // (same state as before this fix). We'd notice via the daily Bazaar
+    // indexing watch cron continuing to 404 our payTo. Safe to ship.
+    // ---------------------------------------------------------------------
+    return { bazaar: { routeTemplate, ...enriched } };
   } catch (err: any) {
     console.warn(
       `[bazaar-extension] declareDiscoveryExtension threw at init: ${err?.message ?? err}. Skipping.`,
@@ -261,8 +282,12 @@ const SPIKE_CONFIG = {
 // Exported declarations (the value that goes into 402.body.extensions)
 // ---------------------------------------------------------------------------
 
-export const routeBazaarExtension: { bazaar: any } | null = buildDeclaration(ROUTE_CONFIG);
-export const spikeBazaarExtension: { bazaar: any } | null = buildDeclaration(SPIKE_CONFIG);
+// routeTemplate strings — these become the canonical catalog key on the
+// CDP facilitator side. For static routes they equal the literal path. See
+// the comment block in buildDeclaration for why this is load-bearing for
+// indexing.
+export const routeBazaarExtension: { bazaar: any } | null = buildDeclaration(ROUTE_CONFIG, '/route');
+export const spikeBazaarExtension: { bazaar: any } | null = buildDeclaration(SPIKE_CONFIG, '/test/bazaar-spike');
 
 // Env-flag getters — centralized for one consistent surface.
 export function isBazaarExtensionEnabled(): boolean {

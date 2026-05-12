@@ -352,11 +352,36 @@ function build402(
   status: 402;
   body: {
     x402Version: number;
+    resource: { url: string; description: string; mimeType: string };
     error: string;
     accepts: PaymentRequirements[];
     extensions?: Record<string, unknown>;
   };
 } {
+  // Resource field per x402 v2 standard. Required so any catalog indexer
+  // (CDP Bazaar / agentic.market) can bind the bazaar declaration in
+  // `extensions.bazaar` to the URL this 402 was emitted from.
+  //
+  // Diagnosis 2026-05-12 (Path P P4): without `resource.url`, our first
+  // CDP-mediated settle succeeded but the route never appeared in agentic.market
+  // search nor the /platform/v2/x402/discovery/merchant?payTo=<revenueWallet>
+  // listing. Working indexed entries (96/100 of page-1 catalog) ALL have a
+  // top-level string `resource: "<url>"`, derived from the 402's `resource.url`.
+  // CMC's 402 we probed during P2 had the same shape. Our 402 lacked it.
+  //
+  // Always include — not gated on the bazaar flag — because resource is part
+  // of the x402 v2 wire spec (see CMC, Coinbase example servers, Foundation
+  // reference servers), not a Bazaar-specific extension.
+  //
+  // Failure mode: if TRUSTBENCH_BASE_URL is misconfigured, the indexed URL is
+  // wrong but the paywall settle path is unaffected (the URL field is opaque
+  // to verify/settle). Recoverable by env fix + a fresh smoke run; CDP catalog
+  // freshness window is ~5-10 min. Default to https://trustbench.io if env
+  // missing — matches the production base URL on Railway (see CLAUDE.md
+  // "trustbench.io DNS flip 2026-05-06").
+  const baseUrl = process.env.TRUSTBENCH_BASE_URL || 'https://trustbench.io';
+  const routeResourceUrl = `${baseUrl}/route`;
+
   // Optional `extensions` field per CDP Bazaar docs (v2 wire format). When
   // present, the CDP facilitator extracts the bazaar metadata at settle time
   // and catalogs the route into agentic.market / Bazaar. Absent on routes
@@ -364,11 +389,17 @@ function build402(
   // surface drift). See src/bazaar-extension.ts for the declaration source.
   const body: {
     x402Version: number;
+    resource: { url: string; description: string; mimeType: string };
     error: string;
     accepts: PaymentRequirements[];
     extensions?: Record<string, unknown>;
   } = {
     x402Version: 2,
+    resource: {
+      url: routeResourceUrl,
+      description: 'TrustBench: non-custodial routing and audit layer for x402. Returns a signed routing receipt with on-chain settlement reference, verifiable offline against a published Ed25519 key.',
+      mimeType: 'application/json',
+    },
     error: 'payment_required',
     accepts: [
       {
@@ -786,6 +817,47 @@ async function handlePaidRoute(c: Context, xPayment: string): Promise<Response> 
   }
   const txHash = settleResp.transaction;
 
+  // -------------------------------------------------------------------------
+  // P1 (phase4-bazaar-handoff-2026-05-11.md § Path P Step P1):
+  // Capture and forward facilitator extension responses for observability of
+  // Bazaar / agentic.market indexing signal.
+  //
+  // SettleResponse (per @x402/core mechanisms-*.d.ts:626-636) carries an
+  // optional `extensions?: Record<string, unknown>` field parsed from the
+  // facilitator's JSON body. CDP's facilitator lands EXTENSION-RESPONSES data
+  // there — including the "processing" / "rejected" signals that tell us
+  // whether the Bazaar declaration on this route was accepted into the
+  // catalog.
+  //
+  // We do two things with whatever's there:
+  //   1. Log it loud so it lands in Railway logs (the durable channel for
+  //      retrospective debugging of indexing signal — see smoke runbook in
+  //      `phase4-bazaar-extension-runbook.md` for the grep pattern).
+  //   2. Forward as a structured JSON header `EXTENSION-RESPONSES` on the
+  //      200 path so the smoke harness and any agent calling /route can read
+  //      the value without grepping our logs.
+  //
+  // Failure mode: if settleResp.extensions is undefined, empty, or stringify
+  // throws, we skip emission and continue with the 200 path. This is purely
+  // observability — it must NOT block the signed receipt from being returned
+  // to a paying agent. We'd notice a regression here by absence of the
+  // [paywall] settle extensions log line on a successful settle that should
+  // have had bazaar metadata. Privacy check: this field is facilitator
+  // processing status, not user data — safe to emit on the response.
+  // -------------------------------------------------------------------------
+  let extensionResponsesHeader: string | undefined;
+  const settleExtensions = settleResp.extensions;
+  if (settleExtensions && Object.keys(settleExtensions).length > 0) {
+    try {
+      extensionResponsesHeader = JSON.stringify(settleExtensions);
+      console.log(`[paywall] settle extensions for tx=${txHash}:`, extensionResponsesHeader);
+    } catch (e: any) {
+      console.warn(`[paywall] failed to stringify settle extensions for tx=${txHash}: ${e?.message || e}`);
+      // intentionally swallow — observability is best-effort, must not block
+      // the receipt path.
+    }
+  }
+
   // 8. Build + sign the routing receipt.
   const receiptId = 'rrcpt_' + ulid();
   const settledAt = new Date().toISOString();
@@ -865,9 +937,15 @@ async function handlePaidRoute(c: Context, xPayment: string): Promise<Response> 
     // recovers anything missed here.
   }
 
-  return c.json(response, 200, {
+  const responseHeaders: Record<string, string> = {
     'X-Receipt-Id': receiptId,
-  });
+  };
+  if (extensionResponsesHeader) {
+    // P1: forward facilitator EXTENSION-RESPONSES on the 200 path. See
+    // detailed comment block above (after txHash assignment).
+    responseHeaders['EXTENSION-RESPONSES'] = extensionResponsesHeader;
+  }
+  return c.json(response, 200, responseHeaders);
 }
 
 // -----------------------------------------------------------------------------

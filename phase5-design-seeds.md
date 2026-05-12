@@ -81,6 +81,51 @@ Once Phase 5 dispute layer is real, the launch positioning is: *"agent payments 
 
 ---
 
+## Receipt envelope: byte-identical replay now actually delivered (2026-05-12)
+
+**Source:** Phase 4 Path P session 2026-05-12. FIX-S3 shipped — the `paid_requests.response_body` JSONB roundtrip was reordering keys, breaking byte-identical idempotency replay. Fixed by canonicalize-on-emit (`paywall-handler.ts:292-332`). Smoke S1-S4 all pass since.
+
+**Why this is Phase 5 territory:**
+
+Phase 5's dispute layer + terms extension above all hinge on receipts being byte-stable across replays. A buyer disputing an output 14 days after delivery needs to prove "this receipt I have in my records is the same one the seller signed" — naive byte equality is the simplest, most universally-supported proof. JCS-aware verification works but adds a dependency every dispute-channel consumer would need; byte equality works for anyone with `grep`.
+
+The pattern is also the right shape for the future `terms` field: it'll be added to the receipt envelope outside the signed `receipt` block, similar to how `replayed_at` was added in v0.1.1. When the dispute layer adds a `terms` field at the envelope level, the canonical-on-emit pattern carries it cleanly.
+
+**How to apply:** when designing Phase 5 dispute/terms extensions, reuse the `canonicalKeyOrder()` helper from paywall-handler.ts. Don't introduce a parallel canonicalization path — single source of truth keeps the verifier semantics simple.
+
+---
+
+## Discovery latency: Bazaar may be slower than its docs claim, which reinforces the discovery-is-upstream-of-curation thesis (2026-05-12)
+
+**Source:** Phase 4 Path P session 2026-05-12. Four real paid /route settles fired against the production paywall with valid bazaar declaration (`extensions.bazaar`) + `resource.url` on the 402 body + `resource` in the X-PAYMENT PaymentPayload envelope. CDP merchant-discovery API at `https://api.cdp.coinbase.com/platform/v2/x402/discovery/merchant?payTo=<revenue>` remained empty for 30+ minutes after each settle. Observed re-validation latency for *existing* entries: ~5-15 min. Inferred first-index latency for *new* payTo+URL pairs: substantially longer (>30 min, possibly hours, possibly requires explicit registration step that's not documented).
+
+**Why this matters for Phase 5:**
+
+The original "discovery is upstream of curation" thesis (Paddock framing, captured above) assumed dark-matter providers — services agents pay for OUTSIDE the canonical discovery surfaces. Today's data point sharpens that: even a route that IS trying hard to be discoverable (declared the bazaar extension, includes resource on both 402 and X-PAYMENT, hit the canonical CDP facilitator) doesn't show up in the canonical catalog within the documented window. That makes the canonical catalog *itself* less authoritative than the docs imply, and increases the value of a comprehensive map that includes "claimed-discoverable but not yet catalogued" as a category.
+
+The five-bucket matrix gains a sixth (or refinement to bucket 4):
+- Paid + declared-discoverable + not yet in catalog (indexing in flight or rejected silently)
+
+A TrustBench Phase 5 surface that exposes its OWN registry-of-claimed-routes (sourced from settle events on the facilitator + the bazaar declarations they carry, not from CDP's catalog) would be a real differentiator. "We index every route that ever successfully settled through a CDP-or-equivalent facilitator with a bazaar declaration, regardless of whether the canonical catalog picked it up." That's strictly more comprehensive than CDP's discovery and harder to game (settle-attested, not just self-declared).
+
+**Tag:** P5-comprehensive-map. Don't start until Phase 4's listing question resolves one way or the other — if Bazaar eventually indexes us at T+24h or T+48h, the friction is just latency. If it never does, this seed becomes a launch wedge.
+
+**How to apply:** when picking up Phase 5, first check whether trustbench.io/route ever appeared in the CDP catalog. If yes, the friction was latency and this seed becomes a "comprehensive map" feature add. If no, this seed becomes a hard differentiator: TrustBench-as-the-only-router-that-routes-to-uncatalogued-routes. Either way, the data point about first-index latency >> re-validation latency is the load-bearing input.
+
+---
+
+## Verification tier shape: manual-verified is operational, not a tier (2026-05-12 refinement)
+
+**Source:** Phase 4 Path P session 2026-05-12. Promoted CoinMarketCap to `x402_verified=true` via `scripts/mark-verified.ts` based on live-probe evidence. The bit reflects empirical conformance (we POSTed `{}` and got a clean v2 402 with valid `accepts[0]` on Base), but the act of flipping it was operational — me running a script — not curatorial.
+
+**Refinement to the verification tier hierarchy table above:**
+
+The three-tier shape (self-attested / 1P-badge / bond-staked) is the right public-facing surface, but operationally there's a hidden zeroth tier: **operator-verified**. When the registry-conformance v0.2.0 work ships (automated POST-conformance probe), this should be collapsed into "automated conformance check" so the operational shortcut becomes a system property, not a per-provider manual flip. Until then, treat each `mark-verified.ts` invocation as a Decision Journal entry (one logged 2026-05-12 with 90-day check_back for CMC).
+
+**How to apply:** when v0.2.0 lands, audit all `metadata.x402_verified=true` rows. Any not auto-confirmable by the new POST-conformance probe should be flipped back to false (operational integrity > registry size). The mark-verified tool stays as the manual override path for edge cases (provider migrated to a new URL we haven't crawled, etc.).
+
+---
+
 ## How to apply this file
 
 - When Phase 5 work begins, this file becomes the design seed for the actual Phase 5 spec docs (analogous to `phase3-x402-construction.md`, `phase3-receipt-generator.md`, etc. for Phase 3).

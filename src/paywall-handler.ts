@@ -1000,6 +1000,28 @@ async function handlePaidRoute(c: Context, xPayment: string): Promise<Response> 
 // The Hono middleware itself. This is what gets mounted in src/index.ts.
 // -----------------------------------------------------------------------------
 export const paywallGate: MiddlewareHandler = async (c: Context, next: Next) => {
+  // -------------------------------------------------------------------------
+  // TEMP 2026-05-12: crawler-probe diagnostic.
+  //
+  // Logs every inbound request to /route so we can tell from Railway logs
+  // whether CDP's Bazaar crawler has visited us at all during the indexing-
+  // watch window. Free-tier Cloudflare doesn't give per-path / per-UA
+  // visibility, and the daily noon UTC `check-bazaar-indexed` cron only
+  // tells us about the OUTPUT side (catalog status), not whether the crawler
+  // has tried.
+  //
+  // Remove after either: (a) CDP indexing is observed via cron, OR
+  // (b) kill criterion fires 2026-05-14 13:00 UTC and we pivot off Path P.
+  // -------------------------------------------------------------------------
+  console.log(
+    `[paywallgate-probe] method=${c.req.method} path=${c.req.path} ` +
+      `ua="${c.req.header('User-Agent') ?? ''}" ` +
+      `cf_ip="${c.req.header('CF-Connecting-IP') ?? ''}" ` +
+      `xfwd="${c.req.header('X-Forwarded-For') ?? ''}" ` +
+      `hasXPayment=${!!c.req.header('X-PAYMENT')} ` +
+      `hasAuth=${!!c.req.header('Authorization')}`,
+  );
+
   // Branch 1: flag off → existing Bearer chain.
   if (!isPaywallEnabled()) {
     return next();

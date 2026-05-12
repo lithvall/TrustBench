@@ -149,30 +149,87 @@ const ROUTE_CONFIG = {
     required: ['capability', 'max_price', 'payer_address'],
   },
   output: {
+    // Output example revised 2026-05-12 (post-x402route discovery): surface
+    // the SIGNED RECEIPT envelope first, then the routing decision, then the
+    // next-step payment requirement. Agents browsing the Bazaar catalog should
+    // see "Ed25519-signed receipt + on-chain settlement reference + audit URL"
+    // as the headline artifact this endpoint produces — that's the wedge vs
+    // thinner routing primitives like x402route.vercel.app/v1/route. See
+    // competitive-landscape.md § "Routing-lane direct competitors (NEW 2026-05-12)"
+    // for the positioning rationale.
     example: {
-      route_id: 'qt_01ABCDEFGHIJKLMNOPQRSTUVWXYZ',
-      payment_required: {
-        scheme: 'exact',
-        network: 'eip155:8453',
-        asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-        amount: '5000',
-        payTo: '0x0000000000000000000000000000000000000000',
-        validAfter: 1715472000,
-        validBefore: 1715472300,
-        nonce: '0x0000000000000000000000000000000000000000000000000000000000000000',
+      receipt: {
+        kind: 'paid_response.route',
+        version: '1.0.0',
+        receipt_id: 'rrcpt_01ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+        issued_at: '2026-05-12T00:00:00Z',
+        issuer: 'trustbench.io',
+        paid: {
+          chain: 'base',
+          tx_hash: '0x' + '0'.repeat(64),
+          payer_address: '0x' + '0'.repeat(40),
+          payee_address: '0x' + '0'.repeat(40),
+          amount_atomic: '5000',
+          currency: 'USDC',
+          decimals: 6,
+          settled_at: '2026-05-12T00:00:00Z',
+        },
+        routing: {
+          capability: 'data',
+          provider_id: 'https://example-provider.com/x402/endpoint',
+          provider_url: 'https://example-provider.com/x402/endpoint',
+          score_at_decision: 97,
+          alternatives_considered: 2,
+          selection_reason: 'top_score',
+        },
+        call: {
+          idempotency_key: 'client-supplied-key-16-to-128-chars',
+          request_hash: 'sha256:' + '0'.repeat(64),
+        },
       },
-      expires_at: '2026-05-12T00:05:00Z',
-      receipt_signature_alg: 'ed25519',
+      signature: {
+        alg: 'ed25519',
+        value: 'base64url-encoded-64-byte-signature',
+        key_id: 'trustbench-2026-04',
+        public_key_url: 'https://trustbench.io/.well-known/trustbench-pubkey',
+      },
+      next_step: {
+        provider_url: 'https://example-provider.com/x402/endpoint',
+        payment_requirements_v2: {
+          scheme: 'exact',
+          network: 'eip155:8453',
+          asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          amount: '5000',
+          payTo: '0x' + '0'.repeat(40),
+          maxTimeoutSeconds: 60,
+          extra: { name: 'USD Coin', version: '2' },
+        },
+      },
     },
+    // Schema updated to match the new example. Required fields are the three
+    // top-level blocks (receipt, signature, next_step); detail below them is
+    // documented inline as descriptions so an agent reading the catalog entry
+    // understands the trust-layer differentiation at a glance.
     schema: {
       type: 'object',
       properties: {
-        route_id: { type: 'string' },
-        payment_required: { type: 'object' },
-        expires_at: { type: 'string' },
-        receipt_signature_alg: { type: 'string' },
+        receipt: {
+          type: 'object',
+          description:
+            'Routing receipt envelope. Signed by TrustBench over RFC 8785 JCS-canonical bytes. Contains the routing decision, the on-chain settlement reference, and call metadata. Returned in the same response as the next_step payment requirements so the agent can verify the audit trail before making the upstream call.',
+        },
+        signature: {
+          type: 'object',
+          description:
+            'Detached Ed25519 signature over the receipt body. Verifiable offline via the published public key URL (no TrustBench round-trip required). Use @trustbench/verify-receipt on npm for a one-line verifier.',
+        },
+        next_step: {
+          type: 'object',
+          description:
+            'PaymentRequirements the agent uses to construct its NEXT call to the selected provider. TrustBench does not mediate that call; the agent pays the provider directly per x402.',
+        },
       },
-      required: ['route_id', 'payment_required', 'expires_at'],
+      required: ['receipt', 'signature', 'next_step'],
     },
   },
   bodyType: 'json' as const,

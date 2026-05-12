@@ -4,6 +4,25 @@ A living log of patterns, surprises, and corrections worth remembering across se
 
 ---
 
+## 2026-05-12 (Day 6 follow-up) — Validator-green ≠ indexer-required: routeTemplate is the canonical example
+
+Yesterday's lesson ("validator tools are ground truth") got us to 11/11 green at `agentic.market/validate` via FIX-PAYMENT-REQUIRED-HEADER. CDP discovery still 404'd at T+18h with no further movement. Direct read of `node_modules/@x402/extensions/dist/cjs/index-Bw-mGWh6.d.ts` revealed the gap: `routeTemplate?: string` declared as a sibling of `info` + `schema` on `BodyDiscoveryExtension` (line 124), with a documented `isValidRouteTemplate(value)` facilitator-side validation function at line 413+. Optional in the wire-spec type, required for cataloging.
+
+**Why the validator missed it:** the agentic.market validator checks wire-spec conformance, where `routeTemplate?: string` is optional and passes silently when omitted. The indexer separately requires `routeTemplate` to be present + structurally valid before cataloging. The two checks are independent — validator says "your response is a valid x402 v2 PaymentRequired envelope" (true), indexer says "I can't add this to my catalog without a key" (also true).
+
+**Why we didn't emit it:** Express `paymentMiddleware` from `@x402/extensions/bazaar` injects `routeTemplate` automatically from its route-pattern key (e.g. `"GET /weather/:city"` → `"/weather/:city"`). We hand-rolled `paywall-handler.ts` instead of using the official middleware. Our `bazaar-extension.ts` calls `declareDiscoveryExtension(config)` which returns `{ bazaar: { info, schema } }` — no routeTemplate, because that's the middleware's job, not the helper's. The official `bazaar.mdx` example confirms: the routeTemplate appears in the 402 output but is never passed into `declareDiscoveryExtension` directly — the middleware derives it from the route-pattern key.
+
+**Lesson:** when a vendor SDK offers BOTH a middleware (`paymentMiddleware`) AND helper functions (`declareDiscoveryExtension`), the middleware does field auto-injection that the helpers don't. If you hand-roll the middleware, replicate the middleware's injection logic — don't just call the helpers and assume the output is complete. The middleware source is the source of truth; the helpers-only view is incomplete.
+
+**How to apply going forward:**
+- For any SDK integration where you handle the middleware layer yourself, read the official middleware source to enumerate every field it injects.
+- Don't trust validator-green as sufficient. Validators check wire-spec optionality; indexers/catalogers have additional requirements that don't surface in validator output.
+- When debugging "validator says OK but indexer/integration still doesn't work," look at fields declared `?` in the spec type — those are the most common indexer-required-but-validator-optional cases.
+
+Fix shipped 2026-05-12 in commit 9d5c3b5 (`bazaar-extension.ts buildDeclaration` now takes a routeTemplate parameter and injects at the bazaar wrapper level). Validates within 48h via the indexing-watch cron; if CDP still 404 at T+48h, the hypothesis is disproven and we look elsewhere.
+
+---
+
 ## 2026-05-12 (Phase 4 Path P) — Validator tools are ground truth; reverse-engineering from observed shapes is third-best diagnosis
 
 The biggest meta-lesson of the day. Spent ~3 hours of session time burning through three sequential hypotheses for why CDP Bazaar wasn't indexing TrustBench's `/route`:

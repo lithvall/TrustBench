@@ -290,6 +290,43 @@ function bodyHash(obj: unknown): string {
 }
 
 // -----------------------------------------------------------------------------
+// FIX-S3 (2026-05-12): Force canonical (lex-sorted) key order at every level.
+//
+// Why this exists: paid_requests.response_body is JSONB (phase4-schema-paid-requests.sql:74).
+// JSONB does not preserve insertion order on roundtrip — the receipt sub-object
+// read back during idempotency replay (S3) has different JS key order than the
+// receipt sub-object emitted on first success (S2). Naive `JSON.stringify` of
+// the two produces different bytes → the smoke harness's S3 byte-equal check
+// fails ("inner receipt envelope differs from original"). The Ed25519 signature
+// itself is unaffected (JCS canonicalization sorts keys, so any JCS-aware
+// verifier — including @trustbench/verify-receipt — produces the same canonical
+// bytes either way), but exact byte-equal replay was a v0.1.1 design property
+// we promised.
+//
+// Implementation: round-trip the response through jcsCanonicalize +
+// JSON.parse. Result is a JS object with keys in lex-sorted order at every
+// level. V8's JSON.stringify (which Hono's c.json calls) preserves source
+// insertion order for non-integer string keys, so the emitted JSON bytes also
+// have keys in lex-sorted order. Identical bytes on S2 and S3 → byte-equal
+// smoke passes.
+//
+// Both emission paths (S2 success + S3 replay) call this. The receipt itself
+// is signed BEFORE this call (signature is over jcsCanonicalize(receipt) bytes
+// in receipt-generator.ts), so reordering keys at the JS-object level after
+// signing does NOT invalidate the signature — a JCS-aware verifier will
+// canonicalize again before verifying.
+//
+// Failure mode: if jcsCanonicalize produces invalid JSON, JSON.parse throws.
+// In practice this is impossible for our response shapes (plain data, no
+// circular refs, no functions, no symbols). If it ever did throw, the user
+// would see a 500 — louder than silently emitting non-canonical bytes, which
+// matches the "fail loud" principle for revenue-bearing surfaces.
+// -----------------------------------------------------------------------------
+function canonicalKeyOrder<T>(obj: T): T {
+  return JSON.parse(jcsCanonicalize(obj)) as T;
+}
+
+// -----------------------------------------------------------------------------
 // Routing receipt — signed envelope returned on successful paywall calls.
 // Different `kind` from Phase 3 settlement receipts (which cover provider
 // settlement, not just the routing fee). Per design doc § Q8.
@@ -677,7 +714,12 @@ async function handlePaidRoute(c: Context, xPayment: string): Promise<Response> 
       const withReplayMarker = (cached && typeof cached === 'object' && !Array.isArray(cached))
         ? { ...(cached as Record<string, unknown>), replayed_at: new Date().toISOString() }
         : cached;
-      return c.json(withReplayMarker as Record<string, unknown>, 200, {
+      // FIX-S3: canonicalize key order so the receipt sub-object matches the
+      // byte shape emitted on first success (despite JSONB roundtrip key reorder).
+      const canonical = (withReplayMarker && typeof withReplayMarker === 'object' && !Array.isArray(withReplayMarker))
+        ? canonicalKeyOrder(withReplayMarker)
+        : withReplayMarker;
+      return c.json(canonical as Record<string, unknown>, 200, {
         'X-Idempotent-Replay': 'true',
       });
     }
@@ -945,7 +987,12 @@ async function handlePaidRoute(c: Context, xPayment: string): Promise<Response> 
     // detailed comment block above (after txHash assignment).
     responseHeaders['EXTENSION-RESPONSES'] = extensionResponsesHeader;
   }
-  return c.json(response, 200, responseHeaders);
+  // FIX-S3: emit with canonical (lex-sorted) key order at every level so the
+  // S2 byte shape matches what the S3 replay path will emit after the JSONB
+  // roundtrip. Without this, the smoke harness's S3 byte-equal check on the
+  // receipt sub-object fails. Signature is unaffected (JCS-aware verifiers
+  // canonicalize before verifying).
+  return c.json(canonicalKeyOrder(response), 200, responseHeaders);
 }
 
 // -----------------------------------------------------------------------------

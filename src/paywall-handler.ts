@@ -154,6 +154,7 @@ import { ulid } from 'ulid';
 import { createHash } from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import { HTTPFacilitatorClient } from '@x402/core/server';
+import { encodePaymentRequiredHeader } from '@x402/core/http';
 import type { PaymentRequirements, PaymentPayload } from '@x402/core/types';
 import { facilitator as cdpFacilitatorConfig } from '@coinbase/x402';
 import { selectProvider } from './provider-selection.js';
@@ -1031,5 +1032,42 @@ export const paywallGate: MiddlewareHandler = async (c: Context, next: Next) => 
   // facilitator catalogs the route at settle time.
   const bazaarExtension = c.get('bazaarExtension' as never) as { bazaar: unknown } | null | undefined;
   const { status, body } = build402(revenueWallet, bazaarExtension);
-  return c.json(body, status);
+
+  // FIX-PAYMENT-REQUIRED-HEADER (2026-05-12):
+  // Emit the PaymentRequired payload as a base64-encoded `PAYMENT-REQUIRED`
+  // response header, per the x402 HTTP transport v2 spec. The body still
+  // contains the same payload for backward compat with v1-aware clients.
+  //
+  // Why this exists: agentic.market/validate diagnostic 2026-05-12 confirmed
+  // CDP Bazaar's catalog scanner reads PAYMENT-REQUIRED from the response
+  // headers, NOT from the body. Without this header, Bazaar discovery rejects
+  // the route — which is why four real paid settles today (txs 0x14d54f,
+  // 0x83203c, 0x4a282e, 0xdd8f69) succeeded at verify+settle but never
+  // appeared in `/discovery/merchant?payTo=<revenue>`.
+  //
+  // We use the SDK's official encoder `encodePaymentRequiredHeader` from
+  // @x402/core/http so the byte shape exactly matches what CDP's scanner
+  // expects (they ship the same package).
+  //
+  // Failure mode: if `encodePaymentRequiredHeader` throws on our body shape,
+  // we'd hit an uncaught exception → 500 on /route. Caught defensively below
+  // and emitted body-only as a degraded fallback. We'd notice via:
+  //   - smoke S1 (which checks for 402 status + accepts[0] shape) still passes
+  //     because body is intact
+  //   - Railway logs would show the encoder warning
+  //   - Bazaar discovery would continue not indexing us (same state as before
+  //     the fix)
+  // The failure is degraded, not catastrophic — agents still get the body
+  // payload they need to construct X-PAYMENT.
+  const responseHeaders: Record<string, string> = {};
+  try {
+    responseHeaders['PAYMENT-REQUIRED'] = encodePaymentRequiredHeader(body as any);
+  } catch (e: any) {
+    console.warn(
+      `[paywall] encodePaymentRequiredHeader failed; emitting body-only 402 (Bazaar indexing will skip this response): ${e?.message || e}`,
+    );
+    // intentionally swallow — degraded path preserves agent payment flow.
+  }
+
+  return c.json(body, status, responseHeaders);
 };

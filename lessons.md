@@ -4,6 +4,135 @@ A living log of patterns, surprises, and corrections worth remembering across se
 
 ---
 
+## 2026-05-12 (Phase 4 Path P) — Validator tools are ground truth; reverse-engineering from observed shapes is third-best diagnosis
+
+The biggest meta-lesson of the day. Spent ~3 hours of session time burning through three sequential hypotheses for why CDP Bazaar wasn't indexing TrustBench's `/route`:
+
+1. **Hypothesis 1: missing `resource.url` on 402 body.** Shipped FIX-RESOURCE. Validator later showed: correct fix, but not the load-bearing one.
+2. **Hypothesis 2: missing `resource` on PaymentPayload (X-PAYMENT envelope).** Shipped PaymentPayload-resource update. Validator later showed: also correct + spec-compliant, but not the load-bearing one either.
+3. **Hypothesis 3: validator pointed at the actual gap.** `PAYMENT-REQUIRED` response header missing per x402 v2 spec. ONE explicit failed check in the diagnostic checklist, with named field, expected vs actual value, explicit fix instruction. Shipped FIX-PAYMENT-REQUIRED-HEADER. Validator went from "1 check failed" to "Implementation Looks Correct" in one round.
+
+**Why the first two hypotheses ate session time:** I was reverse-engineering from observed indexed-entry shapes (`extensions.bazaar`, `resource.url`, etc.) instead of running our endpoint through the vendor's own diagnostic tool. The validator existed at `agentic.market/validate` the whole time. Johan surfaced it after seeing a Twitter exchange (Nick Prince → Younanix → Infopunks) where Younanix used the same validator to debug their own endpoint.
+
+**Lesson:** when a vendor feature isn't working as expected (CDP Bazaar indexing in this case), search Twitter / Reddit / vendor docs for "validator" / "diagnostic" / "checker" tools from the same vendor BEFORE attempting to reverse-engineer the requirements from observed catalog shapes. The validator tells you exactly what's wrong in seconds. Reverse-engineering is what you do when no diagnostic tool exists, not the default approach.
+
+**How to apply going forward:** for any future Foundation-track or partner-track integration where indexing/discovery is gated on a multi-field wire-shape compliance:
+- Search the vendor's homepage navigation for "Seller Tools," "Validator," "Diagnostics," "Checker."
+- Search the vendor's GitHub for `validate-endpoint`, `diagnose`, `compliance-check`.
+- Search Twitter for `<vendor-handle> validator` OR `<vendor-handle> diagnostic`.
+- Check the vendor's footer/docs links for "for sellers" / "for integrators" / "developer tools" pages.
+- All of this BEFORE the first hypothesis-driven code change.
+
+The cost asymmetry is significant: each wrong hypothesis today cost a $0.005 settle + 30-60 min wait for indexing decision. Five minutes of vendor-tool search would have caught the right gap on attempt 1.
+
+---
+
+## 2026-05-12 (Phase 4 Path P) — x402 v2 spec has different HTTP header names than v1; PAYMENT-REQUIRED on response is required for catalog scanning
+
+The x402 protocol has TWO header conventions:
+
+- **v1 (legacy):** `X-PAYMENT` (inbound payment payload), `X-PAYMENT-RESPONSE` (outbound settle response)
+- **v2 (current spec):** `PAYMENT-SIGNATURE` (inbound), `PAYMENT-REQUIRED` (outbound 402), `PAYMENT-RESPONSE` (outbound settle)
+
+We were emitting nothing on the response (PaymentRequired in body only) AND reading v1 `X-PAYMENT` on the request. The inbound v1 name works fine — CDP's facilitator accepts both for payment verification, and existing real-world agent SDKs send `X-PAYMENT`. The outbound response v1 path (no header at all, just body) does NOT work for Bazaar catalog scanning. Bazaar reads `PAYMENT-REQUIRED` from the response headers, parses it as base64-encoded JSON, and uses that as the canonical PaymentRequired record to index. Without the header, the route is processed for payment but never catalogued.
+
+**Lesson:** when integrating with a v2-spec-aware indexer or facilitator, the response-side header names are load-bearing for indexing. Request-side names have looser tolerance (the facilitator handles both for backward compat). Default to emitting the v2 names on responses while accepting both v1 and v2 names on requests.
+
+**How to apply:** the SDK helper is `encodePaymentRequiredHeader(paymentRequired)` exported from `@x402/core/http`. Implementation is `safeBase64Encode(JSON.stringify(paymentRequired))` — bit-for-bit what CDP scans for, because they ship the same package. Don't roll your own encoder; use the SDK function.
+
+Companion full v2 migration to `PAYMENT-SIGNATURE` on inbound is deferred — non-blocking for indexing, high-risk multi-layer change (server + smoke + real agent SDKs). Take it on as a focused fresh session when the time is right.
+
+---
+
+## 2026-05-12 (Phase 4 Path P) — Postgres JSONB doesn't preserve key order on roundtrip; if you need byte-identical replay, canonicalize at emit
+
+Spent meaningful time on the FIX-S3 bug. `paid_requests.response_body` is `jsonb` (per `phase4-schema-paid-requests.sql:74`). When `persistPaidRequest` writes a JS object via the Supabase JS client, Postgres parses it into JSONB's internal binary form. On read, Postgres re-emits in JSONB's internal key order — NOT the source insertion order. So the receipt sub-object the idempotency replay returned had keys like `{call, issued_at, issuer, kind, paid, receipt_id, routing, version}` while the original S2 emit had source-order keys `{kind, version, receipt_id, issued_at, issuer, paid, routing, call}`. Naive `JSON.stringify(body.receipt) === JSON.stringify(prior.cachedBody.receipt)` fails. The Ed25519 signature was unaffected (JCS-aware verifiers canonicalize before verifying), but the v0.1.1 design had explicitly promised byte-identical replay and the smoke harness checked exactly that.
+
+**The fix:** round-trip the response through `JSON.parse(jcsCanonicalize(...))` before emit. V8's `JSON.parse` returns an object with keys in source order; `jcsCanonicalize` produces lex-sorted JSON; the result is a JS object with lex-sorted keys at every level. Both S2 emit and S3 replay use this, so the receipt sub-object is byte-identical on both. Implemented as `canonicalKeyOrder<T>(obj: T): T` in `paywall-handler.ts:292-332` and applied at the two emission points.
+
+**Lesson:** any storage path that involves JSONB → JS object roundtrip cannot promise byte-identical content unless the emit path explicitly canonicalizes. Don't trust the JSONB column to preserve order even if "all my keys are strings and the values are simple." If you're emitting a hash-or-signed payload AND the receiver does naive byte-equality, canonicalize at emit. If you're emitting where receivers JCS-verify (like all third-party tooling we ship), the bug is silent because JCS handles it.
+
+**Why this was latent until 2026-05-12:** at v0.1.1 ship time, S2 503'd (suspended Infopunks endpoint). S3 depends on S2 success. The first time S2 actually succeeded against a real conformant provider (CMC on Base, after we promoted it to `x402_verified=true`) was 2026-05-12 — and that's when S3 ran for the first time end-to-end and exposed the bug.
+
+**How to apply:** when next adding storage roundtrip of any signed/replayed payload, treat JSONB as "preserves values, NOT key order" and design accordingly. If schema migration is too disruptive, the application-level canonicalize-at-emit pattern from FIX-S3 is the lighter path.
+
+---
+
+## 2026-05-12 (Phase 4 Path P) — High-risk-surface discipline successfully gated three revenue-bearing ships in one session
+
+Three high-risk-surface changes shipped to prod in one session (paywall response shape change, idempotency replay byte-shape change, registry-state mutation) without breakage. The discipline that gated them — per CLAUDE.md "Response Structure for Any Non-Trivial Task":
+
+1. **Read canonical design doc before coding** — `phase4-bazaar-handoff-2026-05-11.md` for FIX-RESOURCE/P1, `phase3-idempotency-design.md` for FIX-S3.
+2. **Failure-mode paragraph in code comments** — every diff included a paragraph describing what breaks if the change is wrong + how we'd notice (Railway logs, smoke regression, on-chain mismatch). See `paywall-handler.ts:789-816` (P1), `:360-395` (FIX-RESOURCE), `:292-332` (FIX-S3).
+3. **Critic pass in chat before code** — three rejection reasons + counter-thesis + hidden assumption + kill criterion + verdict. Done for FIX-RESOURCE in chat; the kill criterion ("if /route is still not indexed 30min after this fix + fresh smoke, abandon URL-binding hypothesis") fired exactly at T+30 and we pivoted correctly.
+4. **tsc --noEmit + full smoke S1-S4 before next ship** — caught nothing today, but the discipline meant we could keep moving fast with confidence.
+5. **Decision Journal entries with 90-day check_back** — three entries logged in `decisions.md` with assumption + leading indicator + check_back_date. If FIX-RESOURCE turns out to be wrong, we'll know to look back at this entry.
+
+**Why this is worth a lesson:** the velocity today (three settles, two fixes, no breakage) was sustained because each ship was small, well-bounded, and reversible. Cutting any one of the discipline steps would have either (a) shipped a broken change, or (b) slowed down the next ship by uncertainty about the previous one. The pattern compounds — Ship 3 (FIX-S3) was easier than Ship 1 (FIX-RESOURCE) because we knew the smoke harness + Railway-deploy + on-chain-balance loop was solid.
+
+**How to apply:** when a session has multiple high-risk-surface changes lined up, don't skip the structure even if "the next one is small." The structure is what lets the small ones stay small.
+
+---
+
+## 2026-05-12 (Phase 4 Path P) — Don't trust "facilitator config" docs without reading the package's TypeScript types
+
+The handoff doc and earlier `decisions.md` 2026-05-11 dynamic-routes incident already had a lesson on this. Today reinforced it: spent meaningful time on the URL-binding hypothesis (adding `resource` to 402 body) before realizing the package types reveal `resource` is on BOTH `PaymentPayload` AND `PaymentRequired` (and crucially NOT on `PaymentRequirements`, which is the individual entry in `accepts[]`). The relevant signature is `extractDiscoveryInfo(paymentPayload, paymentRequirements)` — the function the facilitator calls to derive the URL it's cataloging.
+
+Adding `resource` to the 402 body was probably necessary but not sufficient. The hypothesis we should have tested first: `resource` also needs to be in `trustbenchRequirements` (the requirements passed to settle) AND in the X-PAYMENT PaymentPayload (the payload the agent signs over).
+
+**Lesson:** when a hypothesis says "field X is missing for indexing to work," before shipping the fix, grep the package's `.d.ts` for every place X appears. If X is on multiple type definitions, ALL of them probably need the field for the indexer to extract it correctly.
+
+**How to apply:** for the next session's PaymentPayload-resource hypothesis test, read `@x402/core/dist/cjs/mechanisms-*.d.ts` first, find every `resource` reference, document where the field needs to land, and only THEN write the diff. This will save another $0.005 settle round-trip cycle.
+
+---
+
+## 2026-05-11 (OG cards) — Web `BodyInit` wants `Uint8Array<ArrayBuffer>`, not `Uint8Array<ArrayBufferLike>`, and the conversion isn't free
+
+When adding the `/og/:name` route to serve PNG cards from `public/og/`, I tripped over the same TypeScript narrowing error three times in a row before landing the right fix. The chain:
+
+1. Loaded the PNG via `readFileSync(path)` → got `Buffer<ArrayBufferLike>`. Passed to `c.body(body)`. tsc: *"Argument of type 'Buffer<ArrayBufferLike>' is not assignable to parameter of type 'null'."* Hono's `c.body()` overloads fell through to the `T extends null` last overload because Buffer didn't match any earlier one.
+2. Switched to `new Response(body, ...)` to bypass Hono's overloads. tsc: *"Buffer<ArrayBufferLike> is not assignable to BodyInit … missing properties from URLSearchParams: size, append, delete, get."* Same family — the DOM's `BodyInit` union accepts only `Uint8Array<ArrayBuffer>`, and Node's Buffer is parameterized on `ArrayBufferLike` (which includes `SharedArrayBuffer`, which `BodyInit` rejects).
+3. Changed the loader to `return new Uint8Array(buf)`. Still failing — `new Uint8Array(source)` *inherits* the `ArrayBufferLike` parameterization from the source. Type was `Uint8Array<ArrayBufferLike>`, not `Uint8Array<ArrayBuffer>`.
+4. **What finally worked:** allocate by length, then `set()`. `new Uint8Array(buf.byteLength)` returns `Uint8Array<ArrayBuffer>` because the constructor signature for the numeric overload is hard-typed that way. `.set(buf)` copies the bytes in without re-parameterizing.
+
+```ts
+function loadStaticBinary(relPath: string): Uint8Array<ArrayBuffer> | null {
+  const buf = readFileSync(path.resolve(process.cwd(), relPath));
+  const u8 = new Uint8Array(buf.byteLength);
+  u8.set(buf);
+  return u8;
+}
+```
+
+**Lesson:** when serving Node-side binary blobs through a Web `Response` (Hono v4, Fetch API, anything that uses `BodyInit`), the correct path is allocate-fresh + `.set()`, with the function and Record types explicitly declared as `Uint8Array<ArrayBuffer>`. The intuitive `new Uint8Array(buf)` doesn't work because it inherits the source's `ArrayBufferLike` parameterization.
+
+**How to apply going forward:** any new route that returns binary content (image, audio, PDF, font, etc.) should use the loader pattern above. Don't try to fight the Hono overloads with casts — `new Response(body, init)` is cleaner and bypasses them entirely.
+
+**Why this is worth a lesson and not just a code comment:** the error message points at the wrong thing ("missing properties from URLSearchParams" is misleading — it's not the URLSearchParams overload that's failing, it's the `Uint8Array<ArrayBuffer>` overload that's silently dropping out of the union because the input is `ArrayBufferLike`-parameterized). Future-Claude will see that error message, search "BodyInit URLSearchParams", and get bad advice. The actual diagnosis is "your Uint8Array is parameterized on `ArrayBufferLike`, not `ArrayBuffer`."
+
+---
+
+## 2026-05-11 (OG cards) — X caches link-preview cards per URL for ~7 days; delete-and-repost reuses the cache
+
+After shipping the new `summary_large_image` cards with per-page `og:image` meta tags, the live HTML was correct (`curl.exe -s https://trustbench.io/methodology | Select-String og:image` showed all 8 expected tags including `summary_large_image` and the right PNG URL), the PNG itself returned `200 OK image/png` from Cloudflare, but a freshly-posted tweet of `https://trustbench.io/methodology` STILL rendered the old small grey-icon card.
+
+Why: X has a per-URL card cache that survives delete-and-repost. Tweeting the same URL again — even after deleting the old tweet — pulls the previously-rendered card from X's cache rather than re-fetching the meta tags. The cache is roughly 7 days but in practice can be sticky longer.
+
+**The workaround that works:** add a harmless query string the route ignores. `https://trustbench.io/methodology?v=1` renders an identical page (Hono ignores unknown query params) but X treats it as a new URL and fetches fresh. The new card rendered immediately when we tried this.
+
+**The workaround that doesn't exist anymore:** X's old Card Validator at `cards.x.com/validator` used to expose a "Preview card" button that force-refreshed the URL's cache. X retired that tool in 2023. There is no manual re-fetch button on X today.
+
+**Lesson:** whenever you change site-wide social-card meta tags AND want previously-shared URLs to render the new card on X, you cannot just redeploy and re-share. You must either (a) post the URL with a fresh query string, or (b) wait roughly a week for X's cache to age out. For high-value posts that were shared with old/empty cards, query-string busting is the only path.
+
+**How to apply going forward:**
+- For the autonomous X cron (`scripts/post-to-x.js`), URLs vary across the rotation (`/rankings`, `/methodology`, `/pricing`, `/receipts/...`), so most days are first-touches for X and render the new card fine on first post. No action needed.
+- For one-off manual posts of URLs X has likely cached previously (the obvious ones: `https://trustbench.io`, `/methodology`, `/rankings`), append `?v=N` until the new card sticks. Increment N if you want to bust again.
+- If we ever want to globally invalidate ALL cached cards on X (e.g. after a brand refresh), the only path is renaming the og:image filenames (e.g. `home-v2.png`) and updating site-chrome.ts. The new tweet still needs a fresh URL though — query-string busting is still needed for previously-shared canonical URLs.
+
+**Why this is worth a lesson:** "delete and re-post" is the obvious first instinct after fixing card meta tags. It doesn't work. Future-Claude (or future-Johan) will hit this exact failure mode the next time site-wide cards change, and the path forward is non-obvious without the cache-cause diagnosis.
+
+---
+
 ## 2026-05-11 (end of day) — "Throwaway spike route" doesn't work when the paywall is route-coupled
 
 The original Bazaar listing runbook (`phase4-bazaar-extension-runbook.md` § 2) called for a 30-min pre-commit spike against a throwaway route (`/test/bazaar-spike`) to validate the extension wiring before touching production `/route`. The pattern is sound in principle — test the schema with a tiny example before exposing the full route's schema surface.

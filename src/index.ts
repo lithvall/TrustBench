@@ -19,6 +19,7 @@ import {
   getOrComputeRoutingVerifyResults,
   type SignedRoutingEnvelope,
 } from './routing-receipt-html.js';
+import { getRecentReceipts, renderExplorerHtml } from './explorer-html.js';
 import type { SignedReceipt } from './receipt-generator.js';
 import { renderRankingsHtml, type RankingRow } from './rankings-html.js';
 import { renderLandingHtml, type LandingStats } from './landing-html.js';
@@ -750,6 +751,39 @@ app.get('/receipts/:id', async (c) => {
 
   return c.json(data.receipt_json, 200, {
     'Cache-Control': 'public, max-age=86400, immutable',
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Receipt explorer (P4-2) — public list of recent TrustBench receipts.
+//
+// Read-only companion to /receipts/:id. Lists both Phase 3 rcpt_ receipts
+// (from the receipts table, public-read RLS) and Phase 4 rrcpt_ paywall
+// routing receipts (from paid_requests, surfaced via the curated server-side
+// service-role query promised in phase4-schema-paid-requests.sql Deviation 2).
+//
+// Content negotiation mirrors /rankings and /receipts/:id: browsers
+// (Accept: text/html) get the polished list page; agents (Accept:
+// application/json or ?format=json) get the programmatic JSON contract.
+//
+// Cache hint: getRecentReceipts() applies its own 5-min Redis cache; the
+// HTTP cache-control of 300s tracks that exactly so the public-facing
+// freshness story is consistent across the cache and the rendered page.
+//
+// Wire-safety: read-only on receipts + paid_requests; does NOT touch /route,
+// paywallGate, settle path, or boot-time bazaar declaration. POST /route
+// 402 emission stays byte-identical pre/post this route mount.
+// ---------------------------------------------------------------------------
+app.get('/explorer', async (c) => {
+  const rows = await getRecentReceipts(50);
+  const wantsHtml = preferHtml(c.req.header('Accept'), c.req.query('format') ?? null);
+  if (wantsHtml) {
+    return c.html(renderExplorerHtml(rows), 200, {
+      'Cache-Control': 'public, max-age=300',
+    });
+  }
+  return c.json({ receipts: rows, count: rows.length }, 200, {
+    'Cache-Control': 'public, max-age=300',
   });
 });
 

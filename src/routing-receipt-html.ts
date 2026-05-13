@@ -38,6 +38,7 @@ import { createPublicClient, decodeFunctionData, http } from 'viem';
 import { base } from 'viem/chains';
 import { verifyReceiptSignatureInProcess } from './receipt-html.js';
 import { siteHead, renderNav, renderFooter, escapeHtml } from './site-chrome.js';
+import type { TrustSignal } from './trust-signals.js';
 
 // ---------------------------------------------------------------------------
 // Type for the SignedRoutingResponse subset we accept (matches paywall-handler.ts).
@@ -75,6 +76,10 @@ export type SignedRoutingEnvelope = {
       idempotency_key: string | null;
       request_hash: string;
     };
+    // Optional trust-signal annotations. Each entry is the verbatim parsed
+    // payload from a partner (e.g. Strata). Absent on receipts issued before
+    // Change 2 (2026-05-13) or when no X-Trust-Signals header was sent.
+    trust_signals?: TrustSignal[];
   };
   signature: {
     alg: 'ed25519';
@@ -329,6 +334,8 @@ ${renderNav('receipt')}
         ['Idempotency key', r.call.idempotency_key ? `<span class="mono text-xs break-all">${escapeHtml(r.call.idempotency_key)}</span>` : '<span class="text-faint">—</span>'],
         ['Request hash', `<span class="mono text-xs break-all">${escapeHtml(r.call.request_hash)}</span>`],
       ])}
+
+      ${renderTrustSignalsSection(r.trust_signals)}
     </div>
 
     <!-- Right column: verification logic + verify commands -->
@@ -373,6 +380,176 @@ ${renderFooter()}
 // exported from receipt-html.ts to avoid coupling future Phase 3 visual
 // tweaks to Phase 4 (and vice-versa).
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Trust-signals section (Change 2, 2026-05-13).
+//
+// Renders partner-supplied pre-call trust posture (e.g. Strata's runtime score)
+// captured at /route time and embedded inside the signed receipt body.
+//
+// Visual posture: subordinate to Settlement + Routing decision. This is
+// supplementary context, not the headline artifact — the headline is the
+// signed-+-on-chain-verified routing decision above. The signals section sits
+// at the bottom of the left column under Audit.
+//
+// Signature semantics (this is the LOAD-BEARING copy on this page):
+// The Ed25519 signature attests "TrustBench observed exactly these bytes at
+// issued_at." It does NOT attest "these bytes are truthful." A Strata-aware
+// downstream verifier knows to re-fetch via the `ref` URL to confirm the score
+// is real. Strata's 2026-05-12 reply endorsed this semantic explicitly. This
+// distinction matters because the rendered page is publicly viewable, and we
+// must not let a reader over-interpret the cryptographic binding.
+//
+// Failure mode if this render is wrong:
+//   (a) Render omits a present trust_signals → public artifact is incomplete,
+//       integration partner can't point to the rendered receipt as proof.
+//       Mitigation: this function unconditionally renders when the array is
+//       non-empty; the conditional in the caller is "is it present?", not
+//       "should we render it?".
+//   (b) Render leaks an XSS payload from a malicious signal field → public
+//       page execution context. Mitigation: every interpolation goes through
+//       escapeHtml, including the `ref` URL (rendered inside href + as text).
+//       Tested by visual inspection on a payload with <script> in source/kind.
+//   (c) Render shows untrustworthy data without the disambiguation copy → a
+//       reader assumes TrustBench has verified the signal contents.
+//       Mitigation: the "Signature attests observation, not truth" subline
+//       below the section header makes the semantic explicit.
+function renderTrustSignalsSection(signals: TrustSignal[] | undefined): string {
+  if (!signals || signals.length === 0) return '';
+
+  const rows = signals.map((sig, idx) => renderTrustSignalRow(sig, idx)).join('');
+
+  return `<section>
+    <h3 class="label-caps text-faint mb-3">Trust signals</h3>
+    <p class="text-xs text-muted mb-3 leading-relaxed">
+      Partner-supplied pre-call posture observed at the moment of payment, embedded verbatim in the signed receipt.
+      <span class="font-medium text-ink">Signature attests observation, not truth</span> — verify the source via the linked <code class="mono">ref</code> URL for each entry.
+    </p>
+    <div class="bg-surface border border-border rounded-lg p-5 space-y-5">
+      ${rows}
+    </div>
+  </section>`;
+}
+
+// Render a single trust_signals[] entry. The locked §3 shape from
+// strata-integration-sketch-SEND.md has four required fields (source, kind,
+// captured_at, ref) and several optional partner-specific fields. We render
+// the required quartet first, then the well-known optionals if present, then
+// nothing for the long tail (unknown future-Strata fields stay in the signed
+// JSON but don't clutter the rendered page).
+function renderTrustSignalRow(sig: TrustSignal, idx: number): string {
+  // The four required-field renders. Order: source → kind → captured_at → ref.
+  const base: Array<[string, string]> = [
+    ['Source', `<span class="mono text-sm">${escapeHtml(sig.source)}</span>`],
+    ['Kind', `<span class="mono text-sm">${escapeHtml(sig.kind)}</span>`],
+    ['Captured at', `<span class="mono text-sm">${escapeHtml(formatTimestamp(sig.captured_at))}</span>`],
+    ['Reference', renderRefLink(sig.ref)],
+  ];
+
+  // Well-known optional fields from Strata's locked §3 shape. Render only when
+  // present + non-null; unknown future fields are signed but not rendered.
+  const optionals: Array<[string, string]> = [];
+  if (typeof sig.trusted === 'boolean') {
+    optionals.push(['Trusted', renderBoolPill(sig.trusted)]);
+  }
+  if (typeof sig.security_score === 'number') {
+    optionals.push(['Security score', `<span class="mono text-sm">${escapeHtml(String(sig.security_score))}</span> <span class="text-faint text-xs">/ 100</span>`]);
+  }
+  if (typeof sig.risk_level === 'string' && sig.risk_level.length > 0) {
+    optionals.push(['Risk level', renderRiskPill(sig.risk_level)]);
+  }
+  if (Array.isArray(sig.actionable_flags) && sig.actionable_flags.length > 0) {
+    optionals.push(['Actionable flags', renderFlagList(sig.actionable_flags as unknown[])]);
+  }
+  if (sig.payment_endpoint && typeof sig.payment_endpoint === 'object') {
+    optionals.push(['Payment endpoint', renderPaymentEndpoint(sig.payment_endpoint as Record<string, unknown>)]);
+  }
+
+  const allRows = [...base, ...optionals];
+  const tbody = allRows.map(([k, v]) => `
+    <tr class="border-b border-border last:border-0">
+      <td class="label-caps text-faint py-2 pr-4 align-top whitespace-nowrap">${escapeHtml(k)}</td>
+      <td class="py-2 text-sm">${v}</td>
+    </tr>`).join('');
+
+  // Multi-entry header: only show the index counter when there are 2+ entries.
+  // For the single-entry case (today's Strata-only world) the counter would be
+  // noise.
+  const header = idx === 0 ? '' : `<p class="label-caps text-faint pt-3 border-t border-border">Signal ${idx + 1}</p>`;
+
+  return `<div>
+    ${header}
+    <table class="w-full"><tbody>${tbody}</tbody></table>
+  </div>`;
+}
+
+// Render a ref URL: linked when http(s), inert otherwise. Both interpolations
+// (href + visible text) go through escapeHtml so a hostile signal carrying
+// `<script>` or `javascript:` URLs can't break out of the attribute.
+function renderRefLink(ref: string): string {
+  const safe = escapeHtml(ref);
+  // Only treat as a hyperlink when the URL parses as http(s). Other schemes
+  // (javascript:, data:, file:, etc.) render as plain text — same defensive
+  // posture as receipt-html.ts URL handling.
+  const isHttp = /^https?:\/\//i.test(ref);
+  if (isHttp) {
+    return `<a href="${safe}" target="_blank" rel="noopener noreferrer" class="mono text-xs text-primary hover:underline break-all">${safe} <span class="text-xs">↗</span></a>`;
+  }
+  return `<span class="mono text-xs break-all">${safe}</span>`;
+}
+
+function renderBoolPill(v: boolean): string {
+  if (v) {
+    return `<span class="inline-flex items-center gap-1 bg-soft-green text-primary-dark border border-primary/30 px-2 py-0.5 rounded text-xs font-medium">✓ true</span>`;
+  }
+  return `<span class="inline-flex items-center gap-1 bg-amber-soft text-amber-ink border border-amber/30 px-2 py-0.5 rounded text-xs font-medium">⚠ false</span>`;
+}
+
+function renderRiskPill(level: string): string {
+  const lower = level.toLowerCase();
+  // Defensive: only style when we recognize the value. Unknown values render
+  // as plain mono text to avoid asserting a severity color we don't know.
+  if (lower === 'low') {
+    return `<span class="inline-flex items-center gap-1 bg-soft-green text-primary-dark border border-primary/30 px-2 py-0.5 rounded text-xs font-medium">${escapeHtml(level)}</span>`;
+  }
+  if (lower === 'medium') {
+    return `<span class="inline-flex items-center gap-1 bg-amber-soft text-amber-ink border border-amber/30 px-2 py-0.5 rounded text-xs font-medium">${escapeHtml(level)}</span>`;
+  }
+  if (lower === 'high' || lower === 'critical') {
+    return `<span class="inline-flex items-center gap-1 bg-red-soft text-red-ink border border-red-ink/30 px-2 py-0.5 rounded text-xs font-medium">${escapeHtml(level)}</span>`;
+  }
+  return `<span class="mono text-sm">${escapeHtml(level)}</span>`;
+}
+
+function renderFlagList(flags: unknown[]): string {
+  // Each flag is rendered as a small pill. Non-string flag entries (which the
+  // locked §3 shape doesn't define but the passthrough types allow) get
+  // string-coerced + escaped so the render can never crash on bad data.
+  const pills = flags
+    .map((f) => `<span class="inline-flex items-center bg-amber-soft text-amber-ink border border-amber/30 px-2 py-0.5 rounded text-xs font-medium mono">${escapeHtml(String(f))}</span>`)
+    .join(' ');
+  return `<div class="flex flex-wrap gap-1">${pills}</div>`;
+}
+
+function renderPaymentEndpoint(pe: Record<string, unknown>): string {
+  // Render the locked §3 payment_endpoint shape (amount_usd, currency, network)
+  // when present; unknown fields are signed but not rendered. Defensive against
+  // a future Strata schema that changes the inner shape.
+  const parts: string[] = [];
+  if (typeof pe.amount_usd === 'number') {
+    parts.push(`<span class="font-medium">${escapeHtml(String(pe.amount_usd))}</span> <span class="text-faint">USD</span>`);
+  } else if (typeof pe.amount_usd === 'string') {
+    parts.push(`<span class="font-medium">${escapeHtml(pe.amount_usd)}</span> <span class="text-faint">USD</span>`);
+  }
+  if (typeof pe.currency === 'string') {
+    parts.push(`<span class="mono text-xs">${escapeHtml(pe.currency)}</span>`);
+  }
+  if (typeof pe.network === 'string') {
+    parts.push(`<span class="text-faint text-xs">on ${escapeHtml(pe.network)}</span>`);
+  }
+  if (parts.length === 0) return '<span class="text-faint">—</span>';
+  return `<span class="text-sm">${parts.join(' ')}</span>`;
+}
 
 function renderTable(label: string, rows: Array<[string, string]>): string {
   const tbody = rows.map(([k, v]) => `

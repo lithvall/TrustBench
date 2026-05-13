@@ -161,6 +161,7 @@ import { selectProvider } from './provider-selection.js';
 import { signWithEd25519 } from './scorer.js';
 import { jcsCanonicalize } from './idempotency.js';
 import { probeFor402Challenge, loadProbeConfig } from './route-handlers.js';
+import { parseTrustSignals, type TrustSignal } from './trust-signals.js';
 
 // -----------------------------------------------------------------------------
 // Constants — anchored on the design doc + .env.example
@@ -285,8 +286,43 @@ async function countRecentPaidRequests(agentAddress: string): Promise<number> {
 // Sha256 of the JCS-canonicalized request body. Same convention as
 // receipt-generator.ts so a verifier could in principle re-derive both
 // hashes from the same wire data.
-function bodyHash(obj: unknown): string {
-  const canon = jcsCanonicalize(obj);
+//
+// Trust-signals discipline (Change 2, 2026-05-13):
+//   - When trustSignals is null (flag off OR header absent), the hash is
+//     computed over `jcsCanonicalize(body)` alone — byte-identical to the
+//     pre-Change-2 baseline so existing paywall idempotency replays are
+//     unaffected by the deploy.
+//   - When trustSignals is non-null (flag on AND header present AND parse
+//     succeeded), the hash is over `jcsCanonicalize({ body, trust_signals })`.
+//     Different signals on the same idempotency_key produce a different hash,
+//     which makes `checkIdempotencyReplay` 409 — matching the locked §10.4.5(1)
+//     contract: "A replay with the same idempotency key but different
+//     (or absent) signals returns 409 Conflict."
+//
+// Implementing against the spec doc: strata-integration-sketch-SEND.md
+// §10.4.5(1).
+//
+// Failure mode if this is wrong:
+//   (a) Null-path hash changes shape → existing paywall replays 409 on
+//       deploy day. Mitigation: the conditional branch keeps the null path
+//       byte-identical to the legacy single-arg `jcsCanonicalize(body)` form.
+//       Tested by trust-signals-receipt-identity-smoke.ts.
+//   (b) Signals-present hash matches signals-absent hash → replay with
+//       different signals returns the cached body instead of 409, breaking
+//       the §10.4.5 contract. Mitigation: jcsCanonicalize sorts keys, so
+//       `{body, trust_signals}` always has the extra key alphabetically and
+//       hashes differently from `body` alone (different JSON, different
+//       canonical bytes, different sha256).
+function bodyHash(obj: unknown, trustSignals: TrustSignal | null = null): string {
+  // Preserve baseline byte-identity when no signals are present.
+  if (trustSignals === null) {
+    const canon = jcsCanonicalize(obj);
+    return 'sha256:' + createHash('sha256').update(canon).digest('hex');
+  }
+  // With signals: hash inputs are { body, trust_signals } so a replay with
+  // the same idempotency_key but different signal bytes triggers 409.
+  const hashInputs = { body: obj, trust_signals: trustSignals };
+  const canon = jcsCanonicalize(hashInputs);
   return 'sha256:' + createHash('sha256').update(canon).digest('hex');
 }
 
@@ -361,6 +397,18 @@ type RoutingReceipt = {
     idempotency_key: string | null;
     request_hash: string;
   };
+  // Optional trust-signal annotation array. Carries partner-supplied pre-call
+  // posture (e.g. Strata's runtime trust score) for downstream audit consumers.
+  // Field is OMITTED when no signals were captured (conditional spread at
+  // construction time) so the canonical bytes for no-signals receipts are
+  // byte-identical to the pre-Change-2 baseline.
+  //
+  // Signature coverage: the existing Ed25519 over jcsCanonicalize(receipt)
+  // covers this field when present, per the locked §10.4.5(2) contract.
+  //
+  // See strata-integration-sketch-SEND.md §3 (locked annotation shape) and
+  // §10.4.5 (signature coverage + replay semantics).
+  trust_signals?: TrustSignal[];
 };
 
 type SignedRoutingResponse = {
@@ -682,8 +730,69 @@ async function handlePaidRoute(c: Context, xPayment: string): Promise<Response> 
   }
   const agentAddress = decoded.payerAddress;
 
+  // 2b. Parse X-Trust-Signals header (Phase 4 Change 2, 2026-05-13).
+  //
+  // The Strata reference flow (strata-integration-sketch-SEND.md §10.2) carries
+  // the Strata pre-call trust posture as a base64url-encoded JSON object in
+  // the X-Trust-Signals header on the X-PAYMENT-paying POST. We parse here
+  // (NOT in withIdempotency, which is bypassed on the paywall path — see the
+  // Change 2 Critic-pass for the structural finding) so the parsed object can
+  // ride along into both the bodyHash AND the signed routing receipt.
+  //
+  // Flag gate: TRUSTBENCH_TRUST_SIGNALS_ENABLED.
+  //   - OFF (default): header is ignored entirely. No parse, no validation,
+  //     no inclusion in bodyHash, no embed in the receipt. Byte-identical to
+  //     the pre-Change-2 baseline so the deploy of this file does not break
+  //     in-flight paywall replays.
+  //   - ON: header is parsed + validated. Present-but-malformed → 400 with a
+  //     clear error code so the client can debug. Present-and-valid → carried
+  //     forward as `trustSignals` for bodyHash + receipt embed. Absent →
+  //     bodyHash baseline preserved (single-arg path of bodyHash).
+  //
+  // Implementing against spec doc: strata-integration-sketch-SEND.md §10.4
+  // (Change 2 deliverable) + §10.4.5 (idempotency + signature semantics).
+  //
+  // Failure mode if this is wrong:
+  //   (a) Flag-off path parses the header anyway → existing paywall replays
+  //       409 on deploy day. Mitigation: the env-flag check is the OUTER
+  //       guard; nothing inside the `if` block runs when the flag is off.
+  //       Tested by trust-signals-receipt-identity-smoke.ts (no-signals
+  //       canonical bytes byte-identical to baseline).
+  //   (b) Malformed-header path returns 200 with no signals → silent data
+  //       loss; a real Strata-bound integration thinks its signals were
+  //       captured when they weren't. Mitigation: we 400 on any reason !==
+  //       'absent', matching Change 1's behavior in idempotency.ts.
+  //   (c) Replay-with-different-signals returns the cached response →
+  //       breaks §10.4.5(1). Mitigation: bodyHash includes signals (see
+  //       below), so the existing checkIdempotencyReplay's hash-mismatch
+  //       branch 409s when signals differ.
+  let trustSignals: TrustSignal | null = null;
+  if (process.env.TRUSTBENCH_TRUST_SIGNALS_ENABLED === 'true') {
+    const headerValue = c.req.header('X-Trust-Signals');
+    if (headerValue) {
+      const result = parseTrustSignals(headerValue);
+      if (!result.ok && result.reason !== 'absent') {
+        return c.json(
+          {
+            error: 'trust_signals_invalid',
+            reason: result.reason,
+            // result.detail is defined on the three non-'absent' reasons.
+            detail: 'detail' in result ? result.detail : undefined,
+          },
+          400,
+        );
+      }
+      if (result.ok) {
+        trustSignals = result.value;
+      }
+    }
+  }
+
   // 3. Compute body hash for the idempotency check + receipt content addressing.
-  const reqBodyHash = bodyHash(body);
+  // When trustSignals is non-null, the hash includes them so a replay with
+  // different signals 409s per §10.4.5(1). When null, the hash is over the
+  // body alone (byte-identical to the pre-Change-2 path).
+  const reqBodyHash = bodyHash(body, trustSignals);
 
   // 4. Idempotency replay (per design doc § Q4 + § 7 mitigation #2).
   if (idempotencyKey) {
@@ -902,6 +1011,22 @@ async function handlePaidRoute(c: Context, xPayment: string): Promise<Response> 
   }
 
   // 8. Build + sign the routing receipt.
+  //
+  // Change 2 (2026-05-13): when trustSignals is non-null, embed it as the
+  // first entry of receipt.trust_signals[]. The array shape (not singleton)
+  // is locked per strata-integration-sketch-SEND.md §3: future identity-
+  // attestation providers (ERC-8004 reputation, Phala TEE, etc.) can append
+  // additional entries without re-litigating the envelope shape.
+  //
+  // Conditional spread: when trustSignals is null, the trust_signals key is
+  // OMITTED from the receipt body entirely — not present as null, not present
+  // as an empty array. This keeps the canonical bytes for no-signals receipts
+  // byte-identical to the pre-Change-2 baseline. Same idiom as block_number
+  // in receipt-generator.ts:222.
+  //
+  // Signature coverage: the existing Ed25519 over jcsCanonicalize(receipt)
+  // in signRoutingReceipt() covers this field automatically when present —
+  // no separate signing key, no second signature. Per §10.4.5(2).
   const receiptId = 'rrcpt_' + ulid();
   const settledAt = new Date().toISOString();
   const receipt: RoutingReceipt = {
@@ -932,6 +1057,7 @@ async function handlePaidRoute(c: Context, xPayment: string): Promise<Response> 
       idempotency_key: idempotencyKey,
       request_hash: reqBodyHash,
     },
+    ...(trustSignals ? { trust_signals: [trustSignals] } : {}),
   };
 
   const signature = signRoutingReceipt(receipt);

@@ -207,6 +207,24 @@ const ROUTE_CONFIG = {
           idempotency_key: 'client-supplied-key-16-to-128-chars',
           request_hash: 'sha256:' + '0'.repeat(64),
         },
+        // Optional. Present when the agent sends an X-Trust-Signals header
+        // (see strata-integration-sketch-SEND.md §3 for the locked annotation
+        // shape). Each entry carries a partner-supplied pre-call posture
+        // observed at request time and embedded verbatim in the signed
+        // receipt body. Signature attests observation, not truth.
+        trust_signals: [
+          {
+            source: 'strata.usestrata.dev',
+            kind: 'x402_trust',
+            trusted: false,
+            security_score: 45,
+            risk_level: 'medium',
+            payment_endpoint: { amount_usd: 2.5, currency: 'USDC', network: 'base' },
+            actionable_flags: ['drain_risk'],
+            captured_at: '2026-05-10T14:23:41.000Z',
+            ref: 'https://usestrata.dev/api/v1/x402/verify?url=https://example.com',
+          },
+        ],
       },
       signature: {
         alg: 'ed25519',

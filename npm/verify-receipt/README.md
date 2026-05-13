@@ -12,13 +12,25 @@ npm install @trustbench/verify-receipt
 npm install viem
 ```
 
+## Supported receipt prefixes
+
+Two prefixes are accepted; both route to the same `/receipts/:id` endpoint:
+
+| Prefix | Issued by | Envelope shape |
+|---|---|---|
+| `rcpt_…` | Phase 3 settlement receipts | `receipt.settlement.{chain, tx_hash, block_number, payer_address, payee_address, amount_atomic, …}` |
+| `rrcpt_…` | Phase 4 paywall routing receipts | `receipt.paid.{chain, tx_hash, payer_address, payee_address, amount_atomic, …}` (no `block_number`; verifier confirms the block via the tx_hash lookup) |
+
+The verifier handles both shapes transparently. Code that already worked with `rcpt_` requires no changes.
+
 ## Usage (programmatic)
 
 ```js
 import { verifyReceipt } from '@trustbench/verify-receipt';
 
-// By receipt id (fetches from https://trustbench.io/receipts/<id>)
+// By receipt id (Phase 3 or Phase 4)
 const result = await verifyReceipt('rcpt_01KQY7C44GAPSXZPFQYRZ1D10C');
+const result2 = await verifyReceipt('rrcpt_01KRGKSZACB4ECRPEQY1VC0F3N');
 console.log(result.signatureValid); // true | false
 console.log(result.ok);              // signature valid + chain verified (if checkChain)
 
@@ -26,10 +38,10 @@ console.log(result.ok);              // signature valid + chain verified (if che
 const result = await verifyReceipt(envelope);
 
 // From a full URL
-const result = await verifyReceipt('https://trustbench.io/receipts/rcpt_...');
+const result = await verifyReceipt('https://trustbench.io/receipts/rrcpt_...');
 
 // With on-chain verification
-const result = await verifyReceipt('rcpt_...', { checkChain: true });
+const result = await verifyReceipt('rrcpt_...', { checkChain: true });
 if (result.chain && result.chain.ok) {
   console.log('Block:', result.chain.block_number);
   console.log('Payer:', result.chain.payer);
@@ -42,9 +54,10 @@ if (result.chain && result.chain.ok) {
 ```bash
 # Signature-only verification
 npx trustbench-verify-receipt rcpt_01KQY7C44GAPSXZPFQYRZ1D10C
+npx trustbench-verify-receipt rrcpt_01KRGKSZACB4ECRPEQY1VC0F3N
 
 # Signature + on-chain (requires viem)
-npx trustbench-verify-receipt rcpt_01KQY7C44GAPSXZPFQYRZ1D10C --check-chain
+npx trustbench-verify-receipt rrcpt_01KRGKSZACB4ECRPEQY1VC0F3N --check-chain
 
 # From a local JSON file
 npx trustbench-verify-receipt ./my-receipt.json
@@ -100,6 +113,18 @@ The exact canonicalization function used internally. Useful for callers that wan
 - Node.js >= 18 (for built-in `fetch`).
 - `viem >= 2.0.0` peer dependency, optional, only needed for `--check-chain`.
 - Mirrors the in-repo reference verifier ([`scripts/verify-receipt.js`](https://github.com/lithvall/TrustBench/blob/main/scripts/verify-receipt.js)) byte-for-byte for the JCS + Ed25519 logic. If they disagree, that's a bug — please open an issue.
+
+## Changelog
+
+### 0.1.1
+
+- Recognize the `rrcpt_` prefix in addition to `rcpt_`. Both route to the same `/receipts/:id` endpoint on the issuer host.
+- Verifier reads on-chain settlement data from either `receipt.settlement` (Phase 3) or `receipt.paid` (Phase 4 paywall routing receipts). When `block_number` is absent on the paywall envelope, the verifier still confirms the on-chain transaction via the `tx_hash` lookup and reports `block_check: "block_number not in receipt"` in the chain result.
+- No breaking changes. v0.1.0 callers continue working unchanged.
+
+### 0.1.0
+
+- Initial release. Ed25519 signature verification over RFC 8785 JCS-canonical bytes, optional on-chain verification via `viem`.
 
 ## License
 

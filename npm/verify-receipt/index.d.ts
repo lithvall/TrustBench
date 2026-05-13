@@ -43,8 +43,9 @@ export interface VerifyResult {
  * Verify a TrustBench Ed25519-signed receipt's signature, optionally also
  * confirming on-chain settlement.
  *
- * @param input Receipt envelope object, receipt id ("rcpt_..."), full URL,
- *   or path to a JSON file.
+ * @param input Receipt envelope object, receipt id (`rcpt_...` for Phase 3
+ *   settlement receipts or `rrcpt_...` for Phase 4 paywall routing receipts),
+ *   full URL, or path to a JSON file.
  * @param options Optional flags (see VerifyOptions).
  */
 export function verifyReceipt(

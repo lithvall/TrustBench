@@ -19,11 +19,16 @@ Options:
   --json                 Print verification result as JSON instead of human-readable.
   -h, --help             Show this help.
 
+Two receipt-id prefixes are accepted:
+  rcpt_    Phase 3 settlement receipts
+  rrcpt_   Phase 4 paywall routing receipts (signed routing decision + on-chain anchor)
+
 Examples:
   trustbench-verify-receipt rcpt_01KQY7C44GAPSXZPFQYRZ1D10C
   trustbench-verify-receipt rcpt_01KQY7C44GAPSXZPFQYRZ1D10C --check-chain
+  trustbench-verify-receipt rrcpt_01KRGKSZACB4ECRPEQY1VC0F3N --check-chain
   trustbench-verify-receipt ./my-receipt.json
-  trustbench-verify-receipt https://trustbench.io/receipts/rcpt_...
+  trustbench-verify-receipt https://trustbench.io/receipts/rrcpt_...
 
 Exit codes:
   0  signature valid (and chain verified, if --check-chain was used)

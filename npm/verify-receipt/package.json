@@ -1,6 +1,6 @@
-﻿{
+{
   "name": "@trustbench/verify-receipt",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Standalone third-party verifier for TrustBench Ed25519-signed receipts. No TrustBench API calls in the verify path beyond fetching the published public key.",
   "keywords": [
     "trustbench",
@@ -16,7 +16,7 @@
   "homepage": "https://trustbench.io",
   "repository": {
     "type": "git",
-    "url": "https://github.com/lithvall/TrustBench.git",
+    "url": "git+https://github.com/lithvall/TrustBench.git",
     "directory": "npm/verify-receipt"
   },
   "license": "MIT",
@@ -47,7 +47,9 @@
     "viem": ">=2.0.0"
   },
   "peerDependenciesMeta": {
-    "viem": { "optional": true }
+    "viem": {
+      "optional": true
+    }
   },
   "scripts": {
     "test": "node cli.js rcpt_01KQY7C44GAPSXZPFQYRZ1D10C https://trustbench.io"

@@ -4,6 +4,86 @@ A living log of patterns, surprises, and corrections worth remembering across se
 
 ---
 
+## 2026-05-13 — When a deliverable's README documents a verification command, round-trip that exact command end-to-end before declaring the deliverable ready
+
+Shipping the §10 Strata reference-agent script: I wrote `examples/strata-integration/reference-agent.ts` + README, ran `tsc --noEmit`, did the 7-point high-risk-surface self-review, and called it done. The README's verification command was `npx @trustbench/verify-receipt <receipt_id> --check-chain`. I did not actually run that command end-to-end against a Phase 4 paywall receipt before declaring ready. When Johan ran it against the first live `rrcpt_…` receipt the script produced, the npm package threw `unrecognized input: rrcpt_…` — two structural gaps surfaced that I'd missed:
+
+1. **Regex gap:** both the workspace `scripts/verify-receipt.js` and the published `@trustbench/verify-receipt@0.1.0` had `/^rcpt_[0-9A-HJKMNP-TV-Z]{26}$/` for receipt-id validation. The Phase 4 paywall path emits `rrcpt_` prefixed IDs (paywall-handler.ts:1030, shipped 2026-05-11 — after v0.1.0 went out on 2026-05-08). The verifier didn't know about the new prefix.
+
+2. **Envelope-shape gap:** the chain-check code read `envelope.receipt.settlement`. The Phase 4 paywall envelope emits `envelope.receipt.paid` — different field name on a different envelope `kind`. So even when I worked around the regex by passing a fetched JSON file, the chain check failed with "receipt has no settlement block."
+
+Three days of work — the reference agent + adapter + README — could have shipped with a broken verifier path baked into the README's load-bearing one-liner. Johan caught it on the first live run, but the failure mode was "the deliverable's documented verification command fails for the receipts the deliverable produces." That's the worst kind of integration miss: the artifact and the verifier disagree.
+
+**The fix path was small** (two one-liner patches in `npm/verify-receipt/index.js`, mirror in `scripts/verify-receipt.js`, version bump to 0.1.1, npm publish). What's worth banking is **how the gap was avoided next time**.
+
+**Three patterns:**
+
+1. **For any deliverable whose README documents a verification, monitoring, or smoke command — run that exact command end-to-end against a real artifact before declaring ready.** Not the workspace-local equivalent, not the unit test, not the type-check. The literal command a reader of the README will copy-paste. The cost is one extra invocation; the cost of skipping it is a deliverable whose top documented use is broken.
+
+2. **When envelope shapes diverge across phases, the verifier's field-name assumptions become latent bugs that only surface against the new shape.** Phase 3 receipts use `receipt.settlement`; Phase 4 paywall routing receipts use `receipt.paid`. Both are legitimate. A verifier hard-coded to one shape works fine until the other shape ships, at which point it fails opaquely ("receipt has no settlement block" — technically true, but the more useful message would have been "receipt.paid found but verifier was built for receipt.settlement"). When introducing a new envelope shape, audit every consumer of the old shape's field names and add a dual-probe (`a || b`) or branch on `kind` discriminator. The high-risk-surface self-review's "no duplication" item is the trigger; I missed it because I treated the two envelope kinds as one mental model.
+
+3. **Published npm packages can lag the source they were published from.** `@trustbench/verify-receipt@0.1.0` was published 2026-05-08, before paywall v0.1.0 shipped on 2026-05-11. The npm registry is a frozen artifact; the source moves. When introducing a feature that consumers (Strata, Show HN readers) will exercise via a published package, audit the published version's behavior against the new feature, not the in-repo source. Treat the published version as the contract; treat the in-repo source as the proposal.
+
+**Meta-lesson.** The 7-point high-risk-surface checklist had a "fact-check" item that should have caught this. I treated "fact-check" as "spot-check the field names and capabilities I'm using in the new code." The right interpretation is broader: "fact-check that every command and claim the deliverable makes is exercisable end-to-end *as written*, not paraphrased." Updating the mental model: fact-check is a round-trip discipline, not a code-review pass.
+
+---
+
+## 2026-05-13 — Verify middleware chain reachability before cross-handler state-passing (Change 2 pre-work finding)
+
+Change 1 (2026-05-13 commit `1e8c21c`) parsed `X-Trust-Signals` inside `withIdempotency` middleware and stashed the result on the Hono context via `c.set('trust_signals' as never, ...)`. The Change 2 handoff (`phase4-change2-handoff.md` §1, §3 step 3e) inherited that design and instructed the implementer to read the stashed value with `c.get('trust_signals')` inside the receipt-builder. Pre-work reading of `src/index.ts` route registration revealed the assumption was false: middleware chain on POST `/route` is `paywallGate → requireAgent → withIdempotency → requireWithinSpendCap → quoteHandler`. `paywallGate` branches on `X-PAYMENT` presence and on Branch 2 (X-PAYMENT present) calls `handlePaidRoute()` and does NOT call `next()`. The Strata reference flow (`strata-integration-sketch-SEND.md` §10.2) uses Branch 2. So `withIdempotency` never runs on the paywall path, and the Change 1 stash was dead code for the actual use case. Implementing Change 2 as written would have compiled green, shipped, and silently done nothing for Strata.
+
+The Critic pass (`phase4-change2-critic-pass.md`) caught this as Rejection Reason 1 and Johan's scope decision (Option A: parse directly in `handlePaidRoute`) closed it.
+
+**Three patterns worth banking:**
+
+1. **When one change writes to a Hono context and a later change reads from it, validate that both code paths actually execute in the same middleware chain.** The right artifact to check is the `app.post(...)` registration line — it lists the entire chain in order. If a branch in any middleware short-circuits (returns without `next()`), every downstream middleware in the chain is bypassed for that branch. The cheapest verifier: grep for the route registration, list the middleware names, then read each middleware looking for early returns that don't call `next()`. This isn't optional for cross-handler state-passing — it's load-bearing.
+
+2. **The `c.set/c.get` indirection pattern is a smell when producer and consumer aren't on the same chain.** When they aren't, the right answers are (a) parse twice if the helper is pure and cheap (matches Change 2's solution — `parseTrustSignals` is a pure helper with no I/O), or (b) side-channel storage (DB, Redis) with a TTL contract. The `as never` cast on the Variables map hides the type-system signal that would otherwise catch the mismatch. Treat any third use of the `as never` Variables pattern in the codebase as the trigger for the Variables-interface refactor (already structural debt at 2x).
+
+3. **Critic-pass output IS the scope-decision moment for high-risk surfaces.** The temptation when picking up a handoff is to trust its scope description and start coding. The CLAUDE.md Critic-pass discipline (`prompts/critic.md`) is what catches the cases where the handoff's assumptions don't hold against the current code. The four hours of pre-work + Critic-pass writing before any Edit-tool call saved a ~6-hour rework cycle plus a deceptive green-tests-but-broken-behavior failure mode. For high-risk diffs, the right order is always: read → Critic pass → scope decision with the user → code. Skipping the Critic pass on the grounds that "the handoff covers it" defeats the discipline.
+
+**Meta-lesson.** Handoffs from prior sessions are point-in-time observations of the codebase, same as memory entries. The codebase moves between sessions (Phase 4 paywall-handler.ts landed 2026-05-11, post-Change-1-design). A handoff written against an older code state can have assumptions silently break. Treat handoffs the same way as memories: verify the load-bearing claims against current code before acting on them.
+
+---
+
+## 2026-05-13 — X replies sent via Grok scan flow are invisible to the engagement-state record unless captured manually
+
+During today's daily X scan triage, Grok flagged @0xAggelos as an A-tier reply target. The recall pass against memory + project files said "compose framing locked, Reddit reply sent 2026-05-08, no X reply logged" — and on that basis I drafted a generic compose pitch. Johan then surfaced screenshots showing TrustBench had in fact already sent **two X replies** on 2026-05-08 (one to @QBTLabs's "practical stack" post, one to @0xAggelos's audit-trail follow-up), neither of which had earned a like, reply, or RT. The recommendation to send a third compose-pitch reply on the same theme was wrong-shape; the right call was to skip and wait for him to engage publicly with anyone on the thread.
+
+**Why the gap existed.** Replies posted via the Grok scan flow → user-side X send don't round-trip back through Claude. They land in @TrustBench's reply timeline on X but nowhere in the project files, memory, or chat history. The competitive-landscape entry, the project memory, and the lessons.md kicked-back-draft note all fell silent on whether the rewritten draft actually shipped. Six days later, the engagement-state record was wrong by omission — and the wrong recommendation rode on it.
+
+**Three carry-forward changes:**
+
+1. **After approving a Grok scan reply, log it the same day** to the relevant `competitive-landscape.md` entry (or create a `## X engagement state` line if none exists) with: target handle, source post date, our reply text in full, view/like/reply/RT counts at time of send. Two-minute write, prevents this exact failure mode.
+2. **Daily scan recall pass should explicitly check the "have we replied recently?" question** before drafting, not just the "do we recognize them?" question. Recall pattern: grep memory + competitive-landscape for the X handle AND for the source-post-author handle (they may differ — quote-tweeters, retweeters, replies-to-replies). If either matches a reply in the last 14 days, re-evaluate before drafting another.
+3. **Periodic sweep of @TrustBench's replies tab into the daily scan briefing** — once a week, paste the reply timeline into Claude and reconcile against project files. Catches replies that escaped same-day capture. Cheaper than a Twitter API integration and matches the solo-founder calibration (no paid services without explicit approval).
+
+**Meta-lesson.** "I don't have a record of it" ≠ "it didn't happen." When a recommendation depends on the absence of prior outreach, ask the user to spot-check their actual sent record before drafting. The cost of asking is low; the cost of a tone-deaf third-reply-in-a-week to a peer with zero engagement is reputational.
+
+---
+
+## 2026-05-13 — TanStack/Mini-Shai-Hulud worm: lockfile-as-evidence beats signature-based defense
+
+On 2026-05-12 a supply-chain worm hit the TanStack npm release pipeline. 84 malicious versions across 42 packages, all in the router/start/eslint/adapter family, published 2026-05-11 19:20-19:26 UTC. The attacker chained three known vulnerability classes (pull_request_target Pwn Request → GitHub Actions cache poisoning → OIDC token extraction from runner memory) to publish credential-stealing malware *under the legitimate TanStack CI identity*. SLSA provenance attested as authentic — because the CI really did build and publish the tarballs. Maintainer 2FA was on — irrelevant, because no npm token was ever stolen. Tracking issue [TanStack/router#7383](https://github.com/TanStack/router/issues/7383); advisory [GHSA-g7cv-rxg3-hmpx](https://github.com/TanStack/router/security/advisories/GHSA-g7cv-rxg3-hmpx).
+
+TrustBench's exposure was nil: `@tanstack/query-core@5.100.9` and `@tanstack/react-query@5.100.9` are in the `@tanstack/query*` family, which the official postmortem explicitly named as confirmed clean. The router/start family compromise didn't touch query/table/form/virtual/store. Both packages also lacked any `postinstall`/`preinstall`/`prepare` lifecycle hooks AND lacked the IoC fingerprint (`optionalDependencies` entry pointing to `github:tanstack/router#79ac49ee...`). Belt and suspenders.
+
+**Five lessons that survive the incident:**
+
+1. **Lockfile + node_modules mtime predating an attack window is forensic evidence.** The first thing checked was *when* the `@tanstack` dirs were written: `5/11/2026 12:54 PM` local time. That timestamp is data, not just metadata — it bounded the exposure window before any IoC list was public. When a supply-chain incident is breaking, the lockfile + node_modules mtime is the cheapest piece of evidence available; preserve it before doing anything destructive. Do NOT run a fresh `npm install` to "refresh" during an active incident — that destroys the pre-compromise resolution evidence.
+
+2. **SLSA provenance and 2FA are not load-bearing against CI-pipeline hijack.** Both worked exactly as designed and neither caught this. Defending against future variants of this class requires either (a) pinning to versions published before the breach window, or (b) provenance-source-verification — does the tarball actually come from the workflow step that's *expected* to publish it, or from some other step in the same workflow that minted an OIDC token via `id-token: write`? Signature-of-build alone is necessary-but-insufficient. The TanStack postmortem flagged this as the highest-leverage hardening change for them.
+
+3. **IoC fingerprint to watch for in future worms of this class.** An unfamiliar `optionalDependencies` entry pointing to a `github:<org>/<repo>#<sha>` ref in any npm package manifest, where the referenced ref is an orphan commit hosted in the fork network. The Mini-Shai-Hulud payload specifically used `optionalDependencies` because npm silently swallows the failure when the optional dep's `prepare` script exits non-zero — leaving no `node_modules` trace after install. Cheapest detector: `grep -B1 -A3 optionalDependencies node_modules/*/package.json` (or PowerShell `Select-String optionalDependencies node_modules\*\package.json`). Look for `github:` refs to repos with orphan commits.
+
+4. **Cross-session memory freeze worked.** Setting a hard `npm install` freeze in `feedback_*.md` + project state in `project_*.md` + a tight one-line index entry in `MEMORY.md` kept the rule load-bearing across what would have been multiple Cowork sessions yesterday. Scope it to the *specific incident* so it's auditable and liftable, not a generic "be careful with npm" pseudo-rule that drifts into noise. Naming convention that worked: `feedback_npm_install_freeze_tanstack_worm_2026_05_12.md` — domain + action + specific incident + date. Future incident-specific freezes should follow the same shape.
+
+5. **Try a manual lookup before falling back to the watcher cron.** A daily scheduled task pulling GitHub Advisories + WebSearch for the IoC list was the right shape for "wait for external clarity" — but in this case the GHSA was already published 2026-05-11 21:30 UTC by the maintainer team, ~30 hours before the watcher's first scheduled run. Default action when a freeze is set: try a same-day manual `WebSearch` + advisory fetch before scheduling the cron. The watcher is for when the IoC list genuinely isn't out yet, not for when checking takes ten seconds.
+
+The two freeze memory files (`feedback_npm_install_freeze_tanstack_worm_2026_05_12.md`, `project_tanstack_5_100_9_install_state_2026_05_12.md`) are tombstoned 2026-05-13. The `tanstack-worm-ioc-watch` scheduled task is disabled.
+
+---
+
 ## 2026-05-12 (Day 6 follow-up) — Validator-green ≠ indexer-required: routeTemplate is the canonical example
 
 Yesterday's lesson ("validator tools are ground truth") got us to 11/11 green at `agentic.market/validate` via FIX-PAYMENT-REQUIRED-HEADER. CDP discovery still 404'd at T+18h with no further movement. Direct read of `node_modules/@x402/extensions/dist/cjs/index-Bw-mGWh6.d.ts` revealed the gap: `routeTemplate?: string` declared as a sibling of `info` + `schema` on `BodyDiscoveryExtension` (line 124), with a documented `isValidRouteTemplate(value)` facilitator-side validation function at line 413+. Optional in the wire-spec type, required for cataloging.

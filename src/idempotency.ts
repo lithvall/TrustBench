@@ -18,12 +18,26 @@
 //   /`.headers` on the (wrong) value of `await next()` silently goes wrong, then
 //   throws on the second access, which short-circuits the completion-path
 //   UPDATE and leaves rows stuck in 'in_flight'.
+//
+// Hono Variables typing — deliberate `as never` (added 2026-05-13):
+//   This file uses `c.set('trust_signals' as never, ...)` to stash the
+//   parsed signals on the Hono context. The cast matches the existing
+//   `bazaarExtension` pattern in src/index.ts:343. Hono's typed Variables
+//   map rejects untyped keys at compile time; the right fix is a
+//   project-wide Variables interface in a shared types file, then
+//   strongly-typed c.set/c.get on every key. That refactor touches every
+//   middleware in the codebase and was deferred when bazaarExtension
+//   first shipped. The cast is a known structural debt — accepted twice
+//   so far. Per the Change 1 Critic-pass note: next time it shows up,
+//   that's the trigger to do the Variables-interface refactor instead
+//   of accepting the pattern a third time.
 
 import 'dotenv/config';
 import type { Context, Next } from 'hono';
 import { createClient } from '@supabase/supabase-js';
 import Redis from 'ioredis';
 import { createHash } from 'crypto';
+import { parseTrustSignals, type TrustSignal } from './trust-signals.js';
 
 // ---------------------------------------------------------------------------
 // Lazy clients — initialized on first use, not at module import. This keeps
@@ -128,6 +142,65 @@ export async function withIdempotency(c: Context, next: Next) {
     return c.json({ error: 'idempotency_key_required', detail: 'Idempotency-Key header (16–128 chars) is required on POST /route' }, 400);
   }
 
+  // ---- Parse X-Trust-Signals header (Phase 4 SKU pivot Change 1) ----------
+  // Strata integration sketch § 10.4 + § 10.4.5 contract. The header carries
+  // a base64url-encoded JSON object matching the locked § 3 trust_signals
+  // entry shape (source, kind, captured_at, ref required; other fields
+  // passthrough).
+  //
+  // Flag gate (TRUSTBENCH_TRUST_SIGNALS_ENABLED):
+  //   - OFF (default): header is ignored entirely. No parse, no validation,
+  //     no hash inclusion. This preserves byte-identical request_hash for
+  //     all existing /route traffic so the deploy of this file does not
+  //     break in-flight replays. Strata + future SKU-paywall callers will
+  //     start sending the header AFTER the flag flips, not before.
+  //   - ON: header is parsed + validated. Present-but-malformed → 400.
+  //     Present-and-valid → stashed on context for the receipt-generator
+  //     hand-off (Change 2, deferred) AND included in the request hash.
+  //     Absent → hash inputs stay as the 3-key base shape; an agent who
+  //     called with signals on the first request and without signals on
+  //     replay will 409 because the hashes differ. That matches the
+  //     Critic-pass § 10.4.5 commitment "different (or absent) signals → 409".
+  //
+  // Failure mode if this is wrong:
+  //   - Flag-off path mutates the hash → existing replays start 409ing on
+  //     deploy. Mitigation: the trust_signals key is only added to the hash
+  //     input object when (flag is on AND header was present AND parse
+  //     succeeded). Three conditions, all defaulted to off; verify via
+  //     tsc --noEmit + paywall-smoke S1+S4 regression before deploy.
+  //   - Flag-on + header-absent path mutates the hash → first turn-on of
+  //     the flag would 409 any in-flight replays. Mitigation: when flag is
+  //     on and header is absent, the hash input stays at the 3-key base
+  //     shape (no `trust_signals: null` key added). Tested via the same
+  //     S1+S4 regression with flag toggled.
+  let trustSignals: TrustSignal | null = null;
+  if (process.env.TRUSTBENCH_TRUST_SIGNALS_ENABLED === 'true') {
+    const headerValue = c.req.header('X-Trust-Signals');
+    if (headerValue) {
+      const result = parseTrustSignals(headerValue);
+      if (!result.ok && result.reason !== 'absent') {
+        return c.json(
+          {
+            error: 'trust_signals_invalid',
+            reason: result.reason,
+            // result.detail is defined on the three non-'absent' reasons.
+            detail: 'detail' in result ? result.detail : undefined,
+          },
+          400,
+        );
+      }
+      if (result.ok) {
+        trustSignals = result.value;
+        // Stash on Hono context for the receipt-generator (Change 2, deferred).
+        // `as never` matches the existing bazaarExtension pattern in
+        // src/index.ts:343 — Hono's typed Variables map requires either a
+        // project-wide interface or per-key casts; we use casts to keep the
+        // surface minimal until a proper Variables type is introduced.
+        c.set('trust_signals' as never, trustSignals as never);
+      }
+    }
+  }
+
   // ---- Compute request hash -----------------------------------------------
   // We read the raw body text and parse it ourselves rather than calling
   // c.req.json(). Two reasons:
@@ -150,8 +223,18 @@ export async function withIdempotency(c: Context, next: Next) {
   }
   const path = c.req.path;
   const query = c.req.query();
+
+  // Hash inputs. The trust_signals key is conditionally added so that the
+  // flag-off + no-header path is byte-identical to the pre-Change-1 hash.
+  // Conditional spread keeps jcsCanonicalize's sorted-keys output stable for
+  // legacy traffic; adds the `trust_signals` key alphabetically (after
+  // `query` and `path`) when present.
+  const hashInputs: Record<string, unknown> = { body, query, path };
+  if (trustSignals !== null) {
+    hashInputs.trust_signals = trustSignals;
+  }
   const requestHash = createHash('sha256')
-    .update(jcsCanonicalize({ body, query, path }))
+    .update(jcsCanonicalize(hashInputs))
     .digest('hex');
 
   return await runIdempotent(c, next, agentId, key, requestHash);

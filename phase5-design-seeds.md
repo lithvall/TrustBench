@@ -126,6 +126,86 @@ The three-tier shape (self-attested / 1P-badge / bond-staked) is the right publi
 
 ---
 
+## Privacy-aware receipts: compose with confidential-payment substrates (2026-05-12)
+
+**Source:** @gm_usi → @TACEO_IO Confidential x402 thread, 2026-05-12. TACEO shipped Confidential x402 on Base Sepolia: drop-in privacy extension built on their Merces protocol that hides payment amounts and account balances on-chain. Same HTTP 402 flow, same facilitator, same client libraries. Observer sees cryptographic commitments, not prices. Fhenix shipped a parallel implementation (Fhenix402, FHE-based, also Base Sepolia) the same week. Privacy-on-x402 is becoming its own category.
+
+**What this breaks in our current receipt model:**
+
+Today's receipt envelope (`receipt-spec-v1.md`) carries `amount` as cleartext USDC, with the on-chain anchor verified by re-fetching the USDC `AuthorizationUsed` event and matching value+from+to. When the on-chain transfer is a Merces commitment (or a CoFHE ciphertext), there is no cleartext value to match. The current `verify-receipt --check-chain` path fails on confidential-x402 settles by construction.
+
+**Phase 5 design shape (compose, don't compete):**
+
+We don't become the privacy layer — TACEO and Fhenix have a multi-year head start in MPC/coSNARKs and FHE respectively. We become the receipt/audit layer that knows how to *wrap* a confidential payment. Two variants:
+
+- **Privacy-passthrough receipt.** Receipt drops the `amount` field, carries `amount_commitment` (the on-chain cryptographic commitment) + `privacy_scheme` (e.g. `taceo-merces-v1`, `fhenix-cofhe-v1`) + tx_hash. The receipt no longer attests "how much was paid" but it still attests "this party paid this party for this capability at this time with this settlement reference." For most audit use-cases (compliance trail, idempotency replay, dispute existence), that's sufficient.
+- **Privacy-verified receipt.** Receipt carries a ZK proof that the receipt's *claimed* amount equals the on-chain commitment, signed by a party trusted to know the cleartext (the buyer's wallet, typically). This is the "verified privacy" shape: receipt is publicly verifiable as "amount is X" without X being on-chain. Hard cryptography; depends on TACEO / Fhenix exposing a proof-generation hook in client libraries.
+
+**Why this is Phase 5 territory and not Phase 4:**
+
+- **Substrate isn't there.** TACEO Merces is Base Sepolia testnet. Fhenix CoFHE is Base Sepolia testnet. Mainnet is the prereq before we build receipt support against either.
+- **No customer is asking.** Today's paying-or-pre-paying integrations (Strata, Infopunks-era cognition layer, the listing-sprint targets) all settle on cleartext USDC. None of them have surfaced "we need confidential amounts" as a blocker.
+- **Solo-founder calibration says wait.** Capital-fit: zero immediate revenue from privacy-aware receipts. Energy-fit: would require deep coSNARKs / FHE literacy that we don't currently have. Boredom check: passes (interesting cryptography). Risk: reputation if we ship "verified privacy" while the underlying substrate is beta — same overclaim trap as "benchmark/oracle/authority" framing the prober can't justify.
+
+**Trigger conditions to start:**
+
+1. TACEO Merces or Fhenix CoFHE (or any equivalent) reaches mainnet, AND
+2. At least one paying integration explicitly asks for confidential-amount support, AND
+3. Receipt spec v1 has stabilized enough that adding `amount_commitment` is an additive extension (not a redesign — the JCS-canonical envelope + canonical-on-emit pattern from the 2026-05-12 byte-identical-replay seed makes this clean).
+
+Until all three fire, this is notes-only.
+
+**Strategic positioning:**
+
+The reply to @gm_usi (sent 2026-05-12) closed with *"Curious how confidential transfer changes the receipt path"* — phrased as a question, not a claim. That's the right posture for now. If the conversation continues, the compose-pitch is: TACEO/Fhenix own the privacy layer; TrustBench owns the receipt/audit layer; they fit in the same flow because they're orthogonal concerns. A receipt that anchors a confidential payment is strictly more useful than a confidential payment alone (today's confidential-x402 demos have no audit surface beyond the on-chain commitment, which is by design un-auditable in cleartext terms).
+
+**Tag:** P5-privacy-receipts. Not blocking Phase 5 launch. Worth keeping a watching brief on TACEO + Fhenix mainnet timing. If either ships mainnet before our first paying agent, the trigger-condition #1 is met early and we revisit ordering.
+
+**How to apply:** when picking up Phase 5, scan TACEO and Fhenix release notes for "mainnet." If mainnet has shipped on either, fold this seed into the Phase 5 spec immediately — the privacy-passthrough variant is a ~2-day additive change to the receipt schema and verifier. If mainnet hasn't shipped, this stays notes-only and we revisit at next quarterly seed review.
+
+---
+
+## x402 batch settlement: per-call settle assumption is no longer load-bearing (2026-05-13)
+
+**Source:** @Jnix2007 X post 2026-05-12, with linked blog + docs at `x402.org/writing/x402-b...` and `docs.x402.org/schemes/batch-...`. Headline: x402 ships batch settlement at the protocol level. Agents escrow funds once, then pay with off-chain vouchers (seller-verified signatures, no facilitator or RPC roundtrip per call). Sellers settle batches in a single transaction. Each voucher in a batch can be a different amount. "UpTo" support lets variable costs (inference, compute) fit naturally. Sellers don't have to hold funds — deposits, batched settlements, and refunds are sponsored by the facilitator. Any ERC-20, not just stablecoins. Available in TypeScript + Go today; Python coming.
+
+**What this breaks in our current paywall model:**
+
+`phase4-paywall-design.md` Q3 locked 2026-05-08 with explicit reasoning: *"real-time on-chain settlement on every paid call. Coinbase facilitator handles this via EIP-3009. No batching. Reason: solo-founder constraint (no batching infrastructure)."* The solo-founder constraint was load-bearing because building a batching layer would have been heavy infra to maintain. Now that x402 itself ships batching as a TypeScript library that the facilitator sponsors, the constraint inverts — we'd be a *consumer* of batching, not a builder. The 2026-05-08 decision needs re-litigation when this seed graduates.
+
+**Why this is Phase 5 territory and not immediate Phase 4 work:**
+
+- **Facilitator dependency.** The blog points at `x402.org` — the open facilitator. We use Coinbase CDP facilitator per the 2026-05-11 listing-research decision. Two possibilities: (a) batch settlement is a protocol-level extension both facilitators implement and CDP catches up; (b) only the open x402.org facilitator supports it today, and adopting batching means switching facilitator. Path (b) trades away CDP-mediated Bazaar indexing for batching — that's a load-bearing trade-off that requires its own decision. Until CDP's stance is known, treat batching as facilitator-coupled.
+- **No paying agent has asked.** Strata's reference integration sketch arrives ~2026-05-19; we don't yet know whether their MCP gateway flow batches verifications or settles them per-call. Pre-building batch support before a partner-real demand surfaces is the same trap the Critic flagged on the SKU paywall pivot (building before the partner's shape lands).
+- **Receipt-envelope implications.** Today's receipt has one `paid` block per call with one `tx_hash`. A batch settlement has N vouchers per one tx_hash. The envelope either gains a `voucher` field alongside `paid`, OR adds a per-call attestation referencing the batched-settlement reference. Either way, this is a receipt-spec extension, not a paywall-handler bolt-on.
+
+**Direct relevance to the SKU paywall pivot under consideration (`phase4-sku-paywall-sketch.md`):**
+
+If the SKU pivot is approved, batch settlement could change the cost-of-service math meaningfully on both sides. Strata verifying receipts on every agent call would burn one settle per call at $0.002 — economically unviable above ~10k calls/day. With batch vouchers, Strata escrows once, accumulates vouchers, and settles batches. That's the difference between `/verify` being viable at high volume vs. not. "UpTo" pricing on `/score-provider` lets a single call against N URLs be priced as a range without breaking the wire shape.
+
+If the SKU pivot is NOT approved, batch settlement is still interesting for `/route`'s two-payment shape. Current design: agent makes two separate x402 transactions per `/route` call (TrustBench fee + provider fee). With batching, both payments become vouchers drawn from one escrow. Same non-custodial guarantee, half the on-chain footprint per agent.
+
+**Trigger conditions to act:**
+
+1. Coinbase CDP facilitator either supports batch settlement OR a path to migration is clearly available, AND
+2. At least one paying integration (Strata is the leading candidate) surfaces batch-style consumption (high-volume per-call verifications or scoring), AND
+3. Receipt spec v1 has had ≥30 days of stable production use so the envelope extension is additive (per the byte-identical-replay seed pattern).
+
+Until all three fire, this is notes-only.
+
+**Watch list (where to look for trigger-1 movement):**
+
+- `docs.cdp.coinbase.com/x402/` for batch settlement docs landing on CDP side.
+- @Jnix2007 + the x402.org blog for further protocol-extension shipping.
+- Any post from a CDP team member explicitly addressing batching support.
+- The `@coinbase/x402` npm package changelog for batching API surfaces.
+
+**How to apply:** when picking up Phase 5, scan the watch list. If CDP has shipped batching support, fold this seed into the Phase 5 paywall extension spec immediately — both for SKU endpoints (high-volume verification/scoring) and for `/route` (collapse two payments to one escrow). If CDP hasn't shipped, decision (a)-vs-(b) above becomes the load-bearing Phase 5 facilitator question. If the SKU paywall pivot has happened in the interim, the cost-of-service recalculation gets folded into pricing-tier review at that point too.
+
+**Tag:** P5-batch-settlement. Watch list above; revisit at next quarterly seed review or immediately on a CDP-side batching announcement.
+
+---
+
 ## How to apply this file
 
 - When Phase 5 work begins, this file becomes the design seed for the actual Phase 5 spec docs (analogous to `phase3-x402-construction.md`, `phase3-receipt-generator.md`, etc. for Phase 3).

@@ -282,23 +282,215 @@ Strata replied with four corrections to §3 and §7. The locked annotation shape
 
 **Open after 2026-05-11 reply:**
 
-- `actionable_flags` vs. `flags` field name (small, raised in reply).
-- Move to §8 step 3 (tiers) pending Strata's response.
+- ~~`actionable_flags` vs. `flags` field name (small, raised in reply).~~ ✓ Resolved 2026-05-12: Strata confirmed `actionable_flags` ("ages better, semantically honest about filtering, no versioning note needed when WHOIS lands").
+- ~~Move to §8 step 3 (tiers) pending Strata's response.~~ ✓ Unblocked 2026-05-12.
+
+**New 2026-05-12 (Strata "ship them" reply):**
+
+- Strata offered to mirror the `payment_endpoint` nested shape in a future `/x402/verify` response revision. If that revision lands, the receipt annotation `payment_endpoint` block stays exactly as locked above and the names match on both sides.
+- Sample URL in 2026-05-11 reply (`pay.example.com/api/payment`) was schema illustration; missing `https://` scheme was not a live-call issue. Acknowledged in 2026-05-12 reply.
+- `trust_signals` Ed25519-wraps-annotation pattern endorsed: *"Downstream verifiers get cryptographic proof that TrustBench observed that specific Strata response at captured_at, which is stronger than a reference URL alone."*
+
+---
+
+## 9. Tiers (TrustBench-side locked 2026-05-12; Strata acceptance pending)
+
+Step 3 of §8 opened with Strata's "ship them" reply 2026-05-12. TrustBench-side decisions locked same day, sent to Strata in `strata-reply-2026-05-12.md`. Awaiting Strata acceptance or pushback.
+
+**Locked v1 pricing (sent to Strata 2026-05-12):**
+
+| Endpoint | List price | TrustBench × Strata rate | Notes |
+|---|---|---|---|
+| `GET /receipts/:id` | $0.0005 | $0.0005 (list) | Cache-heavy. |
+| `POST /verify` | $0.002 | $0.002 (list) | Compute + RPC. |
+| `POST /score-provider` | $0.005 | **Free (full reciprocal)** | Scoped to score-provider only. Data-exchange offset: Strata's `/x402/verify` data flows into TrustBench receipts as `trust_signals`; TrustBench liveness telemetry flows into Strata's `runtime_score`. Re-quote clause covers volume drift on either side. |
+| `POST /audit-replay` | $0.01 | $0.01 (list) | Full chain reconciliation. |
+| `POST /compliance-export` | **$1.00** (starting) | $1.00 (list) | Starting midpoint of original $0.50-$2.00 range. Calibrates against first one or two real bundle requests; moves up if bundles are heavier than expected, down if lighter. |
+
+All paid in atomic-unit USDC on Base (confirmed §6 resolved-against-Strata). No subscriptions; pure pay-per-call.
+
+**§6 re-quote clause (load-bearing for the reciprocal arrangement):** If real volume produces a clear signal — score-provider traffic balloons, compliance-export bundles end up heavier or lighter than expected, or the data-exchange balance shifts — either side can call for a re-quote. Annual at minimum, sooner if real volume warrants. Putting this in any letter of agreement protects both sides.
+
+**Why scoped reciprocal (not all-tiers-free):** Other tiers are economically separate from the data-exchange flow. score-provider is the specific endpoint where reciprocal value is happening; the other endpoints carry their own cost-of-service that has nothing to do with Strata's `/x402/verify` data. Bundling them into the reciprocal would give away revenue lines that don't have offsetting value.
+
+**Why not 50% discount on score-provider instead:** 50% discount is operationally simpler (predictable revenue line) but loses the partnership framing. Given the data flow IS reciprocal and marginal cost on score-provider is near-zero at expected volumes, full reciprocal is honest. The re-quote clause handles the small-but-nonzero scenario where Strata's traffic gets weird.
 
 ---
 
 ## 8. Concrete next steps
 
-If the shape above looks right to you:
+Original next-steps sequence kept here as historical record. Steps 1-3 closed; step 4 now expanded in detail in § 10 below.
 
-1. **You send the `/x402/verify` schema** at your convenience.
-2. **I take a first cut at the trust-signal annotation field names** in the receipt envelope, matching whatever your schema uses where it makes sense.
-3. **We agree on tiers** — either the starting points in § 6 or whatever revisions Strata's economics suggest.
-4. **A reference integration ships** — probably a single test agent calling Strata's `/x402/verify`, then routing through TrustBench's `/route`, with a real signed receipt that includes the `trust_signals` annotation pointing back at Strata.
-5. **Public artifact** — the resulting receipt URL is shareable (immutable, cache-friendly) and can be referenced by either of us as evidence the integration works end-to-end.
-
-Realistic timeline on our side: ~1 week from your schema landing to a working reference receipt. Shorter if your `/x402/verify` is already plug-and-play; longer if we want to build out the full bidirectional data feed before declaring done.
-
-If something in here feels off or you'd want a different shape, push back and we'll iterate.
+1. ~~**You send the `/x402/verify` schema** at your convenience.~~ ✓ Closed 2026-05-11 (plain JSON, URL-cached, no artifact-level signing).
+2. ~~**I take a first cut at the trust-signal annotation field names**.~~ ✓ Closed 2026-05-11 (locked annotation shape in § 3 update).
+3. ~~**We agree on tiers.**~~ ✓ Closed 2026-05-12 (full reciprocal score-provider; $1.00 compliance-export; everything else at list — see § 9).
+4. **Reference integration ships** — expanded into a concrete spec at § 10. Target ~1 week from tier lock (~2026-05-19).
+5. **Public artifact** — covered in § 10.5 (the resulting receipt URL).
 
 — Johan
+
+---
+
+## 10. Reference integration spec (step 4 detail)
+
+**Status:** TrustBench-side spec. Sent 2026-05-13 after tier lock. Anchors the reference agent + the exact API surfaces it exercises so we're not iterating mid-build.
+
+### 10.1 Goal
+
+A single test agent demonstrates the end-to-end flow in § 1:
+- Calls Strata's `/x402/verify` against a merchant URL before paying
+- Captures the `trust_signals` payload (the locked shape in § 3)
+- Routes through TrustBench, paying the merchant via x402
+- Receives a signed receipt that carries Strata's signals as the first `trust_signals[]` entry
+- The receipt is publicly viewable, byte-identical-replayable, and verifiable offline against TrustBench's published Ed25519 key
+
+Success criterion: the receipt URL is a single shareable artifact that, when fetched, demonstrates the integration to any third party (including a Show HN audience) without either side being online.
+
+### 10.2 End-to-end flow
+
+```
+[Reference Agent]
+   │
+   │ 1. Reads target merchant URL from config
+   │    (concrete choice in § 10.5)
+   │
+   │ 2. GET https://usestrata.dev/api/v1/x402/verify?url=<merchant>
+   ▼
+[Strata /x402/verify]
+   │
+   │ 2a. Returns the locked shape:
+   │     { trusted, security_score, risk_level, payment_endpoint,
+   │       actionable_flags, captured_at, ref }
+   │
+   ▼
+[Reference Agent]
+   │
+   │ 3. Decides to proceed (test path always proceeds)
+   │
+   │ 4. POST https://trustbench.io/route
+   │      Headers: X-Trust-Signals: <base64url-JSON of the
+   │               Strata payload, exact bytes from step 2a>
+   │      Body:    { capability: "data", max_price: "10000",
+   │                 payer_address: <agent EVM addr> }
+   ▼
+[TrustBench /route — quote]
+   │
+   │ 5. Returns 402 with payment_required (TrustBench's $0.005
+   │    routing fee + the upstream merchant's payment_required
+   │    nested under next_step). The 402 body carries the
+   │    Strata trust_signals payload echoed in extensions.bazaar
+   │    so an x402-aware client can see it before paying.
+   │
+   ▼
+[Reference Agent]
+   │
+   │ 6. Signs the routing fee X-PAYMENT and POSTs back
+   │
+   ▼
+[TrustBench /route — settle]
+   │
+   │ 7. Verifies the X-PAYMENT, settles via CDP facilitator,
+   │    issues a signed routing receipt
+   │      receipt.trust_signals[0] = the Strata payload
+   │        from the X-Trust-Signals header (verbatim,
+   │        same bytes captured_at as step 2a)
+   │      signature.alg = ed25519
+   │
+   │ 8. Returns 200 with:
+   │      - the full signed receipt JSON
+   │      - the receipt_id + audit_url
+   │      - the next_step payment requirements for the
+   │        upstream merchant
+   │
+   ▼
+[Reference Agent]
+   │
+   │ 9. Signs the merchant payment, POSTs to merchant
+   │
+   ▼
+[Merchant — currently CoinMarketCap, see § 10.5]
+   │
+   │ 10. Returns 200 with the merchant response
+   │
+   ▼
+[Public artifact]
+   │ https://trustbench.io/receipts/<receipt_id>
+   │ — immutable, signed, verifiable offline
+   │ — carries trust_signals[0] = Strata's payload from step 2a
+```
+
+The whole flow is ~7 HTTPS calls. Real cost: $0.005 TrustBench routing fee + the merchant's price (CMC is $0.0001 today). Total: ~$0.0051 of probe-wallet USDC per reference run.
+
+### 10.3 Reference agent shape
+
+Single TypeScript file. ~120 lines. Will live at `examples/strata-integration/reference-agent.ts` in the public TrustBench GitHub repo (or as a separate `trustbench-strata-reference` repo if you'd prefer it not be in the main codebase — happy to do either; default to main repo so the public artifact has one canonical URL).
+
+Dependencies: `viem`, `@coinbase/x402`, `@trustbench/verify-receipt` (npm v0.1.0+). No Strata-specific SDK needed — Strata's `/x402/verify` is plain JSON over HTTPS so a single `fetch` call works.
+
+The script accepts environment variables for the agent wallet PK and the merchant URL, prints each step's status to stdout, and ends by logging the public receipt URL. Verifiable end-to-end with no TrustBench round-trip via the npm verifier.
+
+### 10.4 Code changes needed on TrustBench side
+
+Two small additive changes; both already designed, both fit in v0.1.1 of the paywall:
+
+**Change 1 — `/route` accepts the `X-Trust-Signals` request header.** TrustBench parses the header (base64url-encoded JSON, max 4 KB), validates the shape against the locked § 3 schema, attaches it as `receipt.trust_signals[0]` in the issued receipt. If the header is malformed or oversized, returns 400 with a clear error — no silent drop, because the agent paid for the call to include the signals. Estimated: 2 hours including unit tests + smoke regression on the existing `/route` no-header path.
+
+**Change 2 — Receipt-generator accepts an optional `trust_signals` field.** The receipt envelope already has the field designed (§ 3 locked shape); the generator just needs to read it from the route-handler hand-off, JCS-canonicalize it inside the signed body, and surface it in both the JSON and HTML receipt renders. Estimated: 1 hour.
+
+Both changes preserve byte-identical replay (the trust_signals header is part of the request hash on the idempotency-key lookup, so replays with different signals return 409 conflict per the existing pattern). No new endpoint, no new signing key, no new public surface — the public artifact is the same `/receipts/:id` URL, just with the new field populated when present.
+
+### 10.4.5 Idempotency-hash + signature semantics (pinned to avoid drift mid-build)
+
+Three explicit contracts so neither side has to guess what the wire shape commits to:
+
+1. **Request-hash inclusion.** The `X-Trust-Signals` header IS included in the request hash that drives the idempotency-key lookup. A replay with the same idempotency key but different (or absent) signals returns 409 Conflict, matching the existing `/route` body-hash-mismatch behavior. This prevents an agent from quietly swapping in fresh signals on a replay and getting a stale-payment receipt with new signals embedded.
+
+2. **Signature coverage.** The captured trust_signals payload IS inside the signed `receipt` body. The existing Ed25519 over RFC 8785 JCS-canonical bytes covers it — no separate signing key, no second signature. A verifier who passes signature verification has cryptographic proof TrustBench observed exactly those signal bytes at issued_at.
+
+3. **Replay returns original signals, not fresh.** A successful replay within the 24h idempotency window returns the *cached* receipt with the *original* signals embedded — not a refreshed call to Strata. This is the right semantics: the receipt attests "this is what Strata said at the captured_at moment of the original call," not "this is what Strata is saying right now." If an agent wants fresh signals, they call Strata again and use a fresh idempotency key.
+
+These three together make the wire shape replayable in a way Strata-aware verifiers can rely on: the signals an auditor reads on the receipt are the signals the agent paid based on, not signals fetched later.
+
+### 10.5 Merchant choice (honest about current registry state)
+
+The reference points at a real, currently-live x402 merchant on Base so the on-chain anchor in the receipt is real and the third-party verifier passes `--check-chain` cleanly.
+
+**First-pick merchant: CoinMarketCap's x402 dex/search endpoint at `https://pro-api.coinmarketcap.com/x402/v1/dex/search`.** Promoted to `x402_verified=true` in the TrustBench registry 2026-05-12 after live-probe confirmation. Charges $0.0001 per call. We hold no relationship with CMC; the registry promotion is empirical, not curated.
+
+**Fallback merchant: any other live x402 endpoint on Base that we can probe-confirm same-day.** Specifically Exa Search (`api.exa.ai/search`, $0.007/call) or Browserbase's session-create endpoint, both observed live in CDP discovery on 2026-05-13. If CMC's endpoint is misbehaving on reference-run day, we point at the fallback and the agent code's `MERCHANT_URL` env-var swap is the only change.
+
+**Honest framing we'd ask be preserved if Strata cites the reference publicly:** the merchant choice is "first verified-live x402 endpoint that returns a clean 402 on probe day," not a curated partnership. The reference demonstrates the *integration pattern*, not an endorsement of any particular merchant.
+
+### 10.6 Artifacts produced (what Strata can reference)
+
+The artifact this reference produces is not "a working API call." It's a publicly-verifiable, immutable, on-chain-anchored proof that Strata's pre-call posture was observed at the moment of payment and signed by TrustBench over JCS-canonical bytes with an Ed25519 key whose public half is at a stable, named URL. That artifact is the specific thing thin routing primitives can't produce without the JCS + Ed25519 + on-chain-anchor stack we already have shipping. The Show HN angle, when you're ready for it, is the artifact's *properties* — replayable, verifiable offline, third-party-cited via the npm verifier — not the bare existence of the integration. We mention this here because §10's implementation detail can read like routine plumbing; the artifact is the part that's hard for anyone else to replicate.
+
+When the reference run completes, three concrete things exist:
+
+1. **The receipt URL.** `https://trustbench.io/receipts/<id>` — immutable, signed, browser-renders HTML, JSON content-negotiated, Cache-Control immutable for 24h. This is the one URL we'd point to in any Show HN or partnership announcement.
+2. **The agent source code.** A public GitHub repo path. Verifiable end-to-end by anyone with a Base wallet and ~$0.01 USDC.
+3. **A short README at the same repo path.** Documents what the reference proves, the verification command (`npx @trustbench/verify-receipt <id> --check-chain`), and a one-paragraph note about the Strata × TrustBench composition (trust scoring before, signed receipt after).
+
+We can put any of these behind a "Strata × TrustBench reference integration" headline on either of our websites; happy to defer the public framing to whatever works for your Show HN moment.
+
+### 10.7 Timeline
+
+Per the 2026-05-12 commitment ("about a week on our side from when tiers lock"). Tiers locked 2026-05-12 PM.
+
+**Target window: receipt URL by Tuesday 2026-05-19.** Implementation is ~2 days of focused work (Changes 1+2 + reference agent script) plus buffer for wire-shape iteration if anything in §10.8 below surfaces a change. Anything from 2026-05-17 to 2026-05-20 is realistic; I'll send the receipt URL the moment it's confirmed verifying clean against `npx @trustbench/verify-receipt <id> --check-chain` rather than waiting for a specific day to be done.
+
+If anything in this spec needs adjustment from your side, the sooner I know, the sooner I can lock the implementation. Specifically the open questions in §10.8 below.
+
+### 10.8 Open questions for Strata
+
+A. **Do you want the reference repo public or unlisted until Show HN?** Default: public from day one, since `@trustbench/verify-receipt` is already public and the receipt URL would be discoverable anyway. Easy to flip if you'd prefer otherwise.
+
+B. **Is there a Strata-side test merchant URL you'd prefer over CMC?** Sometimes integration partners have a known-live x402 endpoint they want shown specifically (their own demo, a partner's endpoint, etc.). Default: CMC as in § 10.5. Swap-in by env var if you have a preferred URL.
+
+C. **`captured_at` clock-skew tolerance.** Strata's `captured_at` will be a few hundred ms before the TrustBench `receipt.issued_at` in normal operation. Anything over ~30 seconds would suggest the agent cached the Strata response across a long pause. Should TrustBench reject signals with `captured_at` more than (say) 60 seconds old, or accept them with a `signals_age_ms` note in the receipt? Default: reject older than 60 seconds, error code clear. Easy to relax.
+
+D. **Strata-signed score artifact in the future.** § 3 noted that Strata's `runtime_score` is currently plain JSON (no artifact-level signing). If Strata adds signing to `/x402/verify` later, the receipt annotation can carry the signed bytes verbatim (we've already noted this in § 3). No reference-integration impact today; flagging for future-proofing.
+
+E. **Show HN coordination.** If you're aiming for a specific Show HN date, knowing it now lets me land the reference receipt with enough buffer that the artifact URL is rock-solid before your moment. Default: ship by 2026-05-19, no specific Show HN coupling; let me know if your timing is firmer.
+
+If any of these need fast turnaround, please flag in the next reply and I'll prioritize accordingly. None block starting the implementation on our side — Changes 1 and 2 are written against the locked § 3 shape regardless.

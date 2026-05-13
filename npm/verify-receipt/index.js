@@ -46,7 +46,12 @@ const BASE_USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 // First 4 bytes of keccak256("transferWithAuthorization(address,address,uint256,uint256,uint256,bytes32,uint8,bytes32,bytes32)")
 const TRANSFER_WITH_AUTH_SELECTOR = '0xe3ee160e';
 
-const RCPT_ID_PATTERN = /^rcpt_[0-9A-HJKMNP-TV-Z]{26}$/;
+// Two receipt-id prefixes are recognized:
+//   - rcpt_   Phase 3 settlement receipts (envelope shape: receipt.settlement.{tx_hash, block_number, …})
+//   - rrcpt_  Phase 4 paywall routing receipts (envelope shape: receipt.paid.{tx_hash, …};
+//             block_number is sometimes absent — handled gracefully by verifyOnChain)
+// Both prefixes route to the same /receipts/:id endpoint on the issuer host.
+const RCPT_ID_PATTERN = /^rr?cpt_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 // ---------------------------------------------------------------------------
 // JCS canonicalization (RFC 8785-style)
@@ -267,8 +272,16 @@ export async function verifyOnChain(envelope, rpcUrl) {
     );
   }
 
-  const settlement = envelope?.receipt?.settlement;
-  if (!settlement) return { ok: false, reason: 'receipt has no settlement block' };
+  // Two envelope shapes carry the on-chain settlement reference under
+  // different field names:
+  //   - Phase 3 settlement receipts (rcpt_…):       receipt.settlement
+  //   - Phase 4 paywall routing receipts (rrcpt_…): receipt.paid
+  // Probe both; whichever is present is the settlement data. Field SHAPE is
+  // the same (chain, tx_hash, payer_address, payee_address, amount_atomic);
+  // only block_number is sometimes missing on the paywall path (handled
+  // gracefully below by the optional-block_number branch).
+  const settlement = envelope?.receipt?.settlement || envelope?.receipt?.paid;
+  if (!settlement) return { ok: false, reason: 'receipt has neither receipt.settlement nor receipt.paid' };
   if (settlement.chain !== 'base') {
     return {
       ok: false,

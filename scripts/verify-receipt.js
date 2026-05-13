@@ -11,12 +11,18 @@
 //      key fetched from signature.public_key_url
 //
 // Usage:
-//   node scripts/verify-receipt.js <path-to-json> [base-url] [--pubkey-url <url>]
-//   node scripts/verify-receipt.js <rcpt_...id>   [base-url] [--pubkey-url <url>]
+//   node scripts/verify-receipt.js <path-to-json>     [base-url] [--pubkey-url <url>]
+//   node scripts/verify-receipt.js <rcpt_...id>       [base-url] [--pubkey-url <url>]
+//   node scripts/verify-receipt.js <rrcpt_...id>      [base-url] [--pubkey-url <url>]
+//
+// Two receipt-id prefixes are accepted:
+//   - rcpt_   Phase 3 settlement receipts (envelope: receipt.settlement.*)
+//   - rrcpt_  Phase 4 paywall routing receipts (envelope: receipt.paid.*)
 //
 // Examples:
 //   node scripts/verify-receipt.js ./my-receipt.json
 //   node scripts/verify-receipt.js rcpt_01HV3K8M5C9X2ZBFYR4QWP8ND1
+//   node scripts/verify-receipt.js rrcpt_01KRGKSZACB4ECRPEQY1VC0F3N
 //   node scripts/verify-receipt.js rcpt_01HV3K8M5C9X2ZBFYR4QWP8ND1 \
 //       https://trustbench.io
 //
@@ -87,8 +93,16 @@ async function loadEnvelope(arg, baseUrl) {
     return JSON.parse(fs.readFileSync(absPath, 'utf8'));
   }
 
-  // Otherwise treat as a receipt id (rcpt_<26-char-Crockford>)
-  if (!/^rcpt_[0-9A-HJKMNP-TV-Z]{26}$/.test(arg)) {
+  // Otherwise treat as a receipt id. Two prefixes are valid:
+  //   - rcpt_<26-char-Crockford>   Phase 3 settlement receipts (envelope shape:
+  //                                receipt.settlement.{tx_hash, block_number, …})
+  //   - rrcpt_<26-char-Crockford>  Phase 4 paywall routing receipts (envelope
+  //                                shape: receipt.paid.{tx_hash, …}; no
+  //                                block_number per paywall-handler.ts:1095)
+  // The verifier branches on the field name at chain-check time (see
+  // verifyOnChain), so both prefixes route to the same /receipts/:id endpoint
+  // and the resulting envelope dictates which settlement-data field is read.
+  if (!/^rr?cpt_[0-9A-HJKMNP-TV-Z]{26}$/.test(arg)) {
     throw new Error(`Argument is neither a .json file path nor a valid receipt id: ${arg}`);
   }
 
@@ -191,8 +205,16 @@ async function verifyOnChain(envelope, rpcUrl) {
     );
   }
 
-  const settlement = envelope.receipt.settlement;
-  if (!settlement) return { ok: false, reason: 'receipt has no settlement block' };
+  // Two envelope shapes carry the on-chain settlement reference under
+  // different field names:
+  //   - Phase 3 settlement receipts (rcpt_…): receipt.settlement
+  //   - Phase 4 paywall routing receipts (rrcpt_…): receipt.paid
+  // Probe both; whichever exists is the settlement data. The field SHAPE is
+  // the same (chain, tx_hash, payer_address, payee_address, amount_atomic);
+  // only block_number is sometimes missing on the paywall path (handled
+  // gracefully below at the optional-block_number branch).
+  const settlement = envelope.receipt.settlement || envelope.receipt.paid;
+  if (!settlement) return { ok: false, reason: 'receipt has neither receipt.settlement nor receipt.paid' };
   if (settlement.chain !== 'base') {
     // Phase 3 is Base-only. Phase 4 P4-3 will add Solana — this branch should
     // grow at that time. For now, refuse rather than guess.

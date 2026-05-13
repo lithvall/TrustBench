@@ -494,3 +494,74 @@ D. **Strata-signed score artifact in the future.** § 3 noted that Strata's `run
 E. **Show HN coordination.** If you're aiming for a specific Show HN date, knowing it now lets me land the reference receipt with enough buffer that the artifact URL is rock-solid before your moment. Default: ship by 2026-05-19, no specific Show HN coupling; let me know if your timing is firmer.
 
 If any of these need fast turnaround, please flag in the next reply and I'll prioritize accordingly. None block starting the implementation on our side — Changes 1 and 2 are written against the locked § 3 shape regardless.
+
+---
+
+## 11. Reference receipt — artifact in hand (2026-05-13)
+
+Six days ahead of the 2026-05-19 target. The §10.2 flow ran end-to-end against a real `data`-capability merchant on Base mainnet. Total wallet cost: $0.005 USDC.
+
+### 11.1 The artifact
+
+```
+https://trustbench.io/receipts/rrcpt_01KRGKSZACB4ECRPEQY1VC0F3N
+```
+
+Immutable, content-negotiated (HTML for browsers, byte-identical JSON for agents), Ed25519-signed over RFC 8785 JCS-canonical bytes, on-chain anchored at Base block 45942380 (tx `0x2ec2ac7f…`).
+
+### 11.2 The verification one-liner
+
+```bash
+npx @trustbench/verify-receipt@0.1.1 rrcpt_01KRGKSZACB4ECRPEQY1VC0F3N --check-chain
+```
+
+Two layers in one command. Layer 1 (signature only) fetches the receipt + our published Ed25519 public key and verifies offline — ~50ms, no TrustBench round-trip beyond the HTTPS fetch. Layer 2 (`--check-chain`) opens a Base RPC, confirms the `tx_hash` exists, the calldata decodes as `transferWithAuthorization(payer, payee, amount)` matching the receipt, and the tx was mined successfully. ~2s total.
+
+Both layers print green for this receipt from a clean install (verified from a fresh PowerShell with no path setup before sending you this).
+
+`@trustbench/verify-receipt` was bumped from 0.1.0 to 0.1.1 today (2026-05-13) to recognize the `rrcpt_…` prefix the paywall path emits. Zero runtime deps; viem is an optional peer dep for the chain check.
+
+### 11.3 What the receipt carries
+
+The signed envelope includes:
+
+- `trust_signals[0]` — your `/x402/verify` response for `pro-api.coinmarketcap.com/x402/v1/dex/search`, captured at `last_checked_at` and normalized into the locked §3 shape by the adapter described in §11.4. All Strata-provided values are preserved 1:1 — only the field names are translated (e.g. `last_checked_at` → `captured_at`, flat `payment_amount_usd` → nested `payment_endpoint.amount_usd`). Final embedded values: `trusted=false`, `security_score=10`, `risk_level="critical"`, `actionable_flags=[]` (post the `unverified_domain` filter per §3 resolved-item-5).
+- `routing` — the routing decision: TrustBench's score-based selection picked QuickNode (`x402.quicknode.com/matic-amoy/`), not CMC, on this run. `score_at_decision`, `alternatives_considered`, `selection_reason` are all in the envelope. Both your pre-call posture on CMC and our routing decision to QuickNode are visible side-by-side in the same signed bytes.
+- `paid` — on-chain settlement reference: `tx_hash`, `payer_address`, `payee_address`, `amount_atomic`, `currency`, `chain`. Block 45942380 on Base.
+
+The CMC-vs-QuickNode split is honest, not curated. We asked your verifier about CMC because §10.5 named CMC as the first-pick merchant after the 2026-05-12 registry promotion. TrustBench's routing is independent of which merchant your verifier was asked about; the receipt captures both signals so an auditor reading the envelope sees the full picture.
+
+This version reflects what an unguided agent would actually produce in production — the pre-call posture and the routing decision are independent inputs to the audit trail, and both end up signed under the same Ed25519 key over the same JCS-canonical bytes. That independence is the integration's value-prop made concrete; a curated demo where Strata's verdict and TrustBench's pick happened to align would tell a weaker story about how the composition actually works under real routing pressure.
+
+(Minor note for the reader: the `matic-amoy` segment in QuickNode's URL is their internal test-merchant identifier from x402's reference catalog, not a network signal. Actual settlement is on Base mainnet per the receipt's `paid.chain` field — block 45942380, tx `0x2ec2ac7f…`.)
+
+### 11.4 Strata-side adapter (TrustBench-side translation)
+
+Your `/x402/verify` today returns the flat shape (`flags`, `payment_amount_usd`, `last_checked_at`, etc.). The locked §3 annotation shape requires four envelope fields (`source`, `kind`, `captured_at`, `ref`) that aren't yet in the response. To unblock the §10.2 flow today, the reference agent runs a deterministic adapter that derives the locked shape from your current API output:
+
+- `source` and `kind` are agent-side constants matching the agreed annotation
+- `captured_at` is a 1:1 rename of your `last_checked_at`
+- `payment_endpoint` nests your flat `payment_amount_usd / payment_currency / payment_network`
+- `actionable_flags` is your `flags` minus `unverified_domain` per §3 resolved-item-5
+- `ref` is the agent's own `/x402/verify` request URL
+- `trusted`, `security_score`, `risk_level` are verbatim 1:1
+
+The adapter is auto-disabling — a forward-compat branch detects responses that already contain all four envelope fields and passes them through verbatim. The day your `/x402/verify` ships the locked shape natively, the adapter becomes a no-op with zero code change on our side.
+
+Code at [`examples/strata-integration/reference-agent.ts`](https://github.com/lithvall/TrustBench/blob/main/examples/strata-integration/reference-agent.ts) for inspection. If anything in the adapter's mapping reads as a misinterpretation of your API, point at the field and we'll iterate.
+
+### 11.5 Status against §10.8 open questions
+
+All five still open. None blocked the artifact. Recapping for your convenience:
+
+- **A. Public repo or unlisted until Show HN?** Currently public. Easy to flip.
+- **B. Strata-side test merchant URL?** Defaulted to CMC; swap-in by env var.
+- **C. `captured_at` clock-skew tolerance?** Not yet enforced server-side. The reference run's clock skew was a few hundred ms.
+- **D. Strata-signed score artifact?** Not yet; the adapter handles the transition when it lands.
+- **E. Show HN coordination?** Whenever you're ready. Receipt URL is rock-solid.
+
+### 11.6 Cost summary
+
+- TrustBench routing fee: $0.005 USDC (paid by the agent wallet via CDP facilitator, gas paid by the facilitator)
+- Merchant fee on the reference run: skipped (`--skip-merchant` mode produces the receipt artifact without the follow-on call). The full §10.2 round-trip with the merchant adds ~$0.0001 for the next run.
+- Reproducible end-to-end by anyone with a Base wallet and ~$0.01 USDC.

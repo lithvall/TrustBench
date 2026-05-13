@@ -99,6 +99,27 @@ For any change touching one of these:
 - Smoke-test against the local mock provider (`scripts/mock-provider.ts`) before declaring done.
 - After shipping, add an entry to `lessons.md` describing what was tricky and what to watch for next time.
 
+**Critic pass on high-risk diffs (added 2026-05-10).** Before shipping any high-risk-surface diff, ALSO produce a Critic-pass output using `prompts/critic.md`. The pass must produce:
+- Three rejection reasons a hostile reviewer would give (specific, not vague pessimism)
+- The strongest counter-thesis (case for the opposite approach)
+- A named wedge competitor (real or hypothetical) who would beat this
+- The hidden assumption that, if wrong, breaks the whole thesis
+- A kill criterion: "if X is observed in Y weeks, abandon"
+- Verdict: `strong-reject` / `weak-reject` / `acceptable` / `endorsed-after-stress-test`
+
+If verdict is `strong-reject`, stop and ask Johan before continuing. Critic output goes in the PR description, the commit body, or as a comment block at the top of the primary changed file. This step is non-negotiable for high-risk surfaces — it's what catches the "Dreamer + Main groupthink" failure mode that pure self-review misses.
+
+**Decision Journal capture + callback (added 2026-05-11).** Every non-trivial decision (phase boundaries, pricing, architecture, partnership commitments, kill calls, strategic pivots) gets a Decision Journal entry in `decisions.md` using the new format (see the file's § Format and `prompts/decision-journal.md`). Each entry includes:
+- The decision (one sentence, verbatim framing where possible)
+- The load-bearing assumption (the one thing that, if wrong, makes the decision wrong)
+- The leading indicator (observable signal that will tell us right/wrong within 90 days)
+- A 90-day check_back_date
+- Status: open
+
+During weekly Monday review, scan `decisions.md` for entries where `status: open` AND `check_back_date ≤ today`. Grade each via `prompts/decision-journal.md` Mode B. Disproven decisions ALWAYS get a `lessons.md` entry describing the assumption-class failure — that's where calibration learning compounds. Historical entries (before 2026-05-11) are NOT retrofitted; they remain frozen context.
+
+This is non-negotiable for the same reason the Critic pass is: it closes the loop between decisions and calibration. Without it, the same assumption-class mistakes recur silently.
+
 **Pre-fill style**: When a response involves code changes, start with the Plan section already structured so the user can interrupt or redirect cleanly before any disk writes.
 
 **Autonomous Bug Fixing**
@@ -118,24 +139,59 @@ For complex tasks, internally apply Anthropic's 6-element structure: (1) Role/Co
 - Scouting partnerships on X — agent builders, x402 providers, MCP middleware authors, complementary infrastructure
 - Monitoring conversation around x402, p402, AP2, MPP, agent payments, agentic infrastructure
 - Pulling in fresh context the user can hand back to Claude (e.g. "Grok found this builder, here's the thread, draft an outreach reply") — but the reply itself, the code, and any decision is Claude's responsibility
-## Phased plan (mirrors `TrustBench-strategy.md`)
+## Phased plan (current state as of 2026-05-10)
 
-- **Phase 0 — Reframe public positioning (this week, ~1 hour).** Site copy + README go from "benchmark/rankings/scores" to "registry + live telemetry, router coming." Add a methodology page that names the probe behavior honestly. Cheaper now (no public users) than after launch.
-- **Phase 1 — Stabilize the foundation (this week).** Percentile helper fix in `prober.ts` is **done** (linear interpolation in place). Ed25519 scorecard signing is **done** — `scorer.ts` signs with Ed25519 when `TRUSTBENCH_SIGNING_PRIVATE_KEY` + `TRUSTBENCH_SIGNING_PUBLIC_KEY` are set, falls back to HMAC-SHA256 with a boot-time warning when they are not. Public key served at `/.well-known/trustbench-pubkey`; reference verifier in `scripts/verify-scorecard.js`. Still pending in Phase 1: generate the production keypair, paste it into Railway env vars, and confirm `/rankings`/`/route`/`/rankings/paid` return current data with `signature_alg: ed25519`.
-- **Phase 2 — Validate before building — DONE (2026-04-30).** Three real conversations completed (r/AI_Agents x3 + @InfopunksHQ X thread) plus ≥1 written expression of interest. Verbatim quotes in `# Phase 2 — Builder Conversations.md`; competitive map in `# Competition Analysis — Recent Rev.md`. Key findings:
-  - The **1–3% routing spread was explicitly rejected** by builders (incl. SpendGate's founder: "a big no no for a lot of people"). Flat-per-tx or subscription is the validated direction.
-  - Top **unprompted** pain points: idempotency (duplicate pay-retry under partial timeouts — "one missing request fingerprint and your agent buys the tool three times"), hard spend caps, signed receipts, queryable audit trail.
-  - @InfopunksHQ gave a concrete receipt spec — *signed receipt + call metadata + settlement reference + replayable audit path* — and is a likely first design partner. Their trust layer (intelligence brain) is complementary to TrustBench's router (payment plumbing); the two are partners, not competitors.
-  - Competitive lane is open: **lightweight, non-custodial, MCP-native plumbing** — Infopunks (intelligence), SpendGate (proxy/governance), AgentlyHQ (framework) all occupy adjacent but different slices.
-- **Phase 3 — Minimal non-custodial router for one capability (2–3 weeks).** Single endpoint `/route?capability=search&max_price=0.01`. Agent submits capability request + payment authorization → TrustBench constructs x402 tx → agent signs → TrustBench executes routing using live scores + real paid probing ($10–20/mo for actual API calls) → returns result + Ed25519-signed receipt. One capability, 2–3 real providers, end-to-end. Non-custodial throughout. **Phase 2 validation requires four primitives to lead this phase rather than be deferred to Phase 4:**
-  1. **Idempotency keys on `/route`** so partial-timeout retries can't double-charge.
-  2. **Hard spend caps** enforced server-side per agent + per call.
-  3. **Ed25519-signed receipts** containing call metadata + settlement reference (tx hash + chain).
-  4. **`/receipts/:id` queryable audit endpoint** so agents can replay the trail.
+> Original phased plan from Phase 0–5 era lives in `TrustBench-strategy.md` (now header-marked SUPERSEDED-IN-PART). The 2026-05-07 partnership-day reframe (component-in-stack with x402-paywalled API monetization, see `partnership-day-record-2026-05-07.md`) shifted Phase 4's shape from "policy-firewall subscription" to "paywalled API endpoints + listing sprint." Phase 5 stays directionally the same with an AP2-compatibility addendum.
 
-  Pricing: flat per-tx fee (e.g. $0.001–$0.01 per routed call), not a percentage spread. Keep @InfopunksHQ in the loop on the receipt schema before locking it in.
-- **Phase 4 — Layer on revenue (after first paid calls).** Policy firewall as a $20–100/mo subscription — building on the Phase 3 base (idempotency + hard spend caps already shipped) with the higher-touch controls: kill switches, allow/deny lists, optional human-in-the-loop confirmation, signed webhook alerts. Refundable provider verification bond (pay-to-list, never pay-to-rank). Receipt/accounting export (CSV/ledger; the signed audit trail itself is already in Phase 3).
-- **Phase 5 — p402 / Canton expansion (after the x402 path is stable and has at least one paying agent).** This is the moat-building phase; do not start until x402 is debugged and earning. Native p402 + KYB/identity attestations + settlement-finality semantics that map cleanly across protocols.
+- **Phase 0 — Reframe public positioning — DONE (2026-05-07).** Site V2 redesign shipped: cross-network framing on landing, methodology page, live stat strip, 2-bit verification badges, content-negotiated `/rankings` and `/receipts/:id`. trustbench.io DNS flipped 2026-05-06; both milestone receipts verify clean against the production domain with no override. Public copy throughout uses honest registry-pulse + telemetry framing (no "benchmark/oracle/authority" language). Tracked in `project_phase4_site_redesign_2026_05_07.md` memory.
+
+- **Phase 1 — Stabilize the foundation — DONE (2026-05-06).** `prober.ts` percentile fix shipped (linear interpolation). Ed25519 scorecard signing live — production keypair generated, deployed to Railway env vars; HMAC fallback with boot-time warning still in place for safety. Public key served at `/.well-known/trustbench-pubkey`. `/rankings`, `/route`, `/rankings/paid` all return live data with `signature_alg: ed25519`. Reference verifier at `scripts/verify-receipt.js`; standalone npm package `@trustbench/verify-receipt` v0.1.0 published 2026-05-08.
+
+- **Phase 2 — Validate before building — DONE (2026-04-30).** Three real conversations (r/AI_Agents x3 + @InfopunksHQ X thread) plus ≥1 written expression of interest. Verbatim quotes in `# Phase 2 — Builder Conversations.md`; competitive map in `# Competition Analysis — Recent Rev.md`. Key findings (still load-bearing):
+  - The **1–3% routing spread was explicitly rejected** by builders (incl. SpendGate's founder: "a big no no for a lot of people"). Flat per-tx + subscription is the validated direction.
+  - Top **unprompted** pain points: idempotency, hard spend caps, signed receipts, queryable audit trail. All four shipped in Phase 3.
+  - @InfopunksHQ gave a concrete receipt spec (signed receipt + call metadata + settlement reference + replayable audit path) — implemented in Phase 3 receipts and tacitly accepted via @InfopunksHQ's silence + cognition-layer launch as their reply (memory `project_receipt_spec_infopunks.md`).
+  - Competitive lane: **lightweight, non-custodial, MCP-native plumbing** — Infopunks (intelligence), SpendGate (proxy/governance), AgentlyHQ (framework) occupy adjacent slices, not the same one.
+
+- **Phase 3 — Minimal non-custodial router — DONE (2026-05-04).** Authoritative reference: `phase3-closeout.md`. Shipped:
+  - Authenticated `POST /route` (quote) + `POST /route/settle` (forward agent-signed EIP-3009) with Argon2id API-key auth.
+  - Idempotency keys (16–128 chars, 24h replay window, 409 on body mismatch). Spec: `phase3-idempotency-design.md`.
+  - Hard spend caps (server-enforced per-agent + per-call). Spec: `phase3-spend-caps.md`.
+  - Ed25519-signed receipts containing call metadata + settlement reference (tx_hash + chain). Spec: `receipt-spec-v1.md`.
+  - Public, immutable, no-auth `/receipts/:id` queryable audit endpoint (24h Cache-Control immutable).
+  - Smoke A1–A5 / B1–B4 green, sign-off in `lessons.md`.
+  - Non-custodial throughout: agent signs EIP-3009 with own key; provider submits on-chain; TrustBench observes tx_hash and emits the receipt.
+  - Pricing direction confirmed: flat per-tx fee + subscription, never %-spread.
+
+- **Phase 4 — Component-in-stack with x402-paywalled API monetization — IN FLIGHT.** Reframed 2026-05-07 from the original "policy-firewall subscription" framing after partnership inbounds from @InfopunksHQ + @stratamcp + CLU_AGENT in 48 hours signaled TrustBench as a *component of an emerging stack*, not a standalone product. Authoritative references: `partnership-day-record-2026-05-07.md` (the reframe), `phase4-kickoff.md` (engineering state), `phase4-paywall-design.md` (paywall v0.1.0 design), `phase4-listing-plan.md` (active sprint plan), `phase4-qbt-and-paywall-handoff.md` (post-QBT-Labs read).
+
+  Already shipped under the Phase 4 banner:
+  - **P4-1b (2026-05-06):** First paid x402 receipt end-to-end against a real provider (Infopunks's cognition layer). Public Railway-issued receipt `rcpt_01KQY7C44GAPSXZPFQYRZ1D10C` verifies SIGNATURE VALID + ON-CHAIN VERIFIED with no override. Five-fix chain: SDK swap to `@x402/core` + `@x402/evm` v2.11.0, drop normalization, slim accepted before encode, chain-lookup fallback via USDC `AuthorizationUsed` event for async-settlement merchants, publish Phase 3+4 to GitHub.
+  - **P4-7 (2026-05-06):** Strict reservation-based spend caps (closes the Phase 3 hold/release race). `SPEND_CAP_RESERVATION_ENABLED=true` in prod; pending-sweep cron releases stale quotes at 60s interval.
+  - **Receipt HTML rendering (2026-05-06):** Content-negotiated `/receipts/:id` — browsers get polished HTML with badges + basescan link + copy-paste verifier; agents get byte-identical JSON. Same pattern on `/rankings`.
+  - **Heurist Solana mesh crawler (2026-05-06):** 4th crawler source; ~150 Solana endpoints stored, currently filtered from `/rankings`+`/route` by Solana network filter (one-line removal when P4-3 lands).
+  - **Discovery surface stack:** `/skill.md` (agentic.market format), `/.well-known/trustbench.json`, `/llms.txt` — all shipped 2026-05-05/05-06.
+  - **trustbench.io DNS flip (2026-05-06):** Cloudflare proxy ON; `TRUSTBENCH_BASE_URL` flipped; Railway hostname kept alive permanently for backward compat.
+  - **Site redesign V2 (2026-05-07):** Cross-network framing throughout, after Pay.sh launch. Multi-network coverage on landing/README/llms.txt/skill.md.
+  - **`@trustbench/verify-receipt` npm v0.1.0 (2026-05-08):** Standalone third-party verifier; mirrors `scripts/verify-receipt.js`; optional `--check-chain` via viem peer-dep. Bumped to v0.1.1 (2026-05-13) to accept the `rrcpt_` prefix + `receipt.paid` envelope for Phase 4 routing receipts.
+  - **P4-2 receipt explorer (2026-05-12):** Public `/explorer` page lists all signed receipts (`rcpt_` Phase 3 + `rrcpt_` Phase 4 merged). Default JSON; HTML opt-in via Accept or `?format=html`. Wire-safe vs the indexing watch.
+
+  Listing sprint SHIPPED 2026-05-13 — 9 days ahead of the 2026-05-22 target (plan in `phase4-listing-plan.md`):
+  - ✓ **Paywall v0.1.0** (`phase4-paywall-design.md`): `/route` only, two-payment-per-call shape (TrustBench fee + provider fee, both x402), `paid_requests` body-hash discipline, Ed25519-signed responses on differentiated-work endpoints. Live in prod since 2026-05-11; free-tier quota and refund path deferred to v0.2.0.
+  - ✓ **agentic.market + Coinbase Bazaar listing** (one listing, two surfaces — see `listing-blocker-audit-2026-05-13.md`): live at `https://agentic.market/services/trustbench.io`, indexed via CDP merchant-discovery with `lastUpdated 2026-05-13T14:09:34Z`. Root cause of the 24h-stuck phase was Stone 0 (X-PAYMENT envelope must echo 402.extensions for the facilitator's `extractDiscoveryInfo` to catalog) — fix in `scripts/paywall-smoke.ts` commit `e060c63`. Reference x402 clients propagate this automatically; hand-rolled wallets must do so explicitly. 30-day validating check: `decisions.md` 2026-05-13 entry (callback 2026-08-11) watches whether `lastUpdated` shifts from an independent agent wallet within 30 days, validating that reference-client propagation works for partners.
+
+  Now-active Phase 4 work post-listing:
+  - **Strata §10 reference-agent integration** (target receipt URL ~2026-05-19 per `strata-integration-sketch-SEND.md`). Awaiting Strata acceptance on §10 tiers sent 2026-05-12.
+  - **v2 header migration tail:** PAYMENT-SIGNATURE inbound + PAYMENT-RESPONSE outbound (PAYMENT-REQUIRED outbound shipped 2026-05-12). See `phase4-v2-header-migration-handoff.md`.
+
+  Other Phase 4 follow-ups still queued (lower urgency):
+  - **P4-3:** Drop the Solana network filter to make Heurist Mesh routable. Timing per `phase4-p4-3-timing.md` (decision: Option A within 48h vs Option C deferred — pending Johan confirmation). Note 2026-05-12: P4-3 is multi-day (Solana branch in validateChallenge + SPL-shaped X-PAYMENT + Solana facilitator), not a one-line filter removal.
+  - **P4-1d:** SDK sweep with `@coinbase/x402` after InfopunksHQ amplification (Infopunks pivoted off cognition layer 2026-05-11; amplification path uncertain).
+  - **Mindshare outreach** after Infopunks amplifies (same uncertainty as above).
+
+  Pricing: flat per-call USDC settlement on Base. Specific tiers in active validation with first integration partners; not yet published. Reviewable based on real volume. Refundable provider verification bond — pay-to-list, never pay-to-rank.
+
+- **Phase 5 — p402 / Canton + AP2 compatibility (after first paying agent on x402 paywalled endpoints).** Native p402 + KYB/identity attestations + settlement-finality semantics across protocols. **AP2 v0.2 verdict (2026-05-07, see `ap2-compatibility-assessment.md` + memory `project_ap2_compatibility_2026_05_07.md`):** AP2 is complementary, not competing. AP2 has no Router role, no Routing Receipt, no on-chain settlement attestation. Path B proceeds; the Policy SKU (P6-M2) should be an AP2 Mandate Constraint extension. Design seeds collected during Phase 4 work in `phase5-design-seeds.md`. Readiness watch + gate-grading runbook in `phase5-readiness-watch.md` — run the four checks there before any Phase 5 kickoff session. Do not start until x402 paywalled endpoints have at least one paying agent and v0.1.0 has been live for ≥4 weeks.
 
 ## Known cleanups (low priority, do as we touch the area)
 
@@ -152,6 +208,19 @@ For complex tasks, internally apply Anthropic's 6-element structure: (1) Role/Co
 - Full accounting UI or heavy frontend work — `/analytics` stays plain HTML for now.
 - On-chain anchoring or EIP-712 typed-data signing — not until we explicitly decide we need it (Ed25519 with a published public key is the Phase 1 target, and that's enough).
 - Any change that makes TrustBench custodial.
+
+## Founder-shape calibration (added 2026-05-10)
+
+Apply this calibration when proposing ideas, scoping work, evaluating opportunities, or running a Critic pass. The values below tune what's "yes" vs. "no" for *this specific operator and project*. Generic "good idea" criteria do not apply — they produce wrong-shape recommendations.
+
+- **Capital position.** Solo founder, self-funded. Operating spend cap ~$50/mo on infrastructure (Railway + Supabase + Upstash + paid-probe combined). No paid third-party services without explicit approval. Paid APIs or scraping require justification with expected payback window.
+- **Energy this quarter.** Phase 4 listing sprint active (paywall v0.1.0 + agentic.market + Bazaar listings, target Friday 2026-05-22 per `phase4-listing-plan.md`). Available dev hours after sprint: ~10-15/week. Solo, no outsourced development.
+- **Skills building.** x402/p402 protocol depth, Ed25519 + JCS canonicalization, AEO / LLM-discoverable surfaces, signed-receipt + audit infrastructure, agent-payments architecture, Hono + tsx + Supabase production patterns.
+- **Skills avoiding.** React Native, Kubernetes, sales engineering, multi-tenant auth/billing systems, frontend framework churn beyond plain HTML + Tailwind.
+- **What bores me.** Low-margin enterprise sales, multi-month deal cycles, anything custodial, complex enterprise sales motions, anything where v1 takes more than two weekends, anything in the AI-as-category trap (per memory `feedback_solo_founder_ai_category_velocity.md`).
+- **Risk tolerance.** Comfortable with technical risk and market risk. Uncomfortable with regulatory risk (custodial, securities) and reputation risk (overclaim, "benchmark/oracle/authority" framing the actual measurement does not justify).
+
+If a candidate idea, feature, or scope expansion fails on capital-fit OR energy-fit OR the boredom-check, flag it explicitly before recommending. Wrong-shape ideas waste solo-founder weeks; calibration prevents that.
 
 ## Solo-Founder Principles
 

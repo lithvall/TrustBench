@@ -126,6 +126,138 @@ function buildTrustBenchRequirements(): PaymentRequirements {
   };
 }
 
+// Fetch the live /route 402 once and extract the `extensions` field so we can
+// echo it into the X-PAYMENT envelope (Stone 0 fix — see paragraph below).
+//
+// Returns undefined if the 402 has no extensions block, which means either
+// TRUSTBENCH_BAZAAR_EXTENSION_ENABLED is false in prod or the package failed
+// to load at module init. Either way, we proceed without extensions and the
+// settle will still complete — but cataloging will be skipped, same as the
+// pre-Stone-0 baseline.
+async function fetchLive402Extensions(): Promise<Record<string, unknown> | undefined> {
+  const probeBody = {
+    capability: 'data',
+    max_price: '10000',
+    payer_address: agentAccount.address,
+  };
+  const res = await fetch(`${BASE_URL}/route`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(probeBody),
+  });
+  if (res.status !== 402) {
+    console.warn(`[paywall-smoke] fetchLive402Extensions: expected 402, got ${res.status}; skipping extensions echo`);
+    return undefined;
+  }
+  const body = await res.json().catch(() => ({}));
+  if (body && typeof body === 'object' && body.extensions && typeof body.extensions === 'object') {
+    return body.extensions as Record<string, unknown>;
+  }
+  return undefined;
+}
+
+// =============================================================================
+// STONE 0 FIX (2026-05-13): the X-PAYMENT envelope's `extensions` echo.
+// =============================================================================
+// Source: listing-blocker-audit-2026-05-13.md § 9 Stone 0 + § 10.2 verbatim SDK
+// excerpt. Confirmed independently by Grok and ChatGPT reviews 2026-05-13.
+//
+// The bug: @x402/extensions's `extractDiscoveryInfo(paymentPayload,
+// paymentRequirements)` reads the bazaar extension from
+// `paymentPayload.extensions[BAZAAR.key]` — i.e. from the X-PAYMENT envelope
+// the agent submits, NOT from the 402 response body the server emitted.
+// Reference x402 clients (@x402/axios, the canonical Express paymentMiddleware)
+// auto-propagate the 402's `extensions` field into the payload they sign and
+// send. Our hand-rolled smoke wallet did not. Result: six successful settles
+// (2026-05-12 + 2026-05-13) produced zero CDP Bazaar indexing even though the
+// server-side 402 body was canonical (validator 11/11 green; routeTemplate,
+// resource, PAYMENT-REQUIRED header all present; validateDiscoveryExtension
+// returns valid:true on the live declaration per scripts/validate-bazaar-extension.cjs
+// 2026-05-13).
+//
+// The fix: add `extensions` to the PaymentPayload literal, sourced from the
+// 402 we just fetched. The inner EIP-3009 authorization is unchanged (already
+// signed before extensions are layered on), so signature recovery is
+// unaffected on the facilitator side.
+//
+// FAILURE MODE PARAGRAPH (high-risk surface discipline per CLAUDE.md):
+//
+// If this code is wrong, the worst plausible outcomes:
+//
+//   A. We somehow corrupt the inner authorization payload by layering
+//      extensions on top. Mitigated: extensions is added as a top-level
+//      field on the PaymentPayload (sibling to `payload.authorization`),
+//      not nested inside it. The EIP-3009 signature is over
+//      payload.authorization fields exclusively per @x402/evm; adding a
+//      sibling does not change recovery.
+//   B. The 402 we fetch returns extensions that don't validate, but the
+//      smoke proceeds anyway, producing an invalid extension on the
+//      facilitator side. Mitigated: scripts/validate-bazaar-extension.cjs
+//      pre-flight confirmed valid:true for the live declaration. We re-run
+//      it before any high-stakes settle.
+//   C. The 402 emits no extensions (flag off or package failed to load).
+//      Mitigated: fetchLive402Extensions returns undefined, and the
+//      conditional spread keeps payload byte-identical to the pre-Stone-0
+//      baseline. The smoke degrades to the prior behavior — no regression.
+//   D. The facilitator rejects the new envelope shape. Mitigated: we'd see
+//      a non-200 in S2 with a parseable error reason from the facilitator,
+//      and the smoke harness reports failure before any indexing watch
+//      starts. Cost of false positive: the same $0.005 as any S2 settle
+//      already burns.
+//
+// CRITIC PASS (mandatory per CLAUDE.md prompts/critic.md):
+//
+//   Three rejection reasons a hostile reviewer would give:
+//     1. "You're echoing server-emitted bytes back to the facilitator
+//        verbatim. If the server's extension declaration is ever wrong, the
+//        smoke participates in cataloging the wrong shape." Counter: that's
+//        the correct behavior — a real agent SDK does the same thing. Bug
+//        ownership belongs on the server (we control it) and is gated by
+//        validateDiscoveryExtension pre-flight.
+//     2. "This change only fixes smoke. Production agents still get the
+//        same gap unless their SDK propagates extensions." Counter: real
+//        agents use reference clients (@coinbase/x402-axios, etc.) that
+//        auto-propagate. The smoke is now aligned with the reference-client
+//        behavior, which means once we prove indexing works from the
+//        smoke, it'll also work from real agents — and is the right
+//        baseline for any future hand-rolled-wallet integration partner.
+//     3. "Re-fetching the 402 inside buildXPaymentHeader couples the
+//        smoke to a second network call per envelope." Counter: this is
+//        acceptable for a smoke harness (correctness > latency; one extra
+//        round-trip is negligible). For prod-shape integration we'd cache
+//        the extensions value across signings, but smoke doesn't need that.
+//
+//   Counter-thesis (case for the opposite approach):
+//     Don't fix the smoke; instead add a server-side workaround that
+//     pre-fetches its own 402 and writes extensions into a side-channel
+//     the facilitator might also read. Rejected: there is no documented
+//     side-channel; the only path the facilitator reads is
+//     paymentPayload.extensions per the SDK source. The bug is genuinely
+//     on the client construction side.
+//
+//   Named wedge competitor: any agent SDK that fails to echo extensions
+//     would face the same indexing gap. x402route.vercel.app (the routing
+//     competitor surfaced 2026-05-12) presumably indexes correctly because
+//     they use reference clients on the agent side. We need to do the same.
+//
+//   Hidden assumption that, if wrong, breaks the design:
+//     That the CDP facilitator's settle path actually runs
+//     extractDiscoveryInfo (not just verify) on every successful settle.
+//     If they batch indexing on a side queue or skip extraction when
+//     validateDiscoveryExtension is invoked elsewhere, the X-PAYMENT echo
+//     wouldn't trigger cataloging on its own. Verification: after the
+//     settle, the discovery endpoint either lists us within ~30 min
+//     (validates hypothesis) or doesn't (kill criterion fires — escalate
+//     to Stone 17 / facilitator-strips-unknown-fields hypothesis).
+//
+//   Kill criterion: if CDP discovery returns "no active resources" 60 min
+//     after the Stone-0-corrected settle lands on-chain, the X-PAYMENT
+//     echo hypothesis is wrong and Stone 17 (facilitator strips
+//     extensions before indexing) becomes the leading candidate.
+//
+//   Verdict: acceptable. Ship and observe.
+// =============================================================================
+//
 // Sign a PaymentPayload as agent and base64-encode the X-PAYMENT header.
 //
 // FIX 2026-05-12 (P4-followup, Path P PaymentPayload-resource hypothesis):
@@ -137,9 +269,17 @@ function buildTrustBenchRequirements(): PaymentRequirements {
 // a well-implemented agent SDK would do after reading the 402 (which now
 // includes resource per FIX-RESOURCE 2026-05-12 in build402).
 //
+// FIX 2026-05-13 (Stone 0): adds extensions echo per the Critic-pass paragraph
+// above. The audit document `listing-blocker-audit-2026-05-13.md` carries the
+// full context.
+//
 // The inner `payload.authorization` (EIP-3009) is what's signed; the envelope
-// resource field is metadata and adding it does NOT change signature recovery.
-async function buildXPaymentHeader(requirements: PaymentRequirements): Promise<string> {
+// resource field and the extensions field are metadata and adding them does
+// NOT change signature recovery.
+async function buildXPaymentHeader(
+  requirements: PaymentRequirements,
+  extensions?: Record<string, unknown>,
+): Promise<string> {
   const evmScheme = new ExactEvmScheme(agentAccount as any);
   const result = await evmScheme.createPaymentPayload(2, requirements);
   const payload: PaymentPayload = {
@@ -152,6 +292,11 @@ async function buildXPaymentHeader(requirements: PaymentRequirements): Promise<s
       description: 'TrustBench: non-custodial routing and audit layer for x402. Returns a signed routing receipt with on-chain settlement reference, verifiable offline against a published Ed25519 key.',
       mimeType: 'application/json',
     },
+    // Stone 0: echo the 402's extensions block so the CDP facilitator's
+    // extractDiscoveryInfo() sees `paymentPayload.extensions.bazaar` and
+    // catalogs the route. Conditional spread keeps byte-identity with the
+    // pre-Stone-0 baseline when extensions is undefined.
+    ...(extensions ? { extensions } : {}),
   };
   return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
 }
@@ -214,7 +359,17 @@ async function checkS2_settle(): Promise<{ idemKey: string; reqBody: any; cached
   console.log('[paywall-smoke] (this settles $0.005 USDC on Base via the facilitator)');
 
   const requirements = buildTrustBenchRequirements();
-  const xPayment = await buildXPaymentHeader(requirements);
+  // Stone 0: fetch the live 402 to capture its extensions block (bazaar
+  // declaration) and echo into the X-PAYMENT envelope so CDP's facilitator
+  // sees it during extractDiscoveryInfo. See buildXPaymentHeader header for
+  // the full Critic-pass + failure-mode paragraph.
+  const liveExtensions = await fetchLive402Extensions();
+  if (liveExtensions) {
+    console.log(`[paywall-smoke] S2: echoing ${Object.keys(liveExtensions).length} extension key(s) into X-PAYMENT: ${Object.keys(liveExtensions).join(', ')}`);
+  } else {
+    console.warn('[paywall-smoke] S2: no extensions found in live 402; X-PAYMENT will not echo any (pre-Stone-0 behavior)');
+  }
+  const xPayment = await buildXPaymentHeader(requirements, liveExtensions);
   // Capability choice: `data` routes to Infopunks-class providers which are
   // proven x402-conformant (P4-1b precedent — see memory
   // project_p4_1b_state_2026_05_06.md). Other capabilities may select
@@ -275,8 +430,13 @@ async function checkS3_replay(prior: { idemKey: string; reqBody: any; cachedBody
   // short-circuit on idempotency-key match BEFORE going to the facilitator,
   // so the fresh nonce is irrelevant for the test — but we send one anyway
   // because the server may reject missing X-PAYMENT in branch 3.
+  //
+  // Stone 0: also echo extensions (same rationale as S2). The replay path
+  // short-circuits before facilitator settle so this won't trigger indexing
+  // either way — but consistency with S2 keeps both envelopes the same shape.
   const requirements = buildTrustBenchRequirements();
-  const xPayment = await buildXPaymentHeader(requirements);
+  const liveExtensions = await fetchLive402Extensions();
+  const xPayment = await buildXPaymentHeader(requirements, liveExtensions);
 
   const { status, body, headers } = await postRoute(prior.reqBody, prior.idemKey, xPayment);
 

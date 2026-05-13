@@ -1457,7 +1457,53 @@ This is the pattern used successfully on 2026-05-07 to kill AgentLog cleanly (no
 **Why now.** ProjectAutonomous Slice 2 (buildroom contract chain) will eventually ship a structured Critic agent with schema-backed receipts. That's a weekend of work. The lightweight CLAUDE.md version derisks the structured build: if the Critic pass surfaces real failure modes over the next 2-3 high-risk diffs, the structured version is validated. If it produces only vague pessimism or rubber-stamp verdicts, the prompt needs sharpening before committing infrastructure.
 
 **Carry-forward signals to watch.**
-- After 3 Critic passes on real high-risk diffs: are the rejection reasons specific (cite exact assumptions, real wedge competitors) or vague? If vague, sharpen the prompt before Slice 2 builds the schema-backed version.
+- After 3 Critic passes on real high-risk diffs: are the rejection reasons sharp enough to catch something self-review missed? If yes, structured Critic agent build is validated. If no, the prompt needs sharpening.
+
+---
+
+## 2026-05-13 — Validator-green vs indexer-required is a three-stage protocol (Stone 0)
+
+**What we learned.** For x402 + CDP Bazaar indexing, the protocol has three correctness stages and the seller diagnostic only covers the first two:
+
+1. **402 emission correctness** — what the server returns. `agentic.market/validate` checks this. Validator-green means stage 1 is correct.
+2. **Settlement correctness** — what the facilitator accepts. Confirmed on-chain by a successful settle. Our six settles 2026-05-12 → 2026-05-13 09:19 UTC were all stage-2 correct.
+3. **Discovery-metadata propagation correctness** — what the facilitator's `extractDiscoveryInfo(paymentPayload, paymentRequirements)` sees during settle. **Reads exclusively from `paymentPayload.extensions[BAZAAR.key]` per `node_modules/@x402/extensions/dist/cjs/bazaar/index.js:607-670`.** The 402 body's outer `extensions` field is invisible to this function. Stage 3 requires the agent's X-PAYMENT envelope to **echo** `extensions` from the 402.
+
+Reference x402 clients (`@coinbase/x402-axios`, the Express paymentMiddleware) auto-propagate. Hand-rolled wallets don't. Our smoke wallet was hand-rolled, so we passed stages 1 + 2 cleanly for six settles and failed stage 3 invisibly. Indexing only fired after the one-line fix: pass the captured 402.extensions through into the signed PaymentPayload.
+
+**Why it took so long.** Stage 3 has no error message. The facilitator silently `console.warn`s on its own side when `extractDiscoveryInfo` returns null; we never see it. The seller diagnostic does not exercise stage 3 because it doesn't simulate a real round-trip. The catalog endpoint returns the same 404 whether the route was never declared, was rejected, or was simply never settled-with-extensions — the failure shapes are indistinguishable from the outside.
+
+**How to detect this class of bug going forward.** Before burning settles on any future bazaar-extension change:
+
+1. Run `scripts/validate-bazaar-extension.cjs` — zero-cost, runs `validateDiscoveryExtension` against the live 402's bazaar block. Eliminates Stone 4 cleanly.
+2. Manually base64-decode the X-PAYMENT envelope our smoke wallet sends and verify `payload.extensions.bazaar` is present. Mirror what a reference client would do.
+3. Read the actual shipped `@x402/extensions` SDK source (`node_modules/@x402/extensions/dist/cjs/bazaar/index.js`) for the indexer's extraction function, not the docs. Vendor docs lagged the package shape twice on this project already (the fake `info: { name, description, category }` block + the fake `dynamic-routes pattern`, both WebSearch-snippet hallucinations resolved 2026-05-11).
+
+**Carry-forward for partner integrations.** Any future partner who rolls their own x402 client (rather than using a reference Coinbase client) needs the same echo, or their settles won't trigger their own Bazaar indexing. Surface this in skill.md / partner-integration docs whenever we ship one.
+
+---
+
+## 2026-05-13 — External-LLM audit handoff when stuck on a hard problem
+
+**What we learned.** When a debugging path has run out of obvious next moves (validator green, smoke 4/4, real settles succeeding, indexing still 0 after six attempts), the highest-leverage move is:
+
+1. **Write a self-contained .md audit document** that captures the goal, the canonical mechanism, every fix attempted, every hypothesis ruled in/out, all observable state via live probes, and verbatim code excerpts of the suspect surfaces.
+2. **Hand it to multiple external LLM reviewers** (we used Grok and ChatGPT) for independent verification.
+3. **The audit-writing process itself surfaces new insight.** On 2026-05-13 the load-bearing finding (Stone 0 — `extractDiscoveryInfo` reads from `paymentPayload.extensions`, not the 402 body) was surfaced *while writing* the audit's § 9 "stones we may not have turned," because writing the audit forced a direct read of `node_modules/@x402/extensions/dist/cjs/bazaar/index.js`. The structured "list everything you've ruled in/out" exercise pushes you to look at sources you'd otherwise trust by reputation.
+4. **Independent reviewers add value beyond confirmation.** Both Grok and ChatGPT converged on Stone 0 as the load-bearing answer (Grok: "the only high-confidence unturned stone"; ChatGPT: "~70%"). ChatGPT *also* added Stone 17 — "facilitator strips unknown fields before indexing" — as the kill-criterion fallback if Stone 0 didn't pan out. That hypothesis wouldn't have been in the audit otherwise; it sharpened the kill criterion and would have been the next move had Stone 0 failed.
+
+**The four properties that made this work, in order of importance.**
+
+1. **Self-contained audit.** External LLMs have no prior context. Every piece needed to dispute one cell must be in the document: file paths, line numbers, verbatim SDK source excerpts, live curl outputs, ruled-in vs ruled-out hypothesis tables, explicit failure-mode taxonomies. Make it possible to challenge one cell at a time. If the audit is too short or hand-wavy, the reviewer reverts to generic pessimism.
+2. **Direct read of canonical sources during the write.** Writing forces re-reading. Re-reading at the level of code (not docs or summaries) is where new findings surface. Vendor docs may lag the shipped package.
+3. **Two independent reviewers minimum.** Convergence raises confidence; divergence adds new hypotheses. ChatGPT's Stone 17 wouldn't have come from Grok alone.
+4. **Pre-flight before the test.** Independent reviewers may rank candidate stones. Before burning $0.005 to test the top-ranked one, run any zero-cost elimination steps for the other top contenders (we ran `validateDiscoveryExtension` against the live declaration before patching the smoke wallet — eliminated Stone 4 cleanly and saved a wrong-attribution scenario where Stone 0 fix would have failed and we'd have wasted the settle on a confounded test).
+
+**When to reach for this pattern.** Multi-hour debugging sessions where the obvious next moves are exhausted, where every visible signal (validator, smoke, settle) is green but the actual outcome (indexing, observable state) doesn't move. Pattern recognition: more than 3 hypothesis-test cycles without progress, prior debugging touched the protocol surface multiple times, vendor docs and self-review both say "should work."
+
+**Carry-forward.** This is now a persistent memory entry (`feedback_external_llm_audit_when_stuck.md`) so it survives across sessions. When future Claude sessions hit a similar wall — exhausted hypothesis space, validator-green but outcome stuck — reach for the audit-handoff pattern early rather than after another round of cycle attempts.
+
+**Time accounting on this instance.** Audit document was ~700 lines of dense prose with verbatim source excerpts. Took ~45 minutes to write. Hand-off to two reviewers took ~5 minutes each. Total round-trip from "stuck" to "indexed" was ~3 hours. The previous debugging had burned ~24 hours of session time across two days and $0.030 in test settles. The audit pattern paid for itself ~8x even discounting the calibration value.ons specific (cite exact assumptions, real wedge competitors) or vague? If vague, sharpen the prompt before Slice 2 builds the schema-backed version.
 - If 3 consecutive Critic verdicts are `acceptable` / `endorsed`, run an alternative-model cross-check (Opus vs. Sonnet) to detect rubber-stamping.
 - Append a one-line entry to `lessons.md` after each Critic pass: `2026-MM-DD: Critic pass on {feature} — verdict {V} — hidden assumption: {one line}.`
 

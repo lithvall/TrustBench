@@ -48,7 +48,7 @@ import { createInterface } from 'node:readline';
 
 const BASE_URL = (process.env.TRUSTBENCH_BASE_URL ?? 'https://trustbench.io').replace(/\/$/, '');
 const SERVER_NAME = 'trustbench';
-const SERVER_VERSION = '1.0.0';
+const SERVER_VERSION = '1.0.4';
 const PROTOCOL_VERSION = '2024-11-05';
 
 // ---------------------------------------------------------------------------
@@ -74,6 +74,15 @@ const TOOLS = [
       },
       required: ['capability'],
     },
+    // MCP tool annotations (MCP spec §6.2):
+    // readOnlyHint=true  — only reads registry data, never writes or transacts
+    // destructiveHint=false — no side effects, safe to retry freely
+    // openWorldHint=true — results come from live trustbench.io telemetry
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: true,
+    },
   },
   {
     name: 'get_receipt',
@@ -91,6 +100,14 @@ const TOOLS = [
         },
       },
       required: ['receipt_id'],
+    },
+    // readOnlyHint=true — immutable receipt fetch, no writes or payments
+    // idempotentHint=true — same receipt ID always returns the same signed envelope
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
     },
   },
   {
@@ -110,6 +127,14 @@ const TOOLS = [
         },
       },
       required: ['receipt_id'],
+    },
+    // readOnlyHint=true — verification only, never initiates payments or writes
+    // idempotentHint=true — verifying the same receipt ID is always safe to repeat
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
     },
   },
 ];

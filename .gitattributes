@@ -1,0 +1,5 @@
+# Force LF line endings for npm package scripts so the shebang line
+# (#!/usr/bin/env node) is not corrupted by Windows CRLF conversion.
+# Without this, npm v10 strips the bin entry during publish.
+npm/mcp/*.js text eol=lf
+npm/verify-receipt/*.js text eol=lf

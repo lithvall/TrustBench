@@ -97,34 +97,79 @@ function percentile(sortedAsc: number[], p: number): number | null {
   return Math.round(sortedAsc[lo] * (1 - frac) + sortedAsc[hi] * frac);
 }
 
+// Paginate over a Supabase / PostgREST query. The default response cap is
+// 1000 rows per request — without explicit pagination, larger tables get
+// silently truncated. We hit this on 2026-05-14 when the first nightly
+// rollup-latest.csv exported only 1000 of ~10,791 probes in a 7-day window
+// (Paddock would have received a Swiss-cheese aggregation: success_rate,
+// p50, p95, samples columns mostly empty because most providers' probes
+// fell outside the truncated 1000-row probe window). Bounded by MAX_PAGES
+// (100 = 100k rows) as a defensive ceiling: if a table grows beyond that
+// we throw rather than loop silently, so we notice loudly.
+const PAGE_SIZE = 1000;
+const MAX_PAGES = 100;
+
+async function fetchAllPaged<T>(
+  label: string,
+  build: (from: number, to: number) => any,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const from = page * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
+    const { data, error } = await build(from, to);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    out.push(...(data as T[]));
+    if (data.length < PAGE_SIZE) break;
+    if (page === MAX_PAGES - 1) {
+      throw new Error(
+        `[export-7-night] ${label}: hit MAX_PAGES (${MAX_PAGES}) ceiling at ${out.length} rows — raise the ceiling or add filtering`,
+      );
+    }
+  }
+  return out;
+}
+
 async function main() {
   const startedAt = Date.now();
   console.error('[export-7-night] Pulling providers...');
-  const { data: providers, error: pErr } = await supabase
-    .from('providers')
-    .select('url, capability, metadata')
-    .returns<ProviderRow[]>();
-  if (pErr) throw pErr;
+  const providers = await fetchAllPaged<ProviderRow>(
+    'providers',
+    (from, to) =>
+      supabase
+        .from('providers')
+        .select('url, capability, metadata')
+        .range(from, to),
+  );
 
-  console.error(`[export-7-night] ${providers?.length ?? 0} providers; pulling scorecards...`);
-  const { data: scorecards, error: sErr } = await supabase
-    .from('scorecards')
-    .select('provider_id, score, latency_p50, latency_p95, last_updated')
-    .returns<ScorecardRow[]>();
-  if (sErr) throw sErr;
+  console.error(`[export-7-night] ${providers.length} providers; pulling scorecards...`);
+  const scorecards = await fetchAllPaged<ScorecardRow>(
+    'scorecards',
+    (from, to) =>
+      supabase
+        .from('scorecards')
+        .select('provider_id, score, latency_p50, latency_p95, last_updated')
+        .range(from, to),
+  );
   const scorecardByUrl = new Map<string, ScorecardRow>(
-    (scorecards ?? []).map((s) => [s.provider_id, s]),
+    scorecards.map((s) => [s.provider_id, s]),
   );
 
   // Probes are append-only and large; restrict to last 7 days at the SQL layer.
+  // Paginated because a 7-day window over ~2000 endpoints with ~5 samples
+  // each is ~10k rows — well past the 1000-row PostgREST default cap.
   const sevenDaysAgo = new Date(Date.now() - SEVEN_DAYS_MS).toISOString();
   console.error(`[export-7-night] Pulling probes since ${sevenDaysAgo}...`);
-  const { data: probes, error: prErr } = await supabase
-    .from('probes')
-    .select('provider_id, timestamp, latency_ms, success')
-    .gte('timestamp', sevenDaysAgo)
-    .returns<ProbeRow[]>();
-  if (prErr) throw prErr;
+  const probes = await fetchAllPaged<ProbeRow>(
+    'probes',
+    (from, to) =>
+      supabase
+        .from('probes')
+        .select('provider_id, timestamp, latency_ms, success')
+        .gte('timestamp', sevenDaysAgo)
+        .range(from, to),
+  );
 
   console.error(`[export-7-night] Aggregating ${probes?.length ?? 0} probe samples...`);
   type Agg = { samples: number; successes: number; latencies: number[] };

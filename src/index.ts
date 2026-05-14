@@ -26,6 +26,7 @@ import { renderLandingHtml, type LandingStats } from './landing-html.js';
 import { renderMethodologyHtml } from './methodology-html.js';
 import { renderPricingHtml, buildPricingJson } from './pricing-html.js';
 import { paywallGate } from './paywall-handler.js';
+import { createMcpHttpHandler } from './mcp-http.js';
 import { renderAnalyticsHtml, type AnalyticsData, type CategoryCard } from './analytics-html.js';
 import {
   routeBazaarExtension,
@@ -416,6 +417,28 @@ app.get('/rankings/paid', async (c) => {
 // tools describe the Phase 3 paid-routing flow (will be live once Step 10's
 // helper functions are filled in).
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// POST /mcp — MCP Streamable HTTP transport endpoint (Phase 4b)
+//
+// Native MCP server over HTTP so agents on claude.ai web, ChatGPT, and any
+// MCP-capable host can use TrustBench without local installation. Required
+// for the Anthropic Connectors Directory (which only accepts Streamable HTTP
+// or SSE, not the stdio/npx transport of @trustbench/mcp).
+//
+// All three tools are read-only and need no API key:
+//   - get_rankings   — live scored providers by capability
+//   - get_receipt    — fetch a signed receipt by ID
+//   - verify_receipt — Ed25519 + on-chain verification
+//
+// Handler uses direct internal imports (getRankings(), Supabase) to avoid
+// an HTTP loopback back to trustbench.io. Supabase client is passed from
+// this file's boot-time instance so we share the connection pool.
+//
+// Failure mode: tool errors surface as JSON-RPC error objects, not 500s.
+// See src/mcp-http.ts for full wire-format documentation.
+// ---------------------------------------------------------------------------
+app.post('/mcp', createMcpHttpHandler(supabase));
+
 app.get('/mcp/tools', (c) => {
   return c.json({
     success: true,

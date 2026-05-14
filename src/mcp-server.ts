@@ -40,6 +40,12 @@
  */
 
 import { createInterface } from 'node:readline';
+// TOOLS array is single-sourced in mcp-tools.ts so the hosted HTTP endpoint
+// (src/mcp-http.ts) and this stdio server always advertise identical schemas.
+// Handler logic differs: this server calls the external trustbench.io API via
+// fetch() because it runs as a subprocess without access to the Hono app's
+// Supabase client. See mcp-tools.ts for the internal-import equivalents.
+import { TOOLS } from './mcp-tools.js';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -49,94 +55,6 @@ const BASE_URL = (process.env.TRUSTBENCH_BASE_URL ?? 'https://trustbench.io').re
 const SERVER_NAME = 'trustbench';
 const SERVER_VERSION = '1.0.4';
 const PROTOCOL_VERSION = '2024-11-05';
-
-// ---------------------------------------------------------------------------
-// Tool definitions (MCP inputSchema = JSON Schema draft-07)
-// ---------------------------------------------------------------------------
-
-const TOOLS = [
-  {
-    name: 'get_rankings',
-    description:
-      'Get TrustBench liveness rankings for x402 providers by capability. ' +
-      'Returns a scored list of providers with latency and success-rate telemetry. ' +
-      'Methodology note: scores are derived from HEAD-probe liveness checks (3 samples ' +
-      'from one host), not a rigorous benchmark. See trustbench.io/methodology.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        capability: {
-          type: 'string',
-          enum: ['search', 'inference', 'data', 'media', 'infra'],
-          description: 'The provider capability to query rankings for.',
-        },
-      },
-      required: ['capability'],
-    },
-    // MCP tool annotations (MCP spec §6.2):
-    // readOnlyHint=true  — only reads registry data, never writes or transacts
-    // destructiveHint=false — no side effects, safe to retry freely
-    // openWorldHint=true — results come from live trustbench.io telemetry
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      openWorldHint: true,
-    },
-  },
-  {
-    name: 'get_receipt',
-    description:
-      'Fetch a TrustBench routing receipt by ID. Receipts are immutable, ' +
-      'Ed25519-signed records of a routing or payment event. Use to verify ' +
-      'what was paid, to whom, for what capability, and what the on-chain ' +
-      'settlement reference is. IDs start with rcpt_ (Phase 3) or rrcpt_ (Phase 4).',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        receipt_id: {
-          type: 'string',
-          description: 'The receipt ID, e.g. rcpt_01KQY7C44GAPSXZPFQYRZ1D10C or rrcpt_…',
-        },
-      },
-      required: ['receipt_id'],
-    },
-    // readOnlyHint=true — immutable receipt fetch, no writes or payments
-    // idempotentHint=true — same receipt ID always returns the same signed envelope
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: true,
-    },
-  },
-  {
-    name: 'verify_receipt',
-    description:
-      'Verify the Ed25519 signature on a TrustBench receipt. Fetches the receipt ' +
-      'from trustbench.io and confirms the signature is valid against the published ' +
-      'public key at trustbench.io/.well-known/trustbench-pubkey. Returns ' +
-      'signature_valid status and, where present, on_chain_verified status. ' +
-      'For full offline verification, use the @trustbench/verify-receipt npm package.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        receipt_id: {
-          type: 'string',
-          description: 'The receipt ID to verify.',
-        },
-      },
-      required: ['receipt_id'],
-    },
-    // readOnlyHint=true — verification only, never initiates payments or writes
-    // idempotentHint=true — verifying the same receipt ID is always safe to repeat
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: true,
-    },
-  },
-];
 
 // ---------------------------------------------------------------------------
 // Tool handlers

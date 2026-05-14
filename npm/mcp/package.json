@@ -1,0 +1,41 @@
+{
+  "name": "@trustbench/mcp",
+  "version": "1.0.0",
+  "description": "Native MCP server for TrustBench. Exposes provider rankings, receipt lookup, and Ed25519 receipt verification as agent-callable tools in Claude Desktop, Grok, Kimi, Cherry Studio, and any MCP-compatible host.",
+  "keywords": [
+    "trustbench",
+    "x402",
+    "mcp",
+    "model-context-protocol",
+    "agent-payments",
+    "ed25519",
+    "receipt",
+    "audit",
+    "non-custodial",
+    "rankings"
+  ],
+  "homepage": "https://trustbench.io",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lithvall/TrustBench.git",
+    "directory": "npm/mcp"
+  },
+  "license": "MIT",
+  "author": "TrustBench",
+  "type": "module",
+  "main": "./index.js",
+  "bin": {
+    "trustbench-mcp": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node index.js"
+  }
+}

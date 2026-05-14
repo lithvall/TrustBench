@@ -868,9 +868,16 @@ app.get('/pricing', (c) => {
 //
 // Failure mode: missing file → 404 plain-text. The route never throws and
 // never leaks the underlying filesystem error to the caller.
+//
+// 404 responses set Cache-Control: no-store (added 2026-05-14). Without it,
+// Cloudflare cached a transient 404 for ~4 hours after rollup-latest.csv was
+// first requested before the file existed, causing the URL to keep returning
+// the cached miss even after the file landed on disk. Forcing no-store on
+// the 404 path means a transient miss can never poison the cache again.
 app.get('/exports/:filename', (c) => {
   const filename = c.req.param('filename');
   if (!/^[A-Za-z0-9._-]+\.csv$/.test(filename)) {
+    c.header('Cache-Control', 'no-store');
     return c.text('Not found', 404);
   }
   try {
@@ -879,6 +886,7 @@ app.get('/exports/:filename', (c) => {
     c.header('Cache-Control', 'public, max-age=300');
     return c.body(content);
   } catch {
+    c.header('Cache-Control', 'no-store');
     return c.text('Not found', 404);
   }
 });

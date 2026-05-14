@@ -58,20 +58,28 @@ function notification(method: string): string {
 async function run(): Promise<void> {
   console.log('TrustBench MCP server smoke test\n');
 
-  // shell: true is required on Windows so Node can resolve npx.cmd
-  const server = spawn('npx', ['tsx', SERVER_PATH], {
+  // On Windows, npx lives as npx.cmd — use the .cmd form directly to avoid
+  // shell:true (which triggers a Node deprecation warning when args are passed).
+  const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+  const server = spawn(npxCmd, ['tsx', SERVER_PATH], {
     stdio: ['pipe', 'pipe', 'inherit'],
-    shell: true,
     env: { ...process.env, TRUSTBENCH_BASE_URL: 'https://trustbench.io' },
   });
 
-  // Collect stdout lines into a queue; resolve waiting promises as lines arrive
+  // Buffer incomplete chunks so large JSON responses (>64KB) don't cause
+  // parse errors. The MCP server writes each response as one JSON line + \n,
+  // but Node may deliver it across multiple data events.
   const lineQueue: string[] = [];
   const waiters: Array<(line: string) => void> = [];
+  let partial = '';
 
   server.stdout!.on('data', (chunk: Buffer) => {
-    const lines = chunk.toString().split('\n').filter((l) => l.trim());
-    for (const line of lines) {
+    partial += chunk.toString();
+    const parts = partial.split('\n');
+    // All but the last element are complete lines; the last may be partial.
+    partial = parts.pop() ?? '';
+    for (const line of parts) {
+      if (!line.trim()) continue;
       const waiter = waiters.shift();
       if (waiter) {
         waiter(line);

@@ -24,6 +24,7 @@ import type { SignedReceipt } from './receipt-generator.js';
 import { renderRankingsHtml, type RankingRow } from './rankings-html.js';
 import { renderLandingHtml, type LandingStats } from './landing-html.js';
 import { renderMethodologyHtml } from './methodology-html.js';
+import { renderPrivacyHtml } from './privacy-html.js';
 import { renderPricingHtml, buildPricingJson } from './pricing-html.js';
 import { paywallGate } from './paywall-handler.js';
 import { createMcpHttpHandler } from './mcp-http.js';
@@ -814,6 +815,9 @@ app.get('/explorer', async (c) => {
 // The new layout mandates the "What this measurement does NOT tell you"
 // callout (formerly inline) per the honest-framing rule in CLAUDE.md.
 app.get('/methodology', (c) => c.html(renderMethodologyHtml()));
+
+// Privacy policy — required for Anthropic Connectors Directory submission.
+app.get('/privacy', (c) => c.html(renderPrivacyHtml()));
 
 // ---------------------------------------------------------------------------
 // Pricing page — Phase 4 v0.1.0 paywall (phase4-paywall-design.md § Q7).

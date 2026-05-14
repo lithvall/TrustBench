@@ -59,7 +59,9 @@ export const TOOLS = [
     // readOnlyHint=true  — only reads registry data, never writes or transacts
     // destructiveHint=false — no side effects, safe to retry freely
     // openWorldHint=true — results come from live trustbench.io telemetry
+    // title — human-readable display name (required by Anthropic Software Directory Policy §5.E)
     annotations: {
+      title: 'Get Provider Rankings',
       readOnlyHint: true,
       destructiveHint: false,
       openWorldHint: true,
@@ -84,7 +86,9 @@ export const TOOLS = [
     },
     // readOnlyHint=true — immutable receipt fetch, no writes or payments
     // idempotentHint=true — same receipt ID always returns the same signed envelope
+    // title — human-readable display name (required by Anthropic Software Directory Policy §5.E)
     annotations: {
+      title: 'Fetch Payment Receipt',
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
@@ -111,7 +115,9 @@ export const TOOLS = [
     },
     // readOnlyHint=true — verification only, never initiates payments or writes
     // idempotentHint=true — verifying the same receipt ID is always safe to repeat
+    // title — human-readable display name (required by Anthropic Software Directory Policy §5.E)
     annotations: {
+      title: 'Verify Receipt Signature',
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,

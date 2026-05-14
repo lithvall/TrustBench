@@ -25,6 +25,7 @@ import { renderRankingsHtml, type RankingRow } from './rankings-html.js';
 import { renderLandingHtml, type LandingStats } from './landing-html.js';
 import { renderMethodologyHtml } from './methodology-html.js';
 import { renderPrivacyHtml } from './privacy-html.js';
+import { renderTermsHtml } from './terms-html.js';
 import { renderPricingHtml, buildPricingJson } from './pricing-html.js';
 import { paywallGate } from './paywall-handler.js';
 import { createMcpHttpHandler } from './mcp-http.js';
@@ -818,6 +819,9 @@ app.get('/methodology', (c) => c.html(renderMethodologyHtml()));
 
 // Privacy policy — required for Anthropic Connectors Directory submission.
 app.get('/privacy', (c) => c.html(renderPrivacyHtml()));
+
+// Terms of Service — required for Anthropic Software Directory submission checklist.
+app.get('/terms', (c) => c.html(renderTermsHtml()));
 
 // Standalone logo SVG — served for the Anthropic Connectors Directory listing
 // and any other context that needs a URL-addressable square logo.

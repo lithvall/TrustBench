@@ -819,6 +819,29 @@ app.get('/methodology', (c) => c.html(renderMethodologyHtml()));
 // Privacy policy — required for Anthropic Connectors Directory submission.
 app.get('/privacy', (c) => c.html(renderPrivacyHtml()));
 
+// Standalone logo SVG — served for the Anthropic Connectors Directory listing
+// and any other context that needs a URL-addressable square logo.
+// 1:1 aspect ratio (32×32 viewBox), brand-green on transparent background.
+app.get('/logo.svg', (c) => {
+  return new Response(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- bench slats -->
+  <rect x="3" y="13" width="26" height="2.5" rx="0.5" fill="#1F7A3A"/>
+  <rect x="3" y="17" width="26" height="2" rx="0.5" fill="#1F7A3A"/>
+  <rect x="3" y="20.5" width="26" height="2" rx="0.5" fill="#1F7A3A"/>
+  <!-- bench legs -->
+  <rect x="5" y="22.5" width="2" height="6" fill="#1F7A3A"/>
+  <rect x="25" y="22.5" width="2" height="6" fill="#1F7A3A"/>
+  <!-- shield -->
+  <path d="M16 4 L22 6 L22 12 Q22 15.5 16 18 Q10 15.5 10 12 L10 6 Z" fill="#1F7A3A" stroke="#FAFAF7" stroke-width="0.6"/>
+  <!-- T glyph -->
+  <text x="16" y="13.4" text-anchor="middle" font-family="Inter, sans-serif" font-weight="700" font-size="8.5" fill="#FFFFFF">T</text>
+</svg>`,
+    { headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=86400' } },
+  );
+});
+
+
 // ---------------------------------------------------------------------------
 // Pricing page — Phase 4 v0.1.0 paywall (phase4-paywall-design.md § Q7).
 // Content-negotiated same as /rankings + /receipts/:id: browsers (Accept:

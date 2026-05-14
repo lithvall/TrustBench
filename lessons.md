@@ -1640,3 +1640,28 @@ Setup playbook at `JarvisBrain/SETUP-NEXT.md`. Estimated setup time: ~3-4 hours 
 - `prompts/decision-journal.md` — TrustBench-side decision journal prompt
 - `prompts/critic.md` — TrustBench-side Critic prompt (mirrored at JarvisBrain `ops/prompts/red-team.md`)
 - `CLAUDE.md` § "Decision Journal" + § "Critic pass" + § "Founder-shape calibration" — workflow rules that informed JarvisBrain's AGENTS.md
+
+---
+
+## 2026-05-14 — Silent default caps: Supabase 1000-row LIMIT and Cloudflare 4xx caching both bit on the same deliverable
+
+Two production gotchas surfaced during the Paddock nightly-rollup-export shipping work today, both with the same shape: a sensible-looking default that silently truncates or poisons data without any error to flag the gap. Worth banking both together because the *meta-pattern* (silent defaults that need explicit opt-out) is what you want to remember next time.
+
+**Gotcha 1: Supabase / PostgREST defaults `.select()` to 1000 rows.** The export script's three queries (`providers`, `scorecards`, `probes`) were all written as `await supabase.from('X').select('cols').returns<T[]>()` with no `.range()` or `.limit()`. PostgREST silently caps responses at 1000 rows by default. The first nightly export shipped with `1001 lines per file` and zero error indication. The probes table genuinely had 10,791 rows in the 7-day window; we were aggregating 9% of the data. The CSV looked complete (header + data rows, no parse errors, no JSON shape mismatch) but every probe column was Swiss-cheese populated because most providers' probes fell outside the truncated 1000-row probe window.
+
+  - **Fix shipped (commit 72ddf5c):** a small `fetchAllPaged<T>` helper that loops `.range(from, from + 999)` until a page returns fewer than 1000 rows, bounded by `MAX_PAGES = 100` as a defensive ceiling. Defensive ceiling matters — if a future table grows past 100k rows, we want to throw loudly rather than loop silently.
+  - **Pagination stability (commit 009befe):** added `.order('url')` / `.order('provider_id')` / `.order('timestamp')` to the three queries. Without explicit ordering, PostgREST adjacent `.range()` calls can return overlapping rows at page boundaries — observed as 8 duplicate URLs in a 49,668-row CSV (0.016% drift). Tiny, but the right discipline.
+  - **Generalizable rule:** any Supabase `.select()` in this codebase that might exceed 1000 rows needs `.range()` pagination plus `.order()` for stability. Audit at-large risk: `src/prober.ts`, `src/scorer.ts`, anywhere reading `probes` or `providers`. None should silently break, but worth a grep next time the rankings cache or a scorecard query feels "missing rows."
+
+**Gotcha 2: Cloudflare caches 4xx responses on the zone by default; transient 404 poisons the URL for the cache TTL.** Earlier in the same deliverable shipping window, `https://trustbench.io/exports/rollup-latest.csv` was requested before the file existed — Cloudflare cached the 404 with `Cache-Control: max-age=14400` (4 hours, set by a zone-level override). Once the file landed on disk and Railway deployed, the URL still returned the cached 404 because Cloudflare wasn't asking the origin. Required a manual Custom Purge to recover. If the cache-poisoning window had happened before Paddock's first poll, his cron would have ingested a 404 instead of the deliverable.
+
+  - **Fix shipped (commit after 009befe):** added `c.header('Cache-Control', 'no-store')` to both 404 branches of `/exports/:filename` in `src/index.ts` (the filename-regex-fail branch and the `readFileSync`-throws branch). Forces Cloudflare to not cache transient misses. Belt-and-suspenders against the same trap.
+  - **Still unresolved:** Cloudflare's zone-level rule is overriding the origin's `Cache-Control: public, max-age=300` to `max-age=14400` on `/exports/*` responses (visible in every 200 response header). That's a separate Cloudflare Page Rule or zone setting that needs investigation. Not blocking — Paddock's daily polling cadence works with 4-hour TTL because the workflow runs nightly. But anyone wanting near-real-time updates on `/exports/*` would hit a 4-hour staleness ceiling.
+  - **Recovery pattern when the trap fires:** Custom Purge via Cloudflare dashboard (Caching → Configuration → Purge Cache → Custom Purge → URL → paste the exact URL → Purge). For testing whether the origin is healthy independent of cache, append a cache-busting query string (`?cachebust=N`) — Cloudflare caches per-URL including query string, so a unique query bypasses any cached response.
+
+**Meta-lesson.** Both gotchas share a fingerprint: a default that's reasonable for the *typical* case (small tables, well-formed URLs) becomes silent corruption for the *atypical* case (large tables, transient 404s). The honest-measurement rule in CLAUDE.md catches misrepresentation in public copy, but it doesn't catch silent data truncation upstream of the public copy. Add to the high-risk-surface checklist for any deliverable that ships data to a partner: **trace the data path end-to-end and ask "what's the default behavior of every component when N grows past expected?"** Specifically for this codebase: Supabase queries → pagination check, Cloudflare-cached endpoints → 4xx Cache-Control check, response-size assumptions → check Content-Length under realistic load.
+
+**Related (mentioned in CLAUDE.md memory entries 2026-05-14):**
+- decisions.md 2026-05-14 entry on the probed-only filter shape (the upstream architectural decision that came out of these two gotchas)
+- `project_agentic_market_crawler_quality_2026_05_14.md` memory — the related but separate finding that the agentic_market crawler over-enumerates per-resource URLs (33K rows from one domain). Different gotcha, same investigation thread.
+

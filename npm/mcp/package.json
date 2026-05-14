@@ -1,6 +1,6 @@
 {
   "name": "@trustbench/mcp",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Native MCP server for TrustBench. Exposes provider rankings, receipt lookup, and Ed25519 receipt verification as agent-callable tools in Claude Desktop, Grok, Kimi, Cherry Studio, and any MCP-compatible host.",
   "keywords": [
     "trustbench",
@@ -25,11 +25,11 @@
   "type": "module",
   "main": "./index.js",
   "bin": {
-    "mcp": "./bin.js"
+    "mcp": "server.js"
   },
   "files": [
     "index.js",
-    "bin.js",
+    "server.js",
     "README.md",
     "LICENSE"
   ],

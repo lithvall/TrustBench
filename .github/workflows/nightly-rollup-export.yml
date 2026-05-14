@@ -1,0 +1,92 @@
+name: Nightly Rollup Export
+
+# Writes the 7-night rollup CSV to exports/ daily. Produces two files per run:
+#
+#   - exports/rollup-<YYYY-MM-DD>.csv  (archive; one per UTC date)
+#   - exports/rollup-latest.csv        (alias; overwritten each run)
+#
+# Both are served by src/index.ts at /exports/:filename, reading from disk at
+# request time. Once this workflow commits + pushes, Railway auto-redeploys
+# and the new container ships the updated rollup.
+#
+# Why 23:55 UTC (and not 00:05 UTC, which is what we told Paddock)
+# -----------------------------------------------------------------
+# Committed in the Paddock Reddit DM 2026-05-14 as the partner-poll target.
+# Paddock's snapshot cron polls trustbench.io/exports/rollup-latest.csv at
+# 00:05 UTC each day. Railway redeploys take ~1-3 minutes after a push, so
+# running at 00:05 UTC would race Paddock's poll. Running at 23:55 UTC the
+# previous day gives ~10 minutes of slack: export (~1 min) + commit + push
+# (~10s) + Railway redeploy (~2-3 min) + buffer. By 00:05 UTC the new
+# container is live and Paddock fetches the fresh file. The "same window
+# as your snapshot cron" framing in the DM still holds.
+#
+# Failure mode
+# ------------
+# If this workflow fails (Supabase down, secret missing, push permission
+# blocked), the last successful rollup-latest.csv stays in place. Paddock
+# polls successfully but reads the previous day's data. The last_probed_at
+# column in the CSV makes the freshness visible to him. No silent corruption.
+# Recovery: re-run via workflow_dispatch from the Actions tab.
+
+on:
+  schedule:
+    - cron: '55 23 * * *'   # 23:55 UTC nightly (10 min before Paddock's 00:05 UTC poll)
+  workflow_dispatch:         # Manual trigger from the Actions tab
+
+permissions:
+  contents: write            # Required to commit + push the generated CSV
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Run the 7-night export script (scripts/export-7-night.ts). It writes
+      # the CSV body to stdout and status messages to stderr, so the > redirect
+      # only captures the CSV. --silent suppresses npm's own preamble so the
+      # file doesn't start with `> tsx scripts/...` lines.
+      #
+      # Both files are produced from the same export run so they're guaranteed
+      # to be byte-identical at write time (we cp the dated file to -latest,
+      # rather than running the export twice and risking drift between them).
+      - name: Generate rollup CSV
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          DATE_UTC=$(date -u +%F)
+          mkdir -p exports
+          npm run export-7-night --silent > "exports/rollup-${DATE_UTC}.csv"
+          cp "exports/rollup-${DATE_UTC}.csv" exports/rollup-latest.csv
+          echo "Wrote exports/rollup-${DATE_UTC}.csv"
+          wc -l "exports/rollup-${DATE_UTC}.csv"
+          wc -c "exports/rollup-${DATE_UTC}.csv"
+
+      # Commit + push. The diff --staged --quiet guard handles the (unusual)
+      # case where the export produced byte-identical output to the prior
+      # run, so git has nothing to commit. [skip ci] in the commit message
+      # is a defensive marker; this workflow only runs on schedule/manual
+      # so there's no recursion risk, but it's a clean signal to any future
+      # commit-triggered workflow that this is a bot commit.
+      - name: Commit and push
+        run: |
+          git config user.name "trustbench-bot"
+          git config user.email "bot@trustbench.io"
+          git add exports/rollup-*.csv
+          if git diff --staged --quiet; then
+            echo "No changes to commit (rollup byte-identical to prior run)."
+          else
+            git commit -m "chore(exports): nightly rollup $(date -u +%F) [skip ci]"
+            git push
+          fi

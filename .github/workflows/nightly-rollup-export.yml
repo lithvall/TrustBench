@@ -73,12 +73,25 @@ jobs:
           wc -l "exports/rollup-${DATE_UTC}.csv"
           wc -c "exports/rollup-${DATE_UTC}.csv"
 
-      # Commit + push. The diff --staged --quiet guard handles the (unusual)
-      # case where the export produced byte-identical output to the prior
-      # run, so git has nothing to commit. [skip ci] in the commit message
-      # is a defensive marker; this workflow only runs on schedule/manual
-      # so there's no recursion risk, but it's a clean signal to any future
-      # commit-triggered workflow that this is a bot commit.
+      # Commit + push. Two robustness guards:
+      #
+      #   1. diff --staged --quiet — handles the (unusual) case where the
+      #      export produced byte-identical output to the prior run.
+      #   2. fetch + rebase + retry — handles the case where main has
+      #      advanced between actions/checkout@v4 and our push attempt.
+      #      Caused the 2026-05-14 first-run failure: workflow_dispatch
+      #      triggered while a recent push was mid-flight, checkout pinned
+      #      the old SHA, push got "fetch first" rejection. Up to 3 attempts
+      #      with a fresh fetch + rebase between each, which covers the
+      #      realistic concurrency window (Railway redeploys don't push
+      #      back, so the only real source of contention is another
+      #      workflow committing to exports/ — currently none, but cheap
+      #      insurance for future cron additions).
+      #
+      # [skip ci] in the commit message: this workflow only runs on
+      # schedule/manual so there's no self-recursion risk, but [skip ci]
+      # is a clean signal to any future commit-triggered workflow that
+      # this is a bot commit.
       - name: Commit and push
         run: |
           git config user.name "trustbench-bot"
@@ -86,7 +99,17 @@ jobs:
           git add exports/rollup-*.csv
           if git diff --staged --quiet; then
             echo "No changes to commit (rollup byte-identical to prior run)."
-          else
-            git commit -m "chore(exports): nightly rollup $(date -u +%F) [skip ci]"
-            git push
+            exit 0
           fi
+          git commit -m "chore(exports): nightly rollup $(date -u +%F) [skip ci]"
+          for attempt in 1 2 3; do
+            if git push; then
+              echo "Push succeeded on attempt ${attempt}."
+              exit 0
+            fi
+            echo "Push rejected on attempt ${attempt}, fetching + rebasing on origin/main..."
+            git fetch origin main
+            git rebase origin/main
+          done
+          echo "Push failed after 3 attempts. Manual recovery needed."
+          exit 1

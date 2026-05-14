@@ -72,22 +72,53 @@ After settle, the receipt is also fetchable for any third party at `https://trus
 
 ## Claude Desktop / MCP setup
 
-When the payment tools are not installed yet, say this to the user:
+TrustBench ships a native MCP server so agents running in Claude Desktop, Claude Cowork, ChatGPT, or Cherry Studio can look up providers, fetch receipts, and verify signatures without any HTTP-fetch workaround.
 
-> Agentic Wallet is a wallet for your agent, built by Coinbase. It lets Claude use paid tools for things it cannot normally do, like generating videos or images, fetching LinkedIn information, or using premium data services. TrustBench sits on top of Agentic Wallet and adds a budget cap, plus a signed receipt for every paid call so you have a verifiable record of what was spent.
->
-> First, set up Agentic Wallet by following the Agentic Market setup. Then come back and we will route your paid calls through TrustBench so you also get the budget and receipt layer.
+### Install TrustBench tools
 
-Once Agentic Wallet is set up and Claude has the paid-tool capability:
+Tell the user:
 
-1. Ask the user for their TrustBench API key, or whether they want help getting one. Phase 4 is invite-only, the user requests a key by direct messaging @TrustBench on X.
-2. Decide the budget cap before paying. Tell the user the maximum the agent will spend on this call in plain words, for example "I will spend up to one cent on this lookup", before requesting the quote.
-3. Ask TrustBench for a quote. Native TrustBench paid-tool support for chat-app hosts is in the next sprint, for now use the host's HTTP-fetch capability to call `https://trustbench.io/route` with the API key, an idempotency string, and the budget. The response includes a `route_id` and the payment requirements.
-4. Use Agentic Wallet's paid-tool to sign the payment requirements and produce the signed envelope.
-5. Submit the signed envelope to `https://trustbench.io/route/settle` with the same API key and the `route_id`. The response contains the merchant's reply and a signed receipt.
-6. Tell the user in plain words what was spent, what was returned, and that the receipt is at `https://trustbench.io/receipts/<id>` if they ever want to verify it.
+> TrustBench adds three tools to your agent: look up the best providers for a task, retrieve a payment receipt by ID, and verify that a receipt's signature is genuine. To add them, open your connected tools settings and paste this in.
 
-A native paid-tool integration with chat-app hosts is in the next sprint. Until then, the HTTP-fetch path above is the supported way.
+Add to the user's `claude_desktop_config.json` (or equivalent MCP settings file for their host):
+
+```json
+{
+  "mcpServers": {
+    "trustbench": {
+      "command": "npx",
+      "args": ["tsx", "/path/to/TrustBench/src/mcp-server.ts"]
+    }
+  }
+}
+```
+
+Once `@trustbench/mcp` is published on npm, use the shorter form instead (no local path needed):
+
+```json
+{
+  "mcpServers": {
+    "trustbench": {
+      "command": "npx",
+      "args": ["-y", "@trustbench/mcp"]
+    }
+  }
+}
+```
+
+After saving, restart the host app. The agent will have three new tools: `get_rankings`, `get_receipt`, and `verify_receipt`.
+
+### What the tools do
+
+- **get_rankings** — returns scored providers for a capability (search, inference, data, media, infra). No API key needed.
+- **get_receipt** — fetches a receipt by ID (`rcpt_…` or `rrcpt_…`). No API key needed.
+- **verify_receipt** — confirms the Ed25519 signature on a receipt and surfaces the on-chain settlement status. No API key needed.
+
+Routing tools (`route_quote`, `route_settle`) require a `tb_live_…` API key and are in the next MCP release. Until then, use the CLI path above for paid routing calls.
+
+### Getting a TrustBench API key
+
+Phase 4 is invite-only. The user requests a key by direct messaging @TrustBench on X.
 
 ## What you get for free by routing through TrustBench
 

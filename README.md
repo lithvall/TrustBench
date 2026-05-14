@@ -42,6 +42,44 @@ across x402, p402, and MPP.
 - Solana routing (registry pre-built, network filter to drop)
 - npm verifier package `@trustbench/verify-receipt`
 
+## Claude Desktop / MCP
+
+TrustBench ships a native MCP server so agents in Claude Desktop, Claude Cowork, ChatGPT, or Cherry Studio can look up providers, fetch receipts, and verify signatures without any HTTP-fetch workaround.
+
+Add to `claude_desktop_config.json` (or your host's equivalent MCP settings file):
+
+```json
+{
+  "mcpServers": {
+    "trustbench": {
+      "command": "npx",
+      "args": ["-y", "@trustbench/mcp"]
+    }
+  }
+}
+```
+
+Or, from a local clone:
+
+```json
+{
+  "mcpServers": {
+    "trustbench": {
+      "command": "npx",
+      "args": ["tsx", "/path/to/TrustBench/src/mcp-server.ts"]
+    }
+  }
+}
+```
+
+Restart the host app after saving. Three tools become available:
+
+- **get_rankings** — scored providers by capability. No API key.
+- **get_receipt** — fetch any receipt by ID (`rcpt_…` / `rrcpt_…`). No API key.
+- **verify_receipt** — confirm Ed25519 signature + on-chain status. No API key.
+
+Routing tools (`route_quote`, `route_settle`) require a `tb_live_…` API key and ship in the next MCP release. Request access by DM'ing @TrustBench on X.
+
 ## What we don't do
 - We never hold agent funds, never submit transactions on-chain, never act as
   a payment facilitator. Agents sign EIP-3009 transferWithAuthorization
@@ -83,7 +121,7 @@ Public (no auth):
 - `GET /rankings?capability=search` — ranked providers for a capability (`search`, `inference`, `data`)
 - `GET /rankings/paid?capability=search` — same as `/rankings` but with each provider's signed scorecard
 - `GET /route?capability=search` — current best provider + fallback (legacy read-only — the Phase 3 routing surface is `POST /route`)
-- `GET /mcp/tools` — MCP tool descriptors for agent integrations
+- `GET /mcp/tools` — MCP tool descriptor catalog (JSON schema). For native tool use, see the Claude Desktop / MCP section above.
 - `GET /analytics` — plain HTML dashboard
 - `GET /methodology` — full description of what the probe does and does not measure
 - `GET /skill.md` — agent skill file in the [agentic.market/skill.md](https://agentic.market/skill.md) format. Paste into Claude Code, Codex, Gemini CLI, Hermes, Cursor, Claude Desktop, Cherry Studio, or ChatGPT to teach the agent the TrustBench quote/settle flow as an additive policy + receipt layer on top of Coinbase Agentic Wallet.

@@ -59,19 +59,6 @@ Add to `claude_desktop_config.json` (or your host's equivalent MCP settings file
 }
 ```
 
-Or, from a local clone:
-
-```json
-{
-  "mcpServers": {
-    "trustbench": {
-      "command": "npx",
-      "args": ["tsx", "/path/to/TrustBench/src/mcp-server.ts"]
-    }
-  }
-}
-```
-
 Restart the host app after saving. Three tools become available:
 
 - **get_rankings** — scored providers by capability. No API key.

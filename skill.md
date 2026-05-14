@@ -87,19 +87,6 @@ Add to the user's `claude_desktop_config.json` (or equivalent MCP settings file 
   "mcpServers": {
     "trustbench": {
       "command": "npx",
-      "args": ["tsx", "/path/to/TrustBench/src/mcp-server.ts"]
-    }
-  }
-}
-```
-
-Once `@trustbench/mcp` is published on npm, use the shorter form instead (no local path needed):
-
-```json
-{
-  "mcpServers": {
-    "trustbench": {
-      "command": "npx",
       "args": ["-y", "@trustbench/mcp"]
     }
   }

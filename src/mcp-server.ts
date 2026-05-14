@@ -20,17 +20,8 @@
  *
  * Routing tools (route_quote, route_settle) are v1.5 — add after v1 ships.
  *
- * Claude Desktop config snippet (add to claude_desktop_config.json):
- * {
- *   "mcpServers": {
- *     "trustbench": {
- *       "command": "npx",
- *       "args": ["tsx", "/path/to/TrustBench/src/mcp-server.ts"]
- *     }
- *   }
- * }
- *
- * Or, once published as @trustbench/mcp on npm:
+ * Claude Desktop / Grok / Kimi config (add to claude_desktop_config.json
+ * or your host's equivalent MCP settings file):
  * {
  *   "mcpServers": {
  *     "trustbench": {
@@ -39,6 +30,9 @@
  *     }
  *   }
  * }
+ *
+ * To run from a local clone instead:
+ *   npx tsx src/mcp-server.ts
  *
  * Failure mode: if TRUSTBENCH_BASE_URL is misconfigured, tool calls return
  * a descriptive error string in the content array — the server never crashes

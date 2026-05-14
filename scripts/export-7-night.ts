@@ -28,9 +28,22 @@
 // No DB writes. Read-only over `providers`, `scorecards`, `probes`. Safe to
 // run any time, including against production.
 //
-// Failure mode: an empty providers list yields a CSV with header only.
-// Missing scorecard or no probes in the 7-day window yield empty cells for
-// the relevant columns. Partner can filter / impute on their side.
+// Probed-only filter (added 2026-05-14): only providers with ≥1 probe sample
+// in the 7-day window are emitted. Providers in the registry with no 7-day
+// probe data are skipped — the probe sampler is the implicit curation layer
+// (~500 providers/night × 3 samples = ~3.5k unique providers in any 7-day
+// window). This keeps the export dense and aligned with Paddock's stated ask
+// for liveness data, and avoids republishing Coinbase Agentic Market catalog
+// noise (per-resource enumeration and reconnaissance probe URLs that landed
+// in providers via the crawler but were never probed). The skipped-count is
+// logged to stderr so the curation is visible in the workflow log.
+//
+// Missing scorecard yields an empty `score` and `last_probed_at` cell for
+// that row (rare; usually a brand-new probed provider). Partner can filter
+// or impute on their side.
+//
+// Failure mode: an empty providers list, or providers with zero matching
+// probes in the 7-day window, yields a CSV with header only.
 // =============================================================================
 
 import 'dotenv/config';
@@ -216,7 +229,37 @@ async function main() {
   process.stdout.write(cols.join(',') + '\n');
 
   let written = 0;
-  for (const p of providers ?? []) {
+  let skipped = 0;
+  for (const p of providers) {
+    // PROBED-ONLY FILTER (added 2026-05-14 for the Paddock deliverable).
+    //
+    // Without this filter the providers table dumps the full Agentic Market
+    // catalog crawl into the CSV (~50k rows on 2026-05-14, 88% concentrated
+    // in two domains that enumerate per-resource URLs like
+    // https://lowpaymentfee.com/api/endpoint-1..100+ and reconnaissance
+    // probe paths like https://lowpaymentfee.com/_dot_git/config). That's
+    // catalog noise, not endpoint discovery, and shipping it to Paddock as
+    // "the 7-night rollup" would misrepresent what TrustBench actually
+    // tracks.
+    //
+    // The probe sampler is the implicit curation layer: it hits ~500
+    // providers/night × 3 samples = the ~3.5k unique providers we consider
+    // real enough to actively measure. Filtering to "has ≥1 probe sample in
+    // the 7-day window" gives Paddock dense, honest liveness data — which
+    // is exactly what he asked for ("every day's snapshot includes that
+    // morning's liveness data alongside the spend data").
+    //
+    // Trade-off: providers with no 7-day probe samples (long-tail catalog
+    // accumulation, just-crawled, or temporarily un-probed) are invisible
+    // in this export. Acceptable for the Paddock-shaped deliverable. A
+    // separate "full registry" export can be added later if a different
+    // partner needs the long tail.
+    const agg = probeAgg.get(p.url);
+    if (!agg || agg.samples === 0) {
+      skipped += 1;
+      continue;
+    }
+
     const meta =
       p.metadata && typeof p.metadata === 'object' && !Array.isArray(p.metadata)
         ? (p.metadata as Record<string, unknown>)
@@ -243,7 +286,9 @@ async function main() {
     const score = sc?.score ?? '';
     const lastUpdated = sc?.last_updated ?? '';
 
-    const agg = probeAgg.get(p.url);
+    // Compute aggregated probe stats. agg.samples > 0 is guaranteed by the
+    // filter above, so the if-guard collapses but stays defensive — keeps
+    // the type narrowing clean for the percentile helpers.
     let successRate: string | number = '';
     let p50: string | number = '';
     let p95: string | number = '';
@@ -278,7 +323,9 @@ async function main() {
   }
 
   const elapsedMs = Date.now() - startedAt;
-  console.error(`[export-7-night] Done. Wrote ${written} rows in ${elapsedMs}ms.`);
+  console.error(
+    `[export-7-night] Done. Wrote ${written} rows, skipped ${skipped} unprobed providers in ${elapsedMs}ms.`,
+  );
 }
 
 main().catch((err) => {

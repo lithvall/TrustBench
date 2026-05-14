@@ -58,11 +58,12 @@ function notification(method: string): string {
 async function run(): Promise<void> {
   console.log('TrustBench MCP server smoke test\n');
 
-  // On Windows, npx lives as npx.cmd — use the .cmd form directly to avoid
-  // shell:true (which triggers a Node deprecation warning when args are passed).
-  const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-  const server = spawn(npxCmd, ['tsx', SERVER_PATH], {
+  // On Windows, .cmd files cannot be spawned directly — they need a shell.
+  // shell:true is safe here because all args are hardcoded constants (not
+  // user input), so there is no injection risk despite the Node deprecation warning.
+  const server = spawn('npx', ['tsx', SERVER_PATH], {
     stdio: ['pipe', 'pipe', 'inherit'],
+    shell: process.platform === 'win32',
     env: { ...process.env, TRUSTBENCH_BASE_URL: 'https://trustbench.io' },
   });
 

@@ -822,6 +822,11 @@ app.get('/privacy', (c) => c.html(renderPrivacyHtml()));
 // Standalone logo SVG — served for the Anthropic Connectors Directory listing
 // and any other context that needs a URL-addressable square logo.
 // 1:1 aspect ratio (32×32 viewBox), brand-green on transparent background.
+// Favicon — redirect to the SVG logo so browsers and Google's favicon service
+// pick up the TrustBench mark correctly.
+app.get('/favicon.ico', (c) => c.redirect('https://trustbench.io/logo.svg', 302));
+app.get('/favicon.svg', (c) => c.redirect('https://trustbench.io/logo.svg', 302));
+
 app.get('/logo.svg', (c) => {
   return new Response(
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">

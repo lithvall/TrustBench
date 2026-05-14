@@ -58,8 +58,10 @@ function notification(method: string): string {
 async function run(): Promise<void> {
   console.log('TrustBench MCP server smoke test\n');
 
+  // shell: true is required on Windows so Node can resolve npx.cmd
   const server = spawn('npx', ['tsx', SERVER_PATH], {
     stdio: ['pipe', 'pipe', 'inherit'],
+    shell: true,
     env: { ...process.env, TRUSTBENCH_BASE_URL: 'https://trustbench.io' },
   });
 

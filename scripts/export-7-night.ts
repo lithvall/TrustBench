@@ -134,22 +134,30 @@ async function fetchAllPaged<T>(
 async function main() {
   const startedAt = Date.now();
   console.error('[export-7-night] Pulling providers...');
+  // .order('url') makes pagination stable. Without it, PostgREST without an
+  // explicit ORDER BY can return overlapping rows on adjacent .range() pages —
+  // observed 2026-05-14 as 8 duplicate URLs / 49,668 in the first paginated
+  // run. URL is unique per provider so it's the natural stable sort key.
   const providers = await fetchAllPaged<ProviderRow>(
     'providers',
     (from, to) =>
       supabase
         .from('providers')
         .select('url, capability, metadata')
+        .order('url')
         .range(from, to),
   );
 
   console.error(`[export-7-night] ${providers.length} providers; pulling scorecards...`);
+  // Same stability discipline. provider_id is the FK to providers.url and
+  // unique per scorecard row, so it's the right stable sort key.
   const scorecards = await fetchAllPaged<ScorecardRow>(
     'scorecards',
     (from, to) =>
       supabase
         .from('scorecards')
         .select('provider_id, score, latency_p50, latency_p95, last_updated')
+        .order('provider_id')
         .range(from, to),
   );
   const scorecardByUrl = new Map<string, ScorecardRow>(
@@ -161,6 +169,10 @@ async function main() {
   // each is ~10k rows — well past the 1000-row PostgREST default cap.
   const sevenDaysAgo = new Date(Date.now() - SEVEN_DAYS_MS).toISOString();
   console.error(`[export-7-night] Pulling probes since ${sevenDaysAgo}...`);
+  // Stable sort across (timestamp, provider_id) so adjacent pages can't
+  // overlap. The (provider_id, timestamp) primary key on probes (or the
+  // natural insert order if no PK) tends to be timestamp-correlated, so
+  // ordering by timestamp first keeps the sort cheap.
   const probes = await fetchAllPaged<ProbeRow>(
     'probes',
     (from, to) =>
@@ -168,6 +180,8 @@ async function main() {
         .from('probes')
         .select('provider_id, timestamp, latency_ms, success')
         .gte('timestamp', sevenDaysAgo)
+        .order('timestamp')
+        .order('provider_id')
         .range(from, to),
   );
 

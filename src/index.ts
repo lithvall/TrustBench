@@ -167,19 +167,40 @@ async function getLandingStats(): Promise<LandingStats> {
     console.warn('[landing-stats] endpoint count query failed:', err);
   }
 
-  // Receipts in last 30 days. Receipts table uses `issued_at` (per
-  // phase3-schema.sql line 178), not `created_at`. Get this column name
-  // wrong and the count silently returns 0 even when receipts exist.
+  // Receipts in last 30 days. Two tables, summed:
+  //   - Phase 3 settlement receipts (rcpt_) live in `receipts`, filtered by
+  //     `issued_at` (per phase3-schema.sql line 178, NOT `created_at`).
+  //   - Phase 4 paywall routing receipts (rrcpt_) live in `paid_requests`
+  //     (service-role RLS), filtered by `created_at` AND a non-null
+  //     `response_body` — mirrors the accuracy filter used by the explorer
+  //     query in src/explorer-html.ts:149.
+  // Fail-soft: if one table query errors, return the other's count rather
+  // than null, so a partial outage doesn't blank the landing stat tile.
+  // Only when BOTH queries fail do we leave receiptsLast30Days null (which
+  // hides the tile per the fmt() em-dash fallback in landing-html.ts:43).
   let receiptsLast30Days: number | null = null;
   try {
     const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const { count, error } = await supabase
-      .from('receipts')
-      .select('id', { count: 'exact', head: true })
-      .gte('issued_at', cutoff);
-    if (!error && typeof count === 'number') receiptsLast30Days = count;
+    const [rcptResult, rrcptResult] = await Promise.all([
+      supabase
+        .from('receipts')
+        .select('id', { count: 'exact', head: true })
+        .gte('issued_at', cutoff),
+      supabase
+        .from('paid_requests')
+        .select('id', { count: 'exact', head: true })
+        .gte('created_at', cutoff)
+        .not('response_body', 'is', null),
+    ]);
+    const rcptCount = !rcptResult.error && typeof rcptResult.count === 'number' ? rcptResult.count : null;
+    const rrcptCount = !rrcptResult.error && typeof rrcptResult.count === 'number' ? rrcptResult.count : null;
+    if (rcptResult.error) console.warn('[landing-stats] rcpt_ count query failed:', rcptResult.error.message);
+    if (rrcptResult.error) console.warn('[landing-stats] rrcpt_ count query failed:', rrcptResult.error.message);
+    if (rcptCount !== null || rrcptCount !== null) {
+      receiptsLast30Days = (rcptCount ?? 0) + (rrcptCount ?? 0);
+    }
   } catch (err) {
-    console.warn('[landing-stats] receipt count query failed:', err);
+    console.warn('[landing-stats] receipt count query threw:', err);
   }
 
   // Median p50 latency across scorecards. Pull the latency_p50 column and

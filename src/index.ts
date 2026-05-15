@@ -441,68 +441,24 @@ app.get('/rankings/paid', async (c) => {
 // ---------------------------------------------------------------------------
 app.post('/mcp', createMcpHttpHandler(supabase));
 
-app.get('/mcp/tools', (c) => {
-  return c.json({
-    success: true,
-    tools: [
-      {
-        name: "trustbench_get_rankings",
-        description: "Get current TrustBench rankings for a capability",
-        parameters: {
-          type: "object",
-          properties: { capability: { type: "string", enum: ["search", "inference", "data", "media", "infra"] } },
-          required: ["capability"]
-        }
-      },
-      {
-        name: "trustbench_route_quote",
-        description: "Request a payment quote for a capability. Returns a route_id and an x402 payment challenge that the agent's wallet must sign with EIP-3009 transferWithAuthorization. Phase 3 supports Base mainnet + USDC only.",
-        parameters: {
-          type: "object",
-          properties: {
-            capability: { type: "string", enum: ["search", "inference", "data", "media", "infra"] },
-            max_price: {
-              type: "string",
-              description: "Maximum the agent will pay for this call, in atomic units of USDC (6 decimals). Example: '10000' = $0.01."
-            },
-            payer_address: {
-              type: "string",
-              pattern: "^0x[0-9a-fA-F]{40}$",
-              description: "The agent's wallet address (EOA) that will sign the EIP-3009 authorization."
-            },
-            idempotency_key: {
-              type: "string",
-              minLength: 16,
-              maxLength: 128,
-              description: "Unique per logical request, supplied as the Idempotency-Key header. Retries with the same key replay the cached quote."
-            }
-          },
-          required: ["capability", "max_price", "payer_address", "idempotency_key"]
-        }
-      },
-      {
-        name: "trustbench_route_settle",
-        description: "Submit the agent's signed EIP-3009 transferWithAuthorization to settle a previously quoted route. Returns the provider's response plus a signed Ed25519 receipt (verifiable at /receipts/:id).",
-        parameters: {
-          type: "object",
-          properties: {
-            route_id: {
-              type: "string",
-              pattern: "^qt_[0-9A-HJKMNP-TV-Z]{26}$",
-              description: "The route_id returned from trustbench_route_quote."
-            },
-            signature: {
-              type: "string",
-              pattern: "^0x[0-9a-fA-F]{130}$",
-              description: "65-byte ECDSA signature (r || s || v) over the EIP-3009 authorization payload."
-            }
-          },
-          required: ["route_id", "signature"]
-        }
-      }
-    ]
-  });
-});
+// ---------------------------------------------------------------------------
+// GET /mcp/tools — REMOVED 2026-05-15.
+//
+// This endpoint previously served a hand-maintained JSON descriptor that
+// drifted from the live MCP server at POST /mcp:
+//   - different tool names (trustbench_get_rankings vs get_rankings)
+//   - different inventory (route_quote/route_settle were never exposed on
+//     the MCP transport — read-only by design in v1)
+//
+// A reviewer probing both surfaces saw two catalogs disagreeing on names
+// and count — a credibility risk for the Anthropic Connectors Directory
+// submission. The single source of truth is now the MCP `tools/list` method
+// on POST /mcp, served from src/mcp-tools.ts. Any wild client still hitting
+// GET /mcp/tools now 404s, which is the right signal — there is one MCP
+// surface and it lives at POST /mcp.
+//
+// Removal context: REVIEW-2026-05-14-mcp-approval-odds.md follow-up critic pass.
+// ---------------------------------------------------------------------------
 
 // Public Ed25519 key
 app.get('/.well-known/trustbench-pubkey', (c) => {

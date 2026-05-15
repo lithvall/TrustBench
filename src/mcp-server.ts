@@ -88,12 +88,57 @@ async function handleGetReceipt(args: Record<string, unknown>): Promise<string> 
   return JSON.stringify(data, null, 2);
 }
 
+/**
+ * Verify a receipt — two modes (matches src/mcp-tools.ts handler).
+ *
+ *   Mode 1 — Lookup: args.receipt_id → fetch via GET /receipts/:id, surface
+ *            the verification fields the live endpoint already computes.
+ *   Mode 2 — Offline: args.receipt_json → POST to /verify (or to the
+ *            HTTP MCP endpoint at /mcp using verify_receipt) so the server
+ *            verifies the supplied envelope. Stdio clients can't use
+ *            in-process Ed25519 here without dragging the noble crypto
+ *            dependency into this minimal-deps subprocess; routing through
+ *            HTTP keeps the package zero-dependency. For truly offline
+ *            verification with zero network use @trustbench/verify-receipt.
+ *
+ * Failure mode: if the chain RPC fails, signature_valid is still meaningful;
+ * on_chain_verified falls back to false. Inverted-truthiness bug fix
+ * (2026-05-15): the prior `data['signature_valid'] ?? data['signature_alg']
+ * ? '...' : 'unknown'` parsed as `?? (ternary)` and lost the false signal.
+ * The server now uses the `signature_valid` boolean directly when present.
+ */
 async function handleVerifyReceipt(args: Record<string, unknown>): Promise<string> {
-  const id = args['receipt_id'] as string;
-  if (!id) return 'Error: receipt_id is required.';
-  if (!/^[a-zA-Z0-9_-]+$/.test(id)) return 'Error: invalid receipt_id format.';
+  const id = args['receipt_id'] as string | undefined;
+  const json = args['receipt_json'] as Record<string, unknown> | undefined;
 
-  // Fetch the receipt
+  if (!id && !json) return 'Error: provide either receipt_id (lookup mode) or receipt_json (offline mode).';
+  if (id && json) return 'Error: receipt_id and receipt_json are mutually exclusive — pass exactly one.';
+
+  // Mode 2 — Offline: forward the envelope to the HTTP MCP endpoint so the
+  // hosted server runs the same Ed25519 + on-chain verification it would for
+  // any other call to verify_receipt. Keeps this stdio package dependency-free.
+  if (json) {
+    const url = `${BASE_URL}/mcp`;
+    const body = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name: 'verify_receipt', arguments: { receipt_json: json } },
+    };
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return `Error verifying receipt envelope: HTTP ${res.status} from ${url}`;
+    const rpc = await res.json() as { result?: { content?: Array<{ text?: string }> }; error?: unknown };
+    if (rpc.error) return `Error: ${JSON.stringify(rpc.error)}`;
+    return rpc.result?.content?.[0]?.text ?? 'Error: empty MCP response.';
+  }
+
+  // Mode 1 — Lookup: receipt_id only.
+  if (!/^[a-zA-Z0-9_-]+$/.test(id!)) return 'Error: invalid receipt_id format.';
+
   const url = `${BASE_URL}/receipts/${id}`;
   const res = await fetch(url, { headers: { Accept: 'application/json' } });
   if (res.status === 404) return `No receipt found for ID: ${id}`;
@@ -101,20 +146,27 @@ async function handleVerifyReceipt(args: Record<string, unknown>): Promise<strin
 
   const data = await res.json() as Record<string, unknown>;
 
-  // The receipt JSON already carries TrustBench's verification fields
-  // (signature_valid, on_chain_verified) when fetched from the live endpoint.
-  // Surface them clearly for the agent.
-  const sigValid = data['signature_valid'] ?? data['signature_alg'] ? '(see full receipt)' : 'unknown';
-  const onChain  = data['on_chain_verified'] ?? 'not checked by server';
+  // Use signature_valid directly when present (it's the boolean the live
+  // endpoint already computed via getOrComputeVerifyResults). Falling back
+  // to the older "(see full receipt)" string only if the field is absent.
+  const sigValid =
+    typeof data['signature_valid'] === 'boolean'
+      ? data['signature_valid']
+      : (data['signature_alg'] ? '(see full receipt)' : 'unknown');
+  const onChain =
+    typeof data['on_chain_verified'] === 'boolean'
+      ? data['on_chain_verified']
+      : (data['on_chain_verified'] ?? 'not checked by server');
 
   const summary = {
     receipt_id: id,
+    mode: 'lookup',
     signature_valid: sigValid,
     on_chain_verified: onChain,
     signature_alg: data['signature_alg'] ?? null,
     verify_url: `${BASE_URL}/receipts/${id}`,
     pubkey_url: `${BASE_URL}/.well-known/trustbench-pubkey`,
-    note: 'For full offline Ed25519 verification: npx @trustbench/verify-receipt ' + id,
+    note: 'For zero-network offline verification: npx @trustbench/verify-receipt ' + id,
   };
 
   return JSON.stringify(summary, null, 2);

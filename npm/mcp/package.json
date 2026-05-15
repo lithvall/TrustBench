@@ -1,7 +1,7 @@
 {
   "name": "@trustbench/mcp",
-  "version": "1.0.4",
-  "description": "Native MCP server for TrustBench. Exposes provider rankings, receipt lookup, and Ed25519 receipt verification as agent-callable tools in Claude Desktop, Grok, Kimi, Cherry Studio, and any MCP-compatible host.",
+  "version": "1.1.0",
+  "description": "Native MCP server for TrustBench. Exposes provider rankings, receipt lookup, and Ed25519 receipt verification (lookup + offline modes) as agent-callable tools in Claude Desktop, Grok, Kimi, Cherry Studio, and any MCP-compatible host.",
   "keywords": [
     "trustbench",
     "x402",

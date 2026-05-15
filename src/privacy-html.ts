@@ -9,7 +9,7 @@ export function renderPrivacyHtml(): string {
     'TrustBench privacy policy. The TrustBench API and MCP server collect no ' +
     'personal data, store no session information, and transmit no user data to ' +
     'third parties.';
-  const lastUpdated = '2026-05-14';
+  const lastUpdated = '2026-05-15';
 
   // Build without template literals to avoid any transpiler surprises.
   const head = siteHead(title, description, 'methodology');
@@ -68,6 +68,31 @@ ${nav}
           <li>No cookies or browser fingerprinting</li>
           <li>No analytics SDKs (no Google Analytics, Mixpanel, etc.)</li>
         </ul>
+      </section>
+
+      <section>
+        <h2 class="text-xl font-semibold text-ink mb-3 pb-2 border-b-2 border-brand">On-chain data in receipts</h2>
+        <p class="mb-3">
+          Receipts contain on-chain settlement data including wallet addresses and payment
+          amounts. <strong class="text-ink">This data is inherently public</strong> &mdash;
+          it exists on Base L2 and is verifiable by anyone with a transaction hash via a
+          public block explorer such as <a href="https://basescan.org" class="text-brand hover:underline">basescan.org</a>.
+        </p>
+        <p class="mb-3">
+          TrustBench does not associate wallet addresses with personal identities and does
+          not enrich receipt data with off-chain identity information. Querying a receipt
+          via the public REST API at <code class="bg-surface px-1 rounded text-sm font-mono">GET /receipts/:id</code>,
+          via the MCP server's <code class="bg-surface px-1 rounded text-sm font-mono">get_receipt</code>
+          or <code class="bg-surface px-1 rounded text-sm font-mono">verify_receipt</code> tools,
+          or via the <code class="bg-surface px-1 rounded text-sm font-mono">@trustbench/verify-receipt</code>
+          npm package returns only the on-chain settlement data plus the Ed25519 signature
+          covering the canonical receipt body. No additional identity, contact, or behavioral
+          data is attached.
+        </p>
+        <p>
+          Users who do not want their wallet activity recorded in a TrustBench receipt should
+          not route their x402 calls through TrustBench.
+        </p>
       </section>
 
       <section>

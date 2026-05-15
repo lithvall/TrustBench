@@ -4,6 +4,26 @@ A living log of patterns, surprises, and corrections worth remembering across se
 
 ---
 
+## 2026-05-15 — `npm view` before asserting a package is broken/unpublished (Critic-pass false positive)
+
+Running a follow-up Critic pass on the MCP Connectors Directory submission, I asserted as the load-bearing rejection reason #1: "the canonical install command in your own docs returns 404 — `@trustbench/mcp` is not published." The reasoning chain was: I globbed for `packages/mcp/**/package.json`, got no hits, concluded the package was not published. Wrote a confident critic-pass output naming this as the highest-severity finding.
+
+When Johan greenlit the work and I went to verify before editing, `npm view @trustbench/mcp` returned `@trustbench/mcp@1.0.4 | MIT | deps: none | versions: 5`. Five published versions going back to 2026-05-14, latest from yesterday. The repo path was `npm/mcp/`, not `packages/mcp/` — I globbed the wrong location. The decision Johan had already approved (option: "Publish @trustbench/mcp") was based on a false premise; the actual work needed was a republish (v1.1.0) after schema changes, not a first publish.
+
+**The discipline that would have caught it:** the critic-pass template (`prompts/critic.md`) is explicit that the value of the exercise is the rejection reasons, not the verdict. I produced a rejection reason that was vivid and felt incisive ("a reviewer following your own published instructions cannot install your own server") without doing the 15-second check that would have falsified it. CLAUDE.md's anti-hallucination section is also explicit: *"Always read the current file with the read_file tool before proposing any edit or claiming knowledge of its contents... Never assume a file, function, env var, or behavior exists. Verify with tools or commands."* I treated the critic pass as an exception because the output was "analysis," not code. It was not an exception.
+
+**Three patterns worth banking:**
+
+1. **For any critic-pass rejection reason that names an external resource (npm package, URL, on-chain artifact, partner endpoint), run the verification command for that resource before writing the reason down.** `npm view <pkg>`, `curl -I <url>`, `cast tx <hash>`. The cost is one bash call per claim; the cost of skipping it is a Critic pass whose load-bearing finding is fiction. The Critic pass on the paywall (`prompts/critic.md` § Example) names "Router402 ships single-payment-per-call" — that's a hypothetical and labeled as such. The MCP critic pass named "your npm install is broken" without the labeling — same uncalibrated confidence as a verified fact.
+
+2. **Glob with both name conventions for things that have community-default locations.** `packages/` is one npm-monorepo convention; `npm/` is another (used in this repo); `dist/` and `bin/` are also possible. Asserting "no package exists" because one path is empty is the same failure mode as asserting "no API exists" because `/api/v1/foo` 404s without checking `/v1/foo`. Either run the canonical query (`npm view`, `nx show projects`, `lerna ls`) or glob for the union of conventions before drawing the absence conclusion.
+
+3. **When the user has just confirmed a multi-question decision rooted in a load-bearing assumption, surface the verification result *before* doing the work that the decision authorized.** Johan picked "Publish @trustbench/mcp" because the question framed the package as broken. The correct flow on receiving "yes, proceed": run the precondition check first, and if the assumption is wrong, surface "the premise of question 1 was wrong; here's what's actually true; do you want to revise the decision?" before any disk writes. I almost executed an unnecessary fresh-publish flow because the decision had already been "made."
+
+**Meta-lesson.** A Critic pass that produces specific-sounding wrong findings is worse than a vague pass that produces specific-sounding right ones. The specificity gives the wrong findings teeth they don't deserve. Per `prompts/critic.md` § Anti-rubber-stamp discipline: "If the Critic verdict is acceptable or endorsed for three high-risk diffs in a row, stop and ask: am I rubber-stamping?" The inverse failure mode also exists: if the Critic verdict is `weak-reject` or `strong-reject` and the rejection reasons sound vivid and confident — pause and ask whether each rejection reason has been verified externally, or whether one or more is operating on an unchecked assumption.
+
+---
+
 ## 2026-05-13 — When a deliverable's README documents a verification command, round-trip that exact command end-to-end before declaring the deliverable ready
 
 Shipping the §10 Strata reference-agent script: I wrote `examples/strata-integration/reference-agent.ts` + README, ran `tsc --noEmit`, did the 7-point high-risk-surface self-review, and called it done. The README's verification command was `npx @trustbench/verify-receipt <receipt_id> --check-chain`. I did not actually run that command end-to-end against a Phase 4 paywall receipt before declaring ready. When Johan ran it against the first live `rrcpt_…` receipt the script produced, the npm package threw `unrecognized input: rrcpt_…` — two structural gaps surfaced that I'd missed:

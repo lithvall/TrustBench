@@ -27,6 +27,21 @@ export interface VerifyResult {
   /** True iff signature is valid AND (chain is verified OR checkChain was not requested). */
   ok: boolean;
   signatureValid: boolean;
+  /**
+   * Three terminal states of the signature check:
+   *   - 'valid'       signature was checked and is correct
+   *   - 'invalid'     signature was checked and is wrong (bytes don't match,
+   *                   or the envelope is structurally malformed)
+   *   - 'unavailable' signature could NOT be checked because a network fetch
+   *                   failed (receipt URL or public-key URL unreachable).
+   *                   Use this branch to distinguish "tampered" from
+   *                   "can't reach the verifier" in CLI output and CI policy.
+   *
+   * Only the `fetch_failed:`, `pubkey_fetch_failed:`, and `pubkey_fetch_error:`
+   * error prefixes map to 'unavailable'. A genuinely tampered signature or
+   * malformed envelope MUST classify as 'invalid'.
+   */
+  verificationStatus: 'valid' | 'invalid' | 'unavailable';
   /** Undefined when checkChain wasn't requested. */
   onChainVerified: boolean | undefined;
   receipt: any | null;

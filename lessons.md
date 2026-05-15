@@ -4,6 +4,35 @@ A living log of patterns, surprises, and corrections worth remembering across se
 
 ---
 
+## 2026-05-15 — When a code change introduces a discriminator, smoke tests need *negative* cases too, not just positive
+
+Shipping `@trustbench/verify-receipt` v0.1.2 after Strata's DM flagged that the CLI prints `❌ SIGNATURE INVALID — receipt has been tampered with` when the pubkey URL is unreachable. The fix: add `verificationStatus: 'valid' | 'invalid' | 'unavailable'` on `VerifyResult`, branch the CLI headline on it, add exit code 5 for unavailable. The discriminator's load-bearing security property is that *only* `fetch_failed:*` / `pubkey_fetch_*` errors classify as `unavailable` — a tampered receipt must classify as `invalid`, because CI policies that retry-forever on `unavailable` but alert-on-tamper for `invalid` would otherwise let an attacker mask a forgery as a connectivity hiccup.
+
+I wrote a smoke test (`npm/verify-receipt/smoke-unavailable.js`) with 4 cases:
+
+1. Receipt URL unreachable → expect `unavailable`. (positive — "must be A")
+2. Public key URL unreachable → expect `unavailable`. (positive)
+3. Programmatic object input with malformed shape → expect `invalid`. (negative — "must NOT be A")
+4. Unsupported signature algorithm → expect `invalid`. (negative)
+
+Johan ran the smoke from PowerShell. Cases 1, 2, 4 passed. **Case 3 failed**: `verificationStatus === unavailable -> unavailable`. A malformed object input (`{ receipt: {...} }` with no `signature`) was being classified as `unavailable` instead of `invalid`. Root cause: `loadEnvelope` threw `"object input is not a receipt envelope"` for malformed objects, and the catch handler in `verifyReceipt` unconditionally mapped *every* thrown error to `fetch_failed:` + `unavailable`. The fix was small: move object-input shape handling inline in `verifyReceipt` so only the string-input fetch path flows through the unavailable-classifying catch.
+
+The point isn't the bug. The point is that **the positive cases (1, 2) alone would have shipped this bug to npm**. Anyone passing a bogus URL got the right classification. The wrong classification only surfaced for programmatic callers passing pre-fetched envelopes — which is exactly the call shape an attacker would use to submit a forgery and trigger CI's retry-forever instead of its tamper-alert. Without Case 3 in the smoke, v0.1.2 ships with the security property broken in the one call shape that matters most.
+
+**Three patterns:**
+
+1. **For any change that introduces a discriminator — status field, error classification, exit code branching, route-selection, allow/deny gate — write smoke tests for both directions.** Positive tests pin "this input must classify as A." Negative tests pin "this input that *looks like A in some ways* must classify as B." A buggy discriminator that defaults to A passes 100% of positive tests trivially. The negative tests are where the actual classification logic gets exercised.
+
+2. **The cheap heuristic for "is there a negative case I'm missing?"** Pair every positive test by writing the inverse claim and seeing if it produces a distinct test case. For Case 1 ("receipt URL unreachable must be `unavailable`"), the inverse is "what input could *appear* unreachable but should be classified differently?" Answer: a programmatic input that throws an error from `loadEnvelope` for a non-fetch reason. That's Case 3, and it's the case that actually surfaced the bug. The pairing is a 30-second mental exercise per positive test.
+
+3. **For security-relevant discriminators specifically, name the attacker shape in the test comment.** Case 3's docstring says: *"A receipt with no signature object MUST classify as 'invalid', NOT 'unavailable'. If we got this wrong, an attacker could submit malformed receipts and have them pass as connectivity issues in CI policy."* That comment is what gets read when the test fails. It tells the reader why the test exists, which prevents a future maintainer from "fixing" the test by relaxing the assertion. Without the attacker-shape framing, Case 3 reads like a pedantic edge case worth deleting.
+
+**Meta-lesson.** The v0.1.2 change was correctly identified as medium-risk (not high-risk) because the Ed25519 + JCS logic stayed byte-identical. The high-risk-surface checklist's "failure mode if this is wrong" item was applied to the classification layer — I wrote *"only `fetch_failed:*` / `pubkey_fetch_*` error prefixes can map to 'unavailable'"* in the index.js comment. The discipline was present in the design. What was missing was the discipline at the test level: writing the contract as a positive-only assertion produces a test that doesn't actually check the contract. Pairing the positive with the negative is what makes the test exercise the same property the design comment claims.
+
+Concretely for future TrustBench work: whenever a change adds a new field that takes one of N discrete values, the smoke test should include at least one input that would exercise *each* value — including the values that should *not* fire under normal circumstances. The N=2 case (boolean) is the most common; this lesson is even more load-bearing there because boolean defaults are silent.
+
+---
+
 ## 2026-05-15 — `npm view` before asserting a package is broken/unpublished (Critic-pass false positive)
 
 Running a follow-up Critic pass on the MCP Connectors Directory submission, I asserted as the load-bearing rejection reason #1: "the canonical install command in your own docs returns 404 — `@trustbench/mcp` is not published." The reasoning chain was: I globbed for `packages/mcp/**/package.json`, got no hits, concluded the package was not published. Wrote a confident critic-pass output naming this as the highest-severity finding.

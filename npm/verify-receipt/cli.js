@@ -26,16 +26,17 @@ Two receipt-id prefixes are accepted:
 Examples:
   trustbench-verify-receipt rcpt_01KQY7C44GAPSXZPFQYRZ1D10C
   trustbench-verify-receipt rcpt_01KQY7C44GAPSXZPFQYRZ1D10C --check-chain
-  trustbench-verify-receipt rrcpt_01KRGKSZACB4ECRPEQY1VC0F3N --check-chain
+  trustbench-verify-receipt rrcpt_01KRN8HYPPRD1MS9JE7045S77Q --check-chain
   trustbench-verify-receipt ./my-receipt.json
   trustbench-verify-receipt https://trustbench.io/receipts/rrcpt_...
 
 Exit codes:
   0  signature valid (and chain verified, if --check-chain was used)
   1  bad arguments / unrecoverable error
-  2  signature invalid
+  2  signature invalid (bytes don't match — possible tampering)
   3  signature valid but on-chain mismatch
   4  signature valid but chain check threw an error (RPC failure etc.)
+  5  signature could not be verified (couldn't fetch the receipt or public key)
 `;
 
 async function main() {
@@ -81,6 +82,16 @@ async function main() {
     printHumanReadable(result, options);
   }
 
+  // Exit code policy (v0.1.2+):
+  //   0  valid signature (+ chain verified if requested)
+  //   2  signature invalid — bytes were checked and don't match (tamper signal)
+  //   3  signature valid but on-chain claim disagrees
+  //   4  signature valid but chain check threw (RPC error)
+  //   5  signature could not be checked at all — fetch failed for receipt or
+  //      pubkey URL. This is a connectivity/availability failure, NOT a tamper
+  //      signal. CI policies that auto-retry on flakiness but alert on tamper
+  //      should branch on this code.
+  if (result.verificationStatus === 'unavailable') process.exit(5);
   if (!result.signatureValid) process.exit(2);
   if (options.checkChain) {
     if (result.chain && !result.chain.ok) process.exit(3);
@@ -107,11 +118,29 @@ function printHumanReadable(result, options) {
   if (result.canonicalLength) console.log('Canon. :', result.canonicalLength, 'bytes signed');
   console.log('');
 
-  if (result.signatureValid) {
+  // Three terminal states (added v0.1.2). The 'unavailable' branch exists to
+  // stop misdiagnosing connectivity failures as tampering — a partner DM
+  // (Strata, 2026-05-15) flagged that a first-run user behind a flaky network
+  // or sandbox sees "SIGNATURE INVALID — receipt has been tampered with" and
+  // assumes the worst. The real issue is that the verifier never reached the
+  // public key URL to do the math.
+  if (result.verificationStatus === 'valid') {
     console.log('✅ SIGNATURE VALID — receipt is authentic.');
+  } else if (result.verificationStatus === 'unavailable') {
+    console.log('⚠️  VERIFICATION UNAVAILABLE — could not fetch the receipt or public');
+    console.log('   key needed to verify the signature. This is NOT a tamper signal;');
+    console.log('   the verifier never reached the math. Retry once your network can');
+    console.log('   reach the URLs below.');
+    if (result.errors.length) {
+      console.log('');
+      console.log('Details:');
+      for (const err of result.errors) console.log(`  - ${err}`);
+    }
+    return;
   } else {
-    console.log('❌ SIGNATURE INVALID — receipt has been tampered with, or the public key');
-    console.log('   at the URL above does not match the signing key.');
+    console.log('❌ SIGNATURE INVALID — bytes were checked and do not match. The receipt');
+    console.log('   has been tampered with, the envelope is structurally malformed, or');
+    console.log('   the public key at the URL above does not match the signing key.');
     if (result.errors.length) {
       console.log('');
       console.log('Errors:');

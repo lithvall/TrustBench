@@ -97,6 +97,25 @@ export async function verifyReceipt(input, options = {}) {
   const result = {
     ok: false,
     signatureValid: false,
+    // verificationStatus distinguishes three terminal states of the signature
+    // check, so callers (and the CLI) can present the right message:
+    //   - 'valid'       signature was checked and is correct
+    //   - 'invalid'     signature was checked and is wrong (bytes don't match,
+    //                   or the envelope is structurally malformed)
+    //   - 'unavailable' signature could NOT be checked because a network fetch
+    //                   failed (receipt URL or public-key URL unreachable).
+    //                   This is NOT a tamper signal — partner DM (Strata,
+    //                   2026-05-15) flagged that printing "SIGNATURE INVALID"
+    //                   on connectivity errors scares first-run users when the
+    //                   real issue is a flaky network or sandboxed environment.
+    //
+    // Load-bearing correctness rule: ONLY the `fetch_failed:*`,
+    // `pubkey_fetch_failed:*`, and `pubkey_fetch_error:*` error prefixes can
+    // map to 'unavailable'. A genuinely tampered signature (signature_invalid)
+    // or a malformed envelope MUST classify as 'invalid'. Misclassifying a
+    // tampered receipt as unavailable would let an attacker mask a forgery as
+    // a connectivity hiccup.
+    verificationStatus: 'invalid',
     onChainVerified: undefined,
     receipt: null,
     keyId: null,
@@ -107,13 +126,29 @@ export async function verifyReceipt(input, options = {}) {
     errors: [],
   };
 
-  // 1. Resolve to envelope
+  // 1. Resolve to envelope.
+  //
+  // Two paths: programmatic object input (no fetch involved) vs string input
+  // (id/URL/file — fetch or read may fail). The split matters because a
+  // structural defect in an object input must classify as 'invalid', not
+  // 'unavailable'. Misclassifying a malformed object as unavailable would let
+  // a hostile caller submit a broken envelope programmatically and get CI to
+  // treat it as a connectivity hiccup instead of a tamper signal. Pinned by
+  // smoke-unavailable.js Case 3.
   let envelope;
-  try {
-    envelope = await loadEnvelope(input, options);
-  } catch (e) {
-    result.errors.push(`fetch_failed: ${e.message}`);
-    return result;
+  if (input && typeof input === 'object' && !Array.isArray(input)) {
+    // Already-decoded envelope. Skip loadEnvelope entirely — no fetch path,
+    // so any shape problem is structural, surfaced below by the
+    // envelope_missing_receipt_or_signature check.
+    envelope = input;
+  } else {
+    try {
+      envelope = await loadEnvelope(input, options);
+    } catch (e) {
+      result.errors.push(`fetch_failed: ${e.message}`);
+      result.verificationStatus = 'unavailable';
+      return result;
+    }
   }
 
   if (!envelope || typeof envelope !== 'object') {
@@ -136,8 +171,21 @@ export async function verifyReceipt(input, options = {}) {
   result.canonicalLength = sigCheck.canonicalLength;
   if (!sigCheck.ok) {
     result.errors.push(...sigCheck.errors);
+    // Distinguish "couldn't fetch the key" from "key fetched but signature
+    // doesn't match." Only the former maps to 'unavailable'. Anything else
+    // (signature_invalid, unsupported_signature_alg, pubkey_parse_error,
+    // signature_value_missing, public_key_url_missing_no_override) stays
+    // 'invalid' — those are real envelope/sig defects.
+    if (sigCheck.errors.some((e) =>
+      e.startsWith('pubkey_fetch_failed:') ||
+      e.startsWith('pubkey_fetch_error:')
+    )) {
+      result.verificationStatus = 'unavailable';
+    }
     return result;
   }
+
+  result.verificationStatus = 'valid';
 
   // 3. Optional: chain verification
   if (options.checkChain) {
@@ -163,12 +211,11 @@ export async function verifyReceipt(input, options = {}) {
 // Internal: load envelope from various input shapes
 // ---------------------------------------------------------------------------
 async function loadEnvelope(input, options) {
-  // Already-decoded envelope
-  if (input && typeof input === 'object') {
-    if (input.receipt && input.signature) return input;
-    throw new Error('object input is not a receipt envelope ({receipt, signature})');
-  }
-
+  // v0.1.2+: object inputs are handled inline in verifyReceipt so the
+  // 'invalid' vs 'unavailable' classification stays correct. This function
+  // now only fires on string inputs (id, URL, file path) — where a fetch or
+  // disk read may fail and 'unavailable' is the right classification on
+  // throw.
   if (typeof input !== 'string') {
     throw new Error('input must be receipt envelope, id, URL, or .json file path');
   }

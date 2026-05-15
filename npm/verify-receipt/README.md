@@ -30,7 +30,7 @@ import { verifyReceipt } from '@trustbench/verify-receipt';
 
 // By receipt id (Phase 3 or Phase 4)
 const result = await verifyReceipt('rcpt_01KQY7C44GAPSXZPFQYRZ1D10C');
-const result2 = await verifyReceipt('rrcpt_01KRGKSZACB4ECRPEQY1VC0F3N');
+const result2 = await verifyReceipt('rrcpt_01KRN8HYPPRD1MS9JE7045S77Q');
 console.log(result.signatureValid); // true | false
 console.log(result.ok);              // signature valid + chain verified (if checkChain)
 
@@ -54,10 +54,10 @@ if (result.chain && result.chain.ok) {
 ```bash
 # Signature-only verification
 npx trustbench-verify-receipt rcpt_01KQY7C44GAPSXZPFQYRZ1D10C
-npx trustbench-verify-receipt rrcpt_01KRGKSZACB4ECRPEQY1VC0F3N
+npx trustbench-verify-receipt rrcpt_01KRN8HYPPRD1MS9JE7045S77Q
 
 # Signature + on-chain (requires viem)
-npx trustbench-verify-receipt rrcpt_01KRGKSZACB4ECRPEQY1VC0F3N --check-chain
+npx trustbench-verify-receipt rrcpt_01KRN8HYPPRD1MS9JE7045S77Q --check-chain
 
 # From a local JSON file
 npx trustbench-verify-receipt ./my-receipt.json
@@ -66,7 +66,7 @@ npx trustbench-verify-receipt ./my-receipt.json
 npx trustbench-verify-receipt ./my-receipt.json --pubkey-url http://localhost:3000/.well-known/trustbench-pubkey
 ```
 
-Exit codes: `0` valid, `1` bad args, `2` signature invalid, `3` on-chain mismatch, `4` chain check error.
+Exit codes: `0` valid, `1` bad args, `2` signature invalid (tamper signal), `3` on-chain mismatch, `4` chain check error, `5` verification unavailable (couldn't fetch the receipt or public key — connectivity, not tampering).
 
 ## What gets verified
 
@@ -115,6 +115,13 @@ The exact canonicalization function used internally. Useful for callers that wan
 - Mirrors the in-repo reference verifier ([`scripts/verify-receipt.js`](https://github.com/lithvall/TrustBench/blob/main/scripts/verify-receipt.js)) byte-for-byte for the JCS + Ed25519 logic. If they disagree, that's a bug — please open an issue.
 
 ## Changelog
+
+### 0.1.2
+
+- Added `verificationStatus: 'valid' | 'invalid' | 'unavailable'` on the `VerifyResult`. Previously, a fetch failure for the receipt URL or the public key URL was indistinguishable from a tampered signature in the headline output. CLI now prints `⚠️  VERIFICATION UNAVAILABLE` (exit code `5`) when the verifier could not reach the URLs needed to do the math, vs. `❌ SIGNATURE INVALID` (exit code `2`) only when bytes were checked and do not match. CI policies that retry on flakiness but alert on tamper should branch on this distinction.
+- The `signatureValid` boolean and existing exit codes 0-4 are preserved. v0.1.0/v0.1.1 callers using `result.signatureValid` or `result.ok` continue working unchanged.
+- Refreshed example IDs in the README and CLI HELP block to point at the post-Strata-PR-24 reference receipt (`rrcpt_01KRN8HYPPRD1MS9JE7045S77Q`).
+- No change to the JCS canonicalization or Ed25519 verify logic. If v0.1.1 said VALID, v0.1.2 says VALID.
 
 ### 0.1.1
 

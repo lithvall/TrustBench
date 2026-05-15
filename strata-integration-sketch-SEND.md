@@ -497,22 +497,22 @@ If any of these need fast turnaround, please flag in the next reply and I'll pri
 
 ---
 
-## 11. Reference receipt — artifact in hand (2026-05-13)
+## 11. Reference receipt — artifact in hand (2026-05-13; re-issued 2026-05-15 against post-PR-24 probe)
 
-Six days ahead of the 2026-05-19 target. The §10.2 flow ran end-to-end against a real `data`-capability merchant on Base mainnet. Total wallet cost: $0.005 USDC.
+Originally landed 2026-05-13, six days ahead of the 2026-05-19 target. Re-issued 2026-05-15 against the post-PR-24 Strata probe after Strata's verifier patch corrected the CMC score from `10/critical` to `65/low/trusted=true`. The §10.2 flow ran end-to-end against a real `data`-capability merchant on Base mainnet. Total wallet cost: $0.005 USDC.
 
 ### 11.1 The artifact
 
 ```
-https://trustbench.io/receipts/rrcpt_01KRGKSZACB4ECRPEQY1VC0F3N
+https://trustbench.io/receipts/rrcpt_01KRN8HYPPRD1MS9JE7045S77Q
 ```
 
-Immutable, content-negotiated (HTML for browsers, byte-identical JSON for agents), Ed25519-signed over RFC 8785 JCS-canonical bytes, on-chain anchored at Base block 45942380 (tx `0x2ec2ac7f…`).
+Immutable, content-negotiated (HTML for browsers, byte-identical JSON for agents), Ed25519-signed over RFC 8785 JCS-canonical bytes, on-chain anchored at Base block 46020367 (tx `0xe0cb4149…`).
 
 ### 11.2 The verification one-liner
 
 ```bash
-npx @trustbench/verify-receipt@0.1.1 rrcpt_01KRGKSZACB4ECRPEQY1VC0F3N --check-chain
+npx @trustbench/verify-receipt@0.1.2 rrcpt_01KRN8HYPPRD1MS9JE7045S77Q --check-chain
 ```
 
 Two layers in one command. Layer 1 (signature only) fetches the receipt + our published Ed25519 public key and verifies offline — ~50ms, no TrustBench round-trip beyond the HTTPS fetch. Layer 2 (`--check-chain`) opens a Base RPC, confirms the `tx_hash` exists, the calldata decodes as `transferWithAuthorization(payer, payee, amount)` matching the receipt, and the tx was mined successfully. ~2s total.
@@ -525,15 +525,15 @@ Both layers print green for this receipt from a clean install (verified from a f
 
 The signed envelope includes:
 
-- `trust_signals[0]` — your `/x402/verify` response for `pro-api.coinmarketcap.com/x402/v1/dex/search`, captured at `last_checked_at` and normalized into the locked §3 shape by the adapter described in §11.4. All Strata-provided values are preserved 1:1 — only the field names are translated (e.g. `last_checked_at` → `captured_at`, flat `payment_amount_usd` → nested `payment_endpoint.amount_usd`). Final embedded values: `trusted=false`, `security_score=10`, `risk_level="critical"`, `actionable_flags=[]` (post the `unverified_domain` filter per §3 resolved-item-5).
-- `routing` — the routing decision: TrustBench's score-based selection picked QuickNode (`x402.quicknode.com/matic-amoy/`), not CMC, on this run. `score_at_decision`, `alternatives_considered`, `selection_reason` are all in the envelope. Both your pre-call posture on CMC and our routing decision to QuickNode are visible side-by-side in the same signed bytes.
-- `paid` — on-chain settlement reference: `tx_hash`, `payer_address`, `payee_address`, `amount_atomic`, `currency`, `chain`. Block 45942380 on Base.
+- `trust_signals[0]` — your `/x402/verify` response for `pro-api.coinmarketcap.com/x402/v1/dex/search`, captured at `last_checked_at` and normalized into the locked §3 shape by the adapter described in §11.4. All Strata-provided values are preserved 1:1 — only the field names are translated (e.g. `last_checked_at` → `captured_at`, flat `payment_amount_usd` → nested `payment_endpoint.amount_usd`). Final embedded values: `trusted=true`, `security_score=65`, `risk_level="low"`, `actionable_flags=[]` (post the `unverified_domain` filter per §3 resolved-item-5).
+- `routing` — the routing decision: TrustBench's score-based selection picked SlamAI (`api.slamai.dev/token/price/exotic`), not CMC, on this run, with `score_at_decision=97`, `alternatives_considered=5`, `selection_reason="top_score"`. Both your pre-call posture on CMC and our routing decision to SlamAI are visible side-by-side in the same signed bytes.
+- `paid` — on-chain settlement reference: `tx_hash`, `payer_address`, `payee_address`, `amount_atomic`, `currency`, `chain`. Block 46020367 on Base, tx `0xe0cb4149…`.
 
-The CMC-vs-QuickNode split is honest, not curated. We asked your verifier about CMC because §10.5 named CMC as the first-pick merchant after the 2026-05-12 registry promotion. TrustBench's routing is independent of which merchant your verifier was asked about; the receipt captures both signals so an auditor reading the envelope sees the full picture.
+The CMC-vs-SlamAI split is honest, not curated. We asked your verifier about CMC because §10.5 named CMC as the first-pick merchant after the 2026-05-12 registry promotion. TrustBench's routing is independent of which merchant your verifier was asked about; the receipt captures both signals so an auditor reading the envelope sees the full picture.
 
 This version reflects what an unguided agent would actually produce in production — the pre-call posture and the routing decision are independent inputs to the audit trail, and both end up signed under the same Ed25519 key over the same JCS-canonical bytes. That independence is the integration's value-prop made concrete; a curated demo where Strata's verdict and TrustBench's pick happened to align would tell a weaker story about how the composition actually works under real routing pressure.
 
-(Minor note for the reader: the `matic-amoy` segment in QuickNode's URL is their internal test-merchant identifier from x402's reference catalog, not a network signal. Actual settlement is on Base mainnet per the receipt's `paid.chain` field — block 45942380, tx `0x2ec2ac7f…`.)
+The re-issue against the post-PR-24 Strata probe also makes the live-probe surface visible: the receipt embeds the corrected `65/low/trusted=true` reading verbatim. Whatever Strata's verifier reports today, the agent paid based on that reading, and the signature is over those exact bytes. The four scoring bugs Strata fixed surface in the audit trail directly — the previous artifact (`rrcpt_01KRGKSZACB4ECRPEQY1VC0F3N`, 2026-05-13) is still valid for its `issued_at` moment and embeds the pre-patch `10/critical/false` reading, so the two artifacts together document the scoring shift across the patch boundary.
 
 ### 11.4 Strata-side adapter (TrustBench-side translation)
 

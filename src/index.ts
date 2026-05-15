@@ -101,6 +101,15 @@ const OG_CARDS: Record<string, Uint8Array<ArrayBuffer> | null> = {
   receipt: loadStaticBinary('public/og/receipt.png'),
 };
 
+// Favicon PNG (64x64) loaded at boot. Served at /favicon.ico with
+// Content-Type: image/png — Google's S2 favicon service (which Anthropic's
+// Connectors Directory uses to fetch the listing icon) requires a real
+// raster payload at /favicon.ico; SVG redirects fail their crawler and
+// cache "no favicon found", surfacing as a grey icon in the directory and
+// in tool-call UI. Source: render of src/index.ts /logo.svg via ImageMagick
+// (convert -background none -density 600 logo.svg -resize 64x64 favicon.png).
+const FAVICON_PNG = loadStaticBinary('public/favicon.png');
+
 // Top-level Supabase client for the public-facing endpoints in this file
 // (currently /receipts/:id). Other modules own their own clients to keep
 // boot lazy. Same env-var convention as the rest of the codebase:
@@ -782,9 +791,44 @@ app.get('/terms', (c) => c.html(renderTermsHtml()));
 // Standalone logo SVG — served for the Anthropic Connectors Directory listing
 // and any other context that needs a URL-addressable square logo.
 // 1:1 aspect ratio (32×32 viewBox), brand-green on transparent background.
-// Favicon — redirect to the SVG logo so browsers and Google's favicon service
-// pick up the TrustBench mark correctly.
-app.get('/favicon.ico', (c) => c.redirect('https://trustbench.io/logo.svg', 302));
+//
+// Favicon strategy (revised 2026-05-15):
+//   The Anthropic Connectors Directory and Claude tool-call UI both fetch the
+//   site favicon via Google's S2 service: https://www.google.com/s2/favicons?domain=...
+//   That service is finicky — many implementations of it don't follow 302
+//   redirects, and even when they do they often reject SVG responses (S2
+//   historically rasterizes from PNG/ICO sources). Previously /favicon.ico
+//   redirected to /logo.svg, which caused S2 to cache "no favicon found"
+//   and render TrustBench with a grey placeholder in directory + tool calls.
+//
+//   Fix: serve a real 64×64 PNG (rendered from the same source SVG via
+//   ImageMagick, committed under public/favicon.png) directly at /favicon.ico
+//   with Content-Type: image/png. Modern browsers and S2 both accept PNG
+//   payloads at /favicon.ico when the mime type is correct. /favicon.svg
+//   keeps the redirect to /logo.svg (SVG-preferring browsers want SVG).
+//   After deploy, Google's S2 cache may take a few days to refresh; see
+//   https://www.google.com/s2/favicons?domain=trustbench.io&sz=64 to monitor.
+//
+// To regenerate the binary: convert -background none -density 600 logo.svg -resize 64x64 public/favicon.png
+//
+// Implementation note: previously this was an inline base64 const, but the
+// tool that wrote the const dropped chunks of the encoded payload during
+// formatting, decoding to a corrupt PNG (verified 2026-05-15 via sha256
+// round-trip). The file-loaded approach mirrors how OG_CARDS handles its
+// PNGs — single source of truth, no transcription risk.
+app.get('/favicon.ico', (c) => {
+  if (!FAVICON_PNG) {
+    // Boot-time load failed (file missing on disk). Fall back to 404 rather
+    // than serving wrong bytes — Google's S2 will retry on cache expiry.
+    return c.text('Favicon not deployed.', 404, { 'Content-Type': 'text/plain; charset=utf-8' });
+  }
+  return new Response(FAVICON_PNG, {
+    headers: {
+      'Content-Type': 'image/png',
+      'Cache-Control': 'public, max-age=86400, immutable',
+    },
+  });
+});
 app.get('/favicon.svg', (c) => c.redirect('https://trustbench.io/logo.svg', 302));
 
 app.get('/logo.svg', (c) => {

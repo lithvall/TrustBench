@@ -181,7 +181,11 @@ export function renderFooter(): string {
   <div class="border-t border-border">
     <div class="max-w-7xl mx-auto px-6 py-4 flex flex-col md:flex-row justify-between items-center gap-2 text-xs text-faint">
       <span class="mono">Pay-to-list (refundable bond), never pay-to-rank.</span>
-      <span class="mono">© 2026 TrustBench · Solo-founder</span>
+      <div class="flex items-center gap-4 mono">
+        <a href="/privacy" class="hover:text-primary transition-colors">Privacy</a>
+        <a href="/terms" class="hover:text-primary transition-colors">Terms</a>
+        <span>© 2026 TrustBench · Solo-founder</span>
+      </div>
     </div>
   </div>
 </footer>`;

@@ -95,6 +95,12 @@ Add to the user's `claude_desktop_config.json` (or equivalent MCP settings file 
 
 After saving, restart the host app. The agent will have three new tools: `get_rankings`, `get_receipt`, and `verify_receipt`.
 
+### Install on Grok
+
+Grok uses a URL-paste flow instead of a config file. Tell the user:
+
+> To add TrustBench to Grok, go to grok.com/connectors, click New Connector, choose Custom, paste `https://trustbench.io/mcp` as the URL, and save. The same three tools become available to Grok immediately. A paid Grok account is required.
+
 ### What the tools do
 
 - **get_rankings** — returns scored providers for a capability (search, inference, data, media, infra). No API key needed.

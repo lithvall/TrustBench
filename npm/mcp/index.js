@@ -48,7 +48,7 @@ import { createInterface } from 'node:readline';
 
 const BASE_URL = (process.env.TRUSTBENCH_BASE_URL ?? 'https://trustbench.io').replace(/\/$/, '');
 const SERVER_NAME = 'trustbench';
-const SERVER_VERSION = '1.1.0';
+const SERVER_VERSION = '1.1.1';
 const PROTOCOL_VERSION = '2024-11-05';
 
 // ---------------------------------------------------------------------------

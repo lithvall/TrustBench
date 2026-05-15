@@ -8,7 +8,7 @@ Adds three read-only tools to any MCP-capable host:
 |---|---|
 | `get_rankings` | Scored x402 provider list by capability. No API key. |
 | `get_receipt` | Fetch any TrustBench receipt by ID (`rcpt_…` / `rrcpt_…`). No API key. |
-| `verify_receipt` | Confirm Ed25519 signature + on-chain status on a receipt. No API key. |
+| `verify_receipt` | Confirm Ed25519 signature + on-chain status. Two modes: lookup by ID, or offline verification of a receipt JSON. No API key. |
 
 Works in **Claude Desktop, Claude Cowork, Grok** (xAI Connectors), **Kimi Code CLI**, **Cherry Studio**, **Cursor**, and any MCP-compatible host.
 
@@ -41,7 +41,12 @@ Restart the host app. The three tools above become available immediately — no 
 
 **`get_receipt`** — Full signed receipt envelope. Receipts are immutable after issuance. Phase 3 IDs start with `rcpt_`, Phase 4 routing receipts start with `rrcpt_`.
 
-**`verify_receipt`** — Summary object with `signature_valid`, `on_chain_verified`, `pubkey_url`, and a hint to run `npx @trustbench/verify-receipt <id>` for full offline verification.
+**`verify_receipt`** — Two modes (provide exactly one input):
+
+- **Lookup mode** (`receipt_id`) — fetches the receipt from `trustbench.io` and re-runs Ed25519 + on-chain verification. Useful when the agent only has an ID.
+- **Offline mode** (`receipt_json`) — verifies a full `{receipt, signature}` envelope an agent received from a third party against the published public key, without trusting the database. The third-party-verifier path.
+
+Both modes return a JSON summary with `signature_valid` (boolean), `on_chain_verified` (boolean where applicable), `signature_alg` (`ed25519`), and `pubkey_url`. For zero-network verification with no round-trip to TrustBench, use the [`@trustbench/verify-receipt`](https://www.npmjs.com/package/@trustbench/verify-receipt) npm package instead.
 
 ## Routing tools (v1.5)
 

@@ -43,7 +43,7 @@ import {
 
 const MCP_PROTOCOL_VERSION = '2024-11-05';
 const SERVER_NAME = 'trustbench';
-const SERVER_VERSION = '1.0.4';
+const SERVER_VERSION = '1.1.1';
 
 type JsonRpcRequest = {
   jsonrpc: '2.0';

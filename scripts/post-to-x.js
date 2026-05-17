@@ -101,19 +101,14 @@ const BUILD_IN_PUBLIC = [
   //   `with signed receipts, on-chain settlement, fail-safe paywall. Routes ` +
   //   `Base today, Solana endpoints in the registry, routing next sprint.\n\n${BASE_URL}`,
 
-  // Paywall v0.1.0 — design + code shipped, flag still off in prod.
-  // After TRUSTBENCH_PAYWALL_ENABLED=true in prod, swap this entry for the
-  // "live" variant in the comment block below.
-  `Paywall design and code landed in main. /pricing page is live. ` +
-    `7-row tier table, v0.1.0 ships POST /route at $0.005 per call. ` +
-    `x402-native, non-custodial, settled via the public Foundation facilitator. ` +
-    `Flag-off until the v0.1.1 gates' first prod smoke.\n\n${BASE_URL}/pricing`,
-
-  // PAYWALL-LIVE VARIANT (uncomment + delete the above after flag flip):
-  // `Paywall is live. POST /route returns 402, agent signs an EIP-3009 ` +
-  //   `transferWithAuthorization for $0.005, x402 facilitator settles on Base, ` +
-  //   `we return an Ed25519-signed routing receipt. Non-custodial end-to-end. ` +
-  //   `Full tier table at ${BASE_URL}/pricing.`,
+  // Paywall v0.1.0 live in prod since 2026-05-11 (flag flipped per memory
+  // project_phase4_1_3_preflight_2026_05_11.md). Previous "flag-off" copy
+  // was both stale and 2 chars over the 280 ceiling — swapped here for the
+  // live variant that had been queued for exactly this moment.
+  `Paywall is live. POST /route returns 402, agent signs an EIP-3009 ` +
+    `transferWithAuthorization for $0.005, x402 facilitator settles on Base, ` +
+    `we return an Ed25519-signed routing receipt. Non-custodial end-to-end. ` +
+    `Full tier table at ${BASE_URL}/pricing.`,
 
   `Shipped @trustbench/verify-receipt v0.1.0 on npm. ` +
     `Standalone third-party verifier, 64-byte Ed25519 signatures, JCS canonicalization. ` +

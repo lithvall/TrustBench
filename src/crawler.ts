@@ -60,6 +60,47 @@ const NORMALIZE_NETWORK: Record<string, string> = {
 };
 const ROUTABLE_NETWORKS = new Set(['base']);
 
+// URL hygiene filter for agentic.market catalog entries (added 2026-05-19).
+//
+// Two failure shapes the upstream catalog has shipped to us that the live
+// probe in route-handlers.probeFor402Challenge cannot recover from:
+//
+//   1. URL templates with un-substituted placeholders (e.g. `/:id/` or
+//      `/:session_id/`). The probe layer treats the URL verbatim, so a
+//      literal `:id` segment hits the merchant as `:id` and returns 404.
+//      The merchant has no chance to emit a 402 challenge because the
+//      route doesn't exist. These should never have been catalog-listed
+//      as routable. Pattern catches all un-substituted templates, not
+//      just the specific Browserbase case that triggered this.
+//
+//   2. Known-bad endpoints that return 200 OK to anonymous GET probes
+//      instead of a 402 x402 challenge body. The probe layer requires
+//      status===402, so these are guaranteed to be rejected as
+//      provider_unavailable on every call. Keeping them in the rotation
+//      only causes /route to 502 in the secondary fallback path.
+//
+// Why static here instead of a live-probe validation in the crawler
+// (the proper fix): agentic.market is the upstream catalog and its
+// rows are crawled hourly; live-probing every row on every crawl would
+// add ~600 outbound HTTP calls per run and meaningfully slow the
+// pipeline. A live-probe validation pass IS the right longer-term move
+// (Path B in the 2026-05-19 incident notes), but for the immediate
+// stop-the-bleeding fix, a small static filter that drops the two known
+// failure shapes is enough and keeps the pipeline fast.
+//
+// Triggering incident: 2026-05-19 ~18:24 UTC. An authenticated client
+// at xfwd=135.232.224.115 was hitting POST /route on capability=data
+// in a tight loop, getting 502s. Both providers in the capability=data
+// pool (api.brave.com/search returning 200 OK because it's not x402;
+// x402.browserbase.com/browser/session/:id/extend returning 404 because
+// of the un-substituted :id) failed the probe layer's status===402 check.
+// Direct DB DELETE of those two rows landed the stop-the-bleed; this
+// filter prevents the next nightly crawl from re-inserting them.
+const URL_TEMPLATE_PATTERN = /\/:[a-z_]+(?:\/|$)/i;
+const URL_DENYLIST = new Set<string>([
+  'https://api.brave.com/search',
+]);
+
 // Agentic Market response shapes (only the fields we read).
 type AmService = {
   id: string;
@@ -130,6 +171,19 @@ async function crawlAgenticMarket(): Promise<number> {
 
       for (const ep of svc.endpoints) {
         if (!ep.url) continue;
+
+        // URL hygiene filter (2026-05-19) — see URL_TEMPLATE_PATTERN and
+        // URL_DENYLIST comments above. Drops entries that the probe layer
+        // would reject as provider_unavailable on every call, before they
+        // reach the rotation.
+        if (URL_TEMPLATE_PATTERN.test(ep.url)) {
+          console.warn(`[crawler] skip URL template (un-substituted placeholder): ${ep.url}`);
+          continue;
+        }
+        if (URL_DENYLIST.has(ep.url)) {
+          console.warn(`[crawler] skip denylisted endpoint (known non-x402): ${ep.url}`);
+          continue;
+        }
 
         // Networks: combine service-level + endpoint-pricing-level, normalize,
         // dedupe, filter to those advertising a routable network.

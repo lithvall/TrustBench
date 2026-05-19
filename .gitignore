@@ -27,3 +27,17 @@ devlog.txt
 # are method statements only and are safe to publish; the briefing content
 # itself is internal-only.
 grok-x-research-briefing.md
+
+# Cowork worktrees (machine-local Claude session isolation directories,
+# not project content).
+.claude/
+
+# Separate planning project that lives in this folder by accident;
+# not part of TrustBench.
+ProjectAutonomous/
+
+# X profile/banner source assets (PSDs + working PNGs/SVGs).
+# Live banners are served from public/og/. Source files stay local.
+Xpictures/
+banner-x.png
+banner-x.svg

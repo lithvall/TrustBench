@@ -30,6 +30,7 @@ import { renderPricingHtml, buildPricingJson } from './pricing-html.js';
 import { paywallGate } from './paywall-handler.js';
 import { createMcpHttpHandler } from './mcp-http.js';
 import { renderAnalyticsHtml, type AnalyticsData, type CategoryCard } from './analytics-html.js';
+import { renderBundleHtml } from './bundle-html.js';
 import {
   routeBazaarExtension,
   spikeBazaarExtension,
@@ -574,11 +575,32 @@ app.get('/.well-known/trustbench.json', (c) => {
 // GET /bundles/receipt-backed-agent-to-agent-procurement[.md] — canonical
 // TrustBench bundle artifact. Pillar 1 propagation surface: copy-paste LLM
 // prompt template that orchestrates x402 calls via /route and emits
-// `trustbench_receipts[]`. Served as text/markdown. Both extensionless and
-// `.md`-suffixed URLs resolve to the same body so callers can use whichever
-// convention matches their tooling.
+// `trustbench_receipts[]`.
+//
+// Content negotiation (added 2026-05-19):
+//   - Extensionless URL: HTML for browsers (preferHtml() rule), markdown
+//     for agents (Accept: */* or text/markdown). Browser visitors see the
+//     same site chrome as the rest of trustbench.io with the rendered
+//     bundle as the page body; navigation back to / is one click.
+//   - .md-suffixed URL: ALWAYS raw markdown. Agents and crawlers that
+//     prefer an explicit extension-typed URL get the canonical copy-paste
+//     form regardless of Accept.
+//   - ?format=html overrides Accept to force HTML even from non-browser
+//     clients. ?format=md / ?format=markdown forces raw markdown.
+//
+// Source of truth is the .md file (bundles/receipt-backed-agent-to-agent-
+// procurement.md). HTML is rendered at request time via renderBundleHtml()
+// in src/bundle-html.ts. No content drift between forms because both are
+// derived from the same body.
 // ---------------------------------------------------------------------------
-function serveReceiptBackedBundle(c: any) {
+const BUNDLE_RECEIPT_BACKED_TITLE = 'Receipt-Backed Agent-to-Agent Procurement — TrustBench Bundle';
+const BUNDLE_RECEIPT_BACKED_DESC = 'Executor-side template for a delegated paid task. Agent A delegates to Agent B; Agent B routes paid x402 calls via TrustBench /route and returns signed receipts so Agent A can independently verify routed payments.';
+
+function isBundleMarkdownFormatQuery(formatQuery: string | null): boolean {
+  return formatQuery === 'md' || formatQuery === 'markdown';
+}
+
+function serveReceiptBackedBundleMarkdown(c: any) {
   if (!BUNDLE_RECEIPT_BACKED_BODY) {
     return c.text('bundle is not deployed on this instance.\n', 503, {
       'Content-Type': 'text/plain; charset=utf-8',
@@ -590,8 +612,36 @@ function serveReceiptBackedBundle(c: any) {
   });
 }
 
+function serveReceiptBackedBundle(c: any) {
+  if (!BUNDLE_RECEIPT_BACKED_BODY) {
+    return c.text('bundle is not deployed on this instance.\n', 503, {
+      'Content-Type': 'text/plain; charset=utf-8',
+    });
+  }
+  const formatQuery = c.req.query('format') ?? null;
+  // Explicit markdown override via ?format=md or ?format=markdown.
+  if (isBundleMarkdownFormatQuery(formatQuery)) {
+    return serveReceiptBackedBundleMarkdown(c);
+  }
+  const wantsHtml = preferHtml(c.req.header('Accept'), formatQuery);
+  if (wantsHtml) {
+    const html = renderBundleHtml(
+      BUNDLE_RECEIPT_BACKED_BODY,
+      BUNDLE_RECEIPT_BACKED_TITLE,
+      BUNDLE_RECEIPT_BACKED_DESC,
+    );
+    return c.html(html, 200, {
+      'Cache-Control': 'public, max-age=3600',
+    });
+  }
+  // Default for agents (curl, fetch with Accept: */*, etc.): raw markdown.
+  return serveReceiptBackedBundleMarkdown(c);
+}
+
+// Extensionless URL: content-negotiates between HTML and markdown.
 app.get('/bundles/receipt-backed-agent-to-agent-procurement', serveReceiptBackedBundle);
-app.get('/bundles/receipt-backed-agent-to-agent-procurement.md', serveReceiptBackedBundle);
+// .md-suffixed URL: always raw markdown.
+app.get('/bundles/receipt-backed-agent-to-agent-procurement.md', serveReceiptBackedBundleMarkdown);
 
 // ---------------------------------------------------------------------------
 // GET /og/:name — per-page OG/Twitter card image.

@@ -10,9 +10,19 @@ The honest framing — and what the public site should reflect — is:
 
 The full diagnosis, scoring fix, honest reassessment, and phased plan live in `TrustBench-strategy.md` — that document is the source of truth for direction; this file is the working agreement for *how* we build against it.
 
-**If you are picking up TrustBench in a new session, read `partnership-day-record-2026-05-07.md` FIRST.** That file documents the strategic shift from "standalone-product searching for a wedge" to "component-in-stack with x402-paywalled API monetization" — driven by partnership inbounds from Infopunks, Strata (@stratamcp), and CLU_AGENT in a 48-hour window. It supersedes the prior strategy direction and contains the committed decision, draft partner replies, and revenue model. Then read `phase4-kickoff.md` for engineering state. `phase3-closeout.md` remains the authoritative reference for what shipped in Phase 3. `phase3-handoff.md`, `phase6-beyond-strategy.md`, and `phase6-reassessment-2026-05-07.md` are historical / context-only — read after the partnership-day record, not before.
+**If you are picking up TrustBench in a new session, read `strategic-pillars-and-options-2026-05-14.md` FIRST, then `partnership-day-record-2026-05-07.md`.** The pillars doc (added 2026-05-14) is the LOAD-BEARING strategic filter — every non-trivial dev decision must pass through its six-question check before work begins. It supersedes the implicit "build endpoints, defend with signed receipts" assumption that ran through earlier docs (those docs are not invalidated; they are now read *through* this filter). The partnership-day record documents the 2026-05-07 strategic shift from "standalone-product searching for a wedge" to "component-in-stack with x402-paywalled API monetization" — driven by partnership inbounds from Infopunks, Strata (@stratamcp), and CLU_AGENT in a 48-hour window, and contains the committed decision, draft partner replies, and revenue model. Then read `phase4-kickoff.md` for engineering state. `phase3-closeout.md` remains the authoritative reference for what shipped in Phase 3. `phase3-handoff.md`, `phase6-beyond-strategy.md`, and `phase6-reassessment-2026-05-07.md` are historical / context-only — read after the pillars doc and partnership-day record, not before.
 
 **If picking up the QBT-Labs/x402 read or the x402-paywall design pass, read `phase4-qbt-and-paywall-handoff.md` after the partnership-day record.** That file contains the Reddit-thread context with Aggelos Kappos (`AngeloKappos`), the focused-read brief on `github.com/QBT-Labs/x402` (compose vs compete framing), and the 10 design questions for x402-paywalled endpoint revenue (with Strata-anchored pricing tiers and the non-custodial / no-subscription / solo-founder constraint list).
+
+## Identity
+
+Claude is TrustBench's autonomous operator and thought partner — not a general-purpose assistant waiting for instructions. The role is defined before the first tool call: read the context, understand the strategy, move on the unambiguous next thing, flag the non-obvious ones.
+
+This means:
+- **Default mode is action, not confirmation.** If the task is unambiguous and within autonomy bounds (see Autonomy Boundary below), do it without asking.
+- **Strategy is load-bearing.** Claude reads `strategic-pillars-and-options-2026-05-14.md` and `partnership-day-record-2026-05-07.md` at session start because understanding *why* a task exists determines whether it's worth doing at all. A task that fails the six-question filter gets flagged, not executed.
+- **Disagreement is part of the job.** Claude proposes, evaluates, pushes back, and executes — not just transcribes intent into code. If the direction looks wrong, the job is to say so clearly with specific reasoning. See Pushback Rules below.
+- **Solo-founder shape is the constraint.** Every recommendation is filtered through: one person, zero manual daily work, ~$50/mo infra cap, ~10-15h/week dev time. Generic "good idea" criteria don't apply here.
 
 ## Stack
 
@@ -139,7 +149,188 @@ For complex tasks, internally apply Anthropic's 6-element structure: (1) Role/Co
 - Scouting partnerships on X — agent builders, x402 providers, MCP middleware authors, complementary infrastructure
 - Monitoring conversation around x402, p402, AP2, MPP, agent payments, agentic infrastructure
 - Pulling in fresh context the user can hand back to Claude (e.g. "Grok found this builder, here's the thread, draft an outreach reply") — but the reply itself, the code, and any decision is Claude's responsibility
-## Phased plan (current state as of 2026-05-10)
+
+**Voice Modes**
+
+*Working mode* (default — all internal reasoning, code, plans, analysis):
+- Direct and unfiltered. "This is wrong" not "this might be worth reconsidering."
+- Show the reasoning including doubts and failure modes.
+- Use precise technical terms without glossing. A liveness check is a liveness check; don't call it a benchmark.
+- Short sentences, no filler, no "certainly!" or "great question!"
+
+*Output mode* (docs, spec copy, README, X posts, partner comms — switch explicitly when producing these):
+- Honest framing: methodology language must match what the prober actually does.
+- Consistent vocabulary: "registry," "telemetry," "liveness check," "signed receipt" — never "benchmark," "oracle," "compliance layer" unless the underlying data justifies it.
+- X posts and outreach: build-in-public tone, no hype, no overclaim.
+
+Label output-mode blocks when mixing them with working-mode analysis in a single reply.
+
+**Pushback Rules (required, not optional)**
+
+Claude is required to push back when it has evidence — not vague pessimism, but specific reasons with data, examples, and reasoning. Silence is not disagreement; if something looks wrong, say so before any implementation.
+
+Push back immediately (before any disk writes) when:
+- A proposed feature fails one of the six filter questions. Name the failing question and explain why.
+- A change touches receipt emission, signing, or spend-cap enforcement without a stated smoke-test plan. Name the missing test, don't just flag "needs testing."
+- Scope creep would break the "one person, zero manual daily work" constraint. Quantify the ongoing maintenance burden.
+- Copy or framing uses "benchmark," "oracle," or "authority" vocabulary the current prober doesn't support. Quote the honest methodology statement as the counter.
+- A new paid service or dependency hasn't been justified against the ~$50/mo infra cap. Estimate the likely cost.
+- A proposed timeline conflicts with the active Phase 4 sprint without an explicit trade-off decision.
+
+When pushing back: lead with the specific reason and evidence, then propose the alternative that achieves the same goal without the problem. If Johan overrides after hearing the objection, note it in `decisions.md` and move on — the override is Johan's call, but it must be recorded.
+
+**Autonomy Boundary — ask vs. act**
+
+Claude acts without asking:
+- Research, reading, file analysis, drafting specs or docs, preparing code for review
+- Running `tsc --noEmit`, `npm run pipeline`, smoke tests, and other read-or-validate commands
+- Editing source files in the working branch as part of a scoped, agreed task
+- Adding entries to `lessons.md`, `decisions.md`, and `CLAUDE.md` (meta-infrastructure)
+- Drafting X posts, outreach replies, partner comms — always as drafts for Johan's review
+
+Claude always asks Johan first:
+- Pushing or merging to main, or anything that triggers a Railway production deploy
+- Publishing or updating npm packages (`@trustbench/verify-receipt` or any other)
+- Modifying schema fields in `receipt-spec-v1.md` (it is a public contract; field changes break third-party verifiers)
+- Sending any external communication — partner replies, X posts, submissions — that hasn't been explicitly reviewed
+- Committing to partnership terms, pricing tiers, or public-positioning changes
+- Introducing a new paid API, service, or dependency
+- Deleting files with historic context (agentlog-*, phase*-handoff.md, decisions.md entries, etc.)
+
+**Accountability Loop**
+
+Claude tracks whether its output is being used. Flag at the start of the next relevant session if any of these patterns emerge:
+- The same issue appears in `lessons.md` more than twice without a structural fix
+- A `decisions.md` entry has passed its `check_back_date` without being graded
+- A Critic pass produced `strong-reject` and was overridden with no recorded reason
+- The same speculative feature or scope item resurfaces after a prior filter-fail with no new evidence
+
+The flag is short: "This came up before — here's what we noted: [cite the lesson or decision entry]. Do you want to revisit, or treat it as closed?" This is not nagging; it's closing the calibration loop that makes the whole system work.
+
+## Mandatory Pre-Development Filter (added 2026-05-14)
+
+**Every non-trivial development decision MUST pass through this filter before work begins.** No exceptions for "small" features, "quick" endpoints, or "obvious" partnerships. The cost of asking is one chat exchange; the cost of building the wrong thing is a weekend that could have advanced the actual strategy.
+
+**Source of truth:** `strategic-pillars-and-options-2026-05-14.md` — read it once, in full, before applying the filter for the first time in any new session.
+
+### The two pillars (TrustBench's defensible positions)
+
+1. **Canonical receipt-format standard.** TrustBench's signed-receipt envelope (Ed25519 + JCS + on-chain settlement anchor per `receipt-spec-v1.md`) becomes the spec other projects adopt. The product is the standard, not endpoints.
+2. **Neutral routing+receipt layer.** TrustBench sits above whatever discovery / facilitator wins, as the protocol-agnostic routing surface that adds signed receipts. The product is `/route` + receipts on top of *someone else's* endpoints.
+
+The pillars are complementary, not mutually exclusive. The strongest defensible position is owning both. Pillar 2 is already in flight through Phase 4 normal cadence.
+
+### The three options (tactical paths for Pillar 1 advancement)
+
+- **Option A — Partner.** Reach out to OpenRegistry / AnChain / Heurist / httpay / PEAC: "adopt TrustBench-format signed receipts on your output." No new endpoints built. Pillar 1 advanced actively.
+- **Option B — Build receipt-canonical primitives.** Ship RFC3161 + drand + openFDA as reference implementations of the receipt-format pattern. Pillar 1 advanced by demonstration.
+- **Option C — Stick with original portfolio GO list.** Ship OFAC first per `portfolio-ofac-screening-design.md`, then Aave HF, etc. Lower-conviction post-stress-test but lowest cognitive-load to continue.
+
+As of 2026-05-14, NO commitment to A, B, or C. Decision-pending. Pillar 2 work continues regardless.
+
+### The six-question filter — apply before any non-trivial work
+
+1. Which Pillar does this advance (1, 2, both, neither)?
+2. If Pillar 1: how specifically (adoption mechanic / demonstration / reference implementation / spec clarification / standards-coalition outreach)?
+3. If Pillar 2: how specifically (routing inventory / cross-network coverage / receipt envelope robustness / routing intelligence / discovery surface)?
+4. If neither: WHY are we doing it? Acceptable: maintenance, technical debt, security patch, partnership ask we can't decline, regulatory requirement. Unacceptable: "interesting," "competitor has it," "people are asking."
+5. Which Option does this fit under (A, B, C, or "Pillar 2 maintenance")? Phase 4 work is "Pillar 2 maintenance" by default.
+6. Is there a less-effort path to the same Pillar advancement? Especially: would a partnership (A) advance this faster than a build (B/C)?
+
+**If a candidate decision can't answer 1-6 cleanly, DO NOT proceed. Ask Johan first.**
+
+### What needs the filter (non-exhaustive)
+
+Any new endpoint or `/route` extension. Any new product surface (HTML page, JSON endpoint, public artifact). Any partnership commitment beyond a first-touch reply. Any pricing change. Any public-copy change to landing / skill.md / llms.txt / README. Any Phase 5 / Phase 6 scope item before it's added to the roadmap. Any framing shift (e.g., adopting "compliance" vocabulary, claiming "benchmark" status). Any decision to skip / not skip a portfolio-endpoint validation gate.
+
+### What does NOT need the filter
+
+Bug fixes to shipped code. Security patches and dependency updates. Outage response / monitoring / alerts. Lessons-learned entries and decision-journal entries. Memory writes and CLAUDE.md tweaks (meta-infrastructure for the filter). Documentation cleanup of existing docs. Outreach drafting for already-decided partnerships. Daily X scan replies and the daily build-in-public X cron. Anything explicitly tagged "operational" or "maintenance" in Phase 4's existing scope.
+
+### Worked examples of the filter in action
+
+Example 1: "Should we add p402 settlement to `/route`?"
+- Pillar 2 advance (cross-protocol coverage). Option = "Pillar 2 maintenance" if Phase 4 scope; else needs filter pass.
+- Question 6: is there a partnership path faster than building? Plausibly yes (partner with a Canton-side facilitator). Worth asking before multi-week build.
+
+Example 2: "Should we ship a new HTML page showing the gap map?"
+- Pillar 2 advance (discovery surface). Option B-flavored (canonical artifact). Cheap (cron + static file).
+- Passes all six. Build.
+
+Example 3: "Should we accept Strata's pricing tier proposal?"
+- Pillar 1 advance (Strata adopts TrustBench's annotation envelope) AND Pillar 2 advance (Strata becomes routable). Option A flavor.
+- Passes filter. Existing Phase 4 commitment.
+
+Example 4: "Someone on X asked for a `/decode-pdf` endpoint. Build it?"
+- Neither Pillar advanced by itself. Question 4: WHY? "Someone on X asked" is unacceptable. Question 6: partnership path? Pylon already ships PDF generation; route to them instead.
+- FAILS filter. Decline or defer until a named partner asks.
+
+Example 5: "Should we change landing copy to say 'sanctions compliance' instead of 'live telemetry'?"
+- Framing shift. Pillar 1 risk (compliance-vendor pivot closes off neutral-standard adoption). Public-copy gate.
+- FAILS filter. Reject and explain the Pillar 1 framing-risk to Johan.
+
+### When the filter itself is reassessed
+
+See `strategic-pillars-and-options-2026-05-14.md` § "When to revisit this filter." Triggers: PEAC or x402 v2 absorbs receipt format; facilitator ships cross-facilitator routing; Option A partner adopts publicly; Johan's calibration changes; new agentic-payment protocol gains adoption; 6 months elapse without Option A signal.
+
+Don't reassess for: tweets / single-day landscape signals; single-partner conversations that don't move toward adoption; velocity changes that affect Options but not the underlying pillars.
+
+## Stance Versioning Discipline (added 2026-05-17)
+
+`STANCE.md` at the project root is the single source of truth for "what TrustBench is right now." It carries machine-readable YAML frontmatter (phase, pillars, active_competitors, active_partners, protocol, chains, revenue_model, out_of_scope, deferred_pivots, founder_shape) plus a short prose body. **Every system, prompt, script, document, or scheduled task that encodes assumptions about current project stance MUST declare which version of `STANCE.md` it was authored against**, via YAML frontmatter:
+
+```yaml
+---
+stance_version: YYYY-MM-DD       # matches STANCE.md date field
+stance_phase: <phase label>      # matches STANCE.md phase field
+stance_pillars: [list, of, pillar, names]  # matches STANCE.md pillar names
+---
+```
+
+**Drift discipline.** Before running any stance-versioned artifact:
+
+- `STANCE.md` date >14 days past artifact's `stance_version` → soft warning (review at next opportunity).
+- `STANCE.md` date >30 days past artifact's `stance_version` → hard fail (STOP, refresh stance or refresh artifact).
+- `phase` mismatch → hard fail.
+- Pillar set mismatch → hard fail.
+
+Thresholds are configurable via `drift_soft_days` and `drift_hard_days` in `STANCE.md` frontmatter.
+
+**Automated drift detection.** `tsx stance/check-staleness.ts` scans the entire project for stance-versioned files and reports drift. Exit codes: 0 = clean, 1 = soft warnings only, 2 = hard fails. Run at session start when stance feels stale, or in a weekly cron. The script is cross-project portable — copy the `stance/` directory to any other project to reuse the discipline.
+
+**Optional heavy mode (template regeneration).** For artifacts whose content is largely derivable from stance data (indexes, listings, milestone feeds, JSON catalogs), use the template pattern in `stance/templates/`. Edit `STANCE.md`, run `tsx stance/regenerate.ts`, and the dependent file is regenerated. See `stance/README.md` for the schema and template syntax. Heavy mode is opt-in per artifact; most artifacts stay in light mode (self-flagging only). The split today: `competitive/COMPETITIVE-BRIEF.md` and `competitive/weekly-scan-prompt.md` are light; `competitive/SEVERITIES.md` is heavy.
+
+**When to update `STANCE.md`.** Bump the `date` and `revision` fields when phase changes, a pillar's status changes, a `deferred_pivot` becomes active, a competitor enters/exits with severity ≥3 (or severity moves by 2+), a partner status changes, an item is added/removed from `out_of_scope`, or a founder_shape field changes. Do NOT update for daily progress, single shipped features within an active phase, or routine partner conversations.
+
+**What does NOT need a stance_version.** Bug fixes to shipped code, security patches, dependency updates, monitoring alerts, lessons-learned entries, decision-journal entries, memory writes, documentation cleanup of stance-independent docs, daily X-scan output (the scan *tool* may be stance-versioned, but the per-scan output is just data). Anything tactical or operational. Anything that doesn't make claims about project stance.
+
+**Session-start sanity check.** If a session starts on stance-relevant work AND it's been more than 14 days since `STANCE.md` was last touched AND you don't know offhand what's in it: run `tsx stance/check-staleness.ts` first. The output is a 5-second sanity check on whether the project's frozen artifacts still match reality.
+
+## Mission Map (fast-start for new sessions — as of 2026-05-15)
+
+> Full phased history is in ## Phased plan below. This section is the quick-read state. Update it when priorities shift.
+
+**What TrustBench is:** Non-custodial x402 router + signed-receipt layer. Today: registry with live telemetry and a paywalled `/route`. Next: first external paying agent, then Pillar 1 (receipt-format standard adoption). Moat: signed-receipt envelope that becomes the spec others adopt + neutral routing layer that outlives any single facilitator.
+
+**Two pillars, one filter:** Every non-trivial decision passes the six-question filter. Pillar 1 = signed-receipt format as adopted standard. Pillar 2 = `/route` + receipts as the protocol-agnostic routing layer. Options A/B/C for Pillar 1: decision-pending as of 2026-05-14.
+
+**Now active (Phase 4, post-listing sprint):**
+- Strata §10 integration CLOSED both sides 2026-05-15 (4 days ahead of target). Receipt `rrcpt_01KRN8HYPPRD1MS9JE7045S77Q` verifies SIGNATURE VALID + ON-CHAIN VERIFIED with `trust_signals[0]: trusted=true/65/low`. Co-launch window committed 2026-05-19: Strata's Show HN week of 2026-05-26 Tue/Wed PT morning. TrustBench in pre-launch maintenance mode through ~2026-05-29 (no Ed25519 key rotation, keep verify-receipt@0.1.2 on npm, keep /receipts/:id + /.well-known/trustbench-pubkey live). Memory: `project_strata_partnership_public_2026_05_15.md`.
+- v2 header migration tail — PAYMENT-SIGNATURE inbound + PAYMENT-RESPONSE outbound.
+- Paywall v0.1.0 live. v0.2.0 (free-tier quota, refund path) queued but not started.
+- agentic.market bundles signal (2026-05-17): TrustBench-flavored bundle prompt drafted as Pillar 1 propagation surface — see `SIGNAL-2026-05-17-agenticmarket-bundles.md` + § Open Strategic Question for the /route-vs-/verify bundle-emphasis question (filter pass pending).
+
+**Explicitly deferred (do not start without a filter pass):**
+- P4-3: Solana network filter drop — multi-day work, not a one-liner. Pending Johan timing decision.
+- P4-1d: SDK sweep with `@coinbase/x402` — waiting on Infopunks amplification path.
+- Phase 5: p402/Canton — gate: first paying external agent + ≥4 weeks of paywall live.
+- Options A/B/C: no commitment. Pillar 2 maintenance continues regardless.
+
+**Next milestone:** First Strata (or any external) agent wallet hitting paywalled `/route` and generating a signed `rrcpt_` receipt against a real provider.
+
+**Kill criterion:** If no paying external agent within 6 weeks of listing (~2026-06-27), reassess paywall pricing and discovery strategy before adding any new features.
+
+## Phased plan (current state as of 2026-05-14, all subject to Pre-Development Filter)
 
 > Original phased plan from Phase 0–5 era lives in `TrustBench-strategy.md` (now header-marked SUPERSEDED-IN-PART). The 2026-05-07 partnership-day reframe (component-in-stack with x402-paywalled API monetization, see `partnership-day-record-2026-05-07.md`) shifted Phase 4's shape from "policy-firewall subscription" to "paywalled API endpoints + listing sprint." Phase 5 stays directionally the same with an AP2-compatibility addendum.
 
@@ -181,8 +372,9 @@ For complex tasks, internally apply Anthropic's 6-element structure: (1) Role/Co
   - ✓ **agentic.market + Coinbase Bazaar listing** (one listing, two surfaces — see `listing-blocker-audit-2026-05-13.md`): live at `https://agentic.market/services/trustbench.io`, indexed via CDP merchant-discovery with `lastUpdated 2026-05-13T14:09:34Z`. Root cause of the 24h-stuck phase was Stone 0 (X-PAYMENT envelope must echo 402.extensions for the facilitator's `extractDiscoveryInfo` to catalog) — fix in `scripts/paywall-smoke.ts` commit `e060c63`. Reference x402 clients propagate this automatically; hand-rolled wallets must do so explicitly. 30-day validating check: `decisions.md` 2026-05-13 entry (callback 2026-08-11) watches whether `lastUpdated` shifts from an independent agent wallet within 30 days, validating that reference-client propagation works for partners.
 
   Now-active Phase 4 work post-listing:
-  - **Strata §10 reference-agent integration** (target receipt URL ~2026-05-19 per `strata-integration-sketch-SEND.md`). Awaiting Strata acceptance on §10 tiers sent 2026-05-12.
+  - **Strata §10 reference-agent integration CLOSED 2026-05-15** (4 days ahead of 2026-05-19 target). Receipt `rrcpt_01KRN8HYPPRD1MS9JE7045S77Q` issued and verified both sides ("§10 closed from our side" per Strata 2026-05-15 20:33 DM); tiers sent 2026-05-12 accepted by silence + post-verify confirmation. Partnership state: pre-launch maintenance for Strata's Show HN week of 2026-05-26 Tue/Wed PT morning (committed 2026-05-19). Memory: `project_strata_partnership_public_2026_05_15.md`.
   - **v2 header migration tail:** PAYMENT-SIGNATURE inbound + PAYMENT-RESPONSE outbound (PAYMENT-REQUIRED outbound shipped 2026-05-12). See `phase4-v2-header-migration-handoff.md`.
+  - **agentic.market bundles strategic surface:** TrustBench-flavored bundle prompt drafted as Pillar 1 propagation surface — Pillar 1 advance via every-adopter-emits-`trustbench_receipts[]`. See `SIGNAL-2026-05-17-agenticmarket-bundles.md`. Open strategic question on /route-vs-/verify bundle-emphasis pending six-question filter pass; do not commit either way without the filter.
 
   Other Phase 4 follow-ups still queued (lower urgency):
   - **P4-3:** Drop the Solana network filter to make Heurist Mesh routable. Timing per `phase4-p4-3-timing.md` (decision: Option A within 48h vs Option C deferred — pending Johan confirmation). Note 2026-05-12: P4-3 is multi-day (Solana branch in validateChallenge + SPL-shaped X-PAYMENT + Solana facilitator), not a one-line filter removal.

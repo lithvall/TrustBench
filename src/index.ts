@@ -60,6 +60,12 @@ function loadStatic(relPath: string): string | null {
 const SKILL_MD_BODY = loadStatic('skill.md');
 const LLMS_TXT_BODY = loadStatic('llms.txt');
 const WELL_KNOWN_TRUSTBENCH_JSON_BODY = loadStatic('.well-known/trustbench.json');
+// Bundle artifacts — copy-paste LLM prompt templates that orchestrate x402 calls
+// via TrustBench /route and emit `trustbench_receipts[]` in their output.
+// Strategic context: Pillar 1 propagation surface; see SIGNAL-2026-05-17-agenticmarket-bundles.md.
+// Served as text/markdown so agents and crawlers can copy the prompt verbatim.
+// Archived/disproven drafts in bundles/archived-drafts/ are NOT served publicly.
+const BUNDLE_RECEIPT_BACKED_BODY = loadStatic('bundles/receipt-backed-agent-to-agent-procurement.md');
 
 // Binary-safe variant of loadStatic for assets served as image/png etc.
 // Same boot-on-disk-or-503 semantics — we never crash boot on a missing card.
@@ -563,6 +569,29 @@ app.get('/.well-known/trustbench.json', (c) => {
     'Cache-Control': 'public, max-age=3600',
   });
 });
+
+// ---------------------------------------------------------------------------
+// GET /bundles/receipt-backed-agent-to-agent-procurement[.md] — canonical
+// TrustBench bundle artifact. Pillar 1 propagation surface: copy-paste LLM
+// prompt template that orchestrates x402 calls via /route and emits
+// `trustbench_receipts[]`. Served as text/markdown. Both extensionless and
+// `.md`-suffixed URLs resolve to the same body so callers can use whichever
+// convention matches their tooling.
+// ---------------------------------------------------------------------------
+function serveReceiptBackedBundle(c: any) {
+  if (!BUNDLE_RECEIPT_BACKED_BODY) {
+    return c.text('bundle is not deployed on this instance.\n', 503, {
+      'Content-Type': 'text/plain; charset=utf-8',
+    });
+  }
+  return c.text(BUNDLE_RECEIPT_BACKED_BODY, 200, {
+    'Content-Type': 'text/markdown; charset=utf-8',
+    'Cache-Control': 'public, max-age=3600',
+  });
+}
+
+app.get('/bundles/receipt-backed-agent-to-agent-procurement', serveReceiptBackedBundle);
+app.get('/bundles/receipt-backed-agent-to-agent-procurement.md', serveReceiptBackedBundle);
 
 // ---------------------------------------------------------------------------
 // GET /og/:name — per-page OG/Twitter card image.

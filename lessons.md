@@ -1799,6 +1799,40 @@ Two production gotchas surfaced during the Paddock nightly-rollup-export shippin
 - `project_agentic_market_crawler_quality_2026_05_14.md` memory — the related but separate finding that the agentic_market crawler over-enumerates per-resource URLs (33K rows from one domain). Different gotcha, same investigation thread.
 
 
+## 2026-05-19 — Railway log scan during inbound-traffic readiness pass; CORRECTED interpretation after UA attribution
+
+**What happened — first pass.** During the Day-1 inbound-traffic operational readiness pass, a small slice of Railway HTTP logs (~1 hour, ~60 requests) revealed several patterns I initially read as positive external-interest signal. Then Johan uploaded the structured deploy log JSON which contains the `[paywallgate-probe]` instrumentation lines on `/route` hits with user-agent and IP attribution. That changed the interpretation materially.
+
+**What the UA attribution actually shows (corrected).** Of 10 /route hits in the observable hour:
+- **9 from `mako-pulse-prober/0.1`** at IPv6 `2600:8800:6087:d300:548d:7b14:b7d1:522b`, polling at regular ~5-7 minute intervals.
+- **1 from `x402station/0.1 (+https://x402station.io) uptime-probe`** at a different IPv6.
+
+MAKO Pulse (per STANCE.md severity 4 as of 2026-05-19, direct 1:1 competitor on signed-receipt scoring + routing+receipt composition) is actively monitoring /route at ~7-minute cadence. The agent-card.json 404 burst (33 paths in 3 seconds at 14:50:28-31) falls *between* MAKO's /route polls and is almost certainly the same source doing competitor reconnaissance. The two `GET /bundles/receipt-backed-agent-to-agent-procurement 200` fetches also fall between MAKO's /route polls — almost certainly MAKO checking what TrustBench shipped today, not interested-adopter behavior.
+
+**The bias that produced the wrong-shaped first interpretation.** I claimed Bundle v7 was firing as a leading indicator ~5 days early. That was confirmation bias: the strategy expects external interest to materialize, so the first external traffic I saw got read as that. The honest interpretation, once UA attribution landed, is that the bundle fetches are competitor recon. Strategically: Bundle v7 propagation is NOT yet validated by this observation. The artifact-anchor model is unchanged from this morning's status.
+
+**The round-3 Claude reviewer's "correlated noise on shared priors" warning made concrete.** Three rounds of AI cross-check produced a v2.1 audit that explicitly flagged: "two LLM reviewers with overlapping training data agreeing is not independent confirmation; it's correlated noise on shared priors." This lessons.md entry is what that warning looks like in practice — I read positive signal into traffic that wasn't there, no human reviewer caught it, and the correction required actually inspecting the source data (the UA attribution in the deploy log) instead of inferring from the abstract log pattern. **Generalizable rule:** before banking any "leading indicator firing" claim from log scans, attribute by UA + IP + timing-cluster to specific sources. If a competitor is the dominant source, the signal is competitive-watch intel, not adoption signal.
+
+**What's still valid after correction.**
+- **Discovery-surface gap is real.** MAKO Pulse using A2A / agent-card.json / OpenRPC / DID / AI-plugin paths during recon IS evidence those paths are part of standard agent-discovery tooling. Any non-competitor crawler integrating x402 discovery would likely use the same set. The fix (ship `/.well-known/agent-card.json` + related conventions) remains valid Pillar 2 work; the urgency framing shifts from "respond to real adopter friction" to "don't be misclassified by discovery-tooling that scans for canonical paths." Same fix; lower urgency. Still banked for week of 2026-06-02 post-Strata.
+- **/.well-known/x402 404** worth a quick web-search to verify if it's an emerging x402 convention. Same priority as before.
+- **Zero settled /route calls** is now fully expected — MAKO and x402station are uptime-probing, not buying. The kill-criterion clock (paying external agent by 2026-06-27) hasn't moved.
+- **Ed25519 signing perf is healthy** — separately validated by `scripts/sign-latency-check.ts` run from PowerShell (p50 25µs, p99 39µs on normal payload; p99 66µs on 7.6KB worst-case payload).
+
+**New competitive-watch observation worth banking.** MAKO Pulse polling /route every ~7 minutes from a stable IPv6 is ongoing competitor monitoring of TrustBench's paywall behavior. Volume is trivial (~10/hour, sub-second responses, negligible infrastructure cost), so no rate-limiting needed. But it confirms what STANCE.md already reflects: MAKO is a direct competitor actively watching TrustBench's surface. If MAKO ships a paywall-bypass or starts probing /receipts/:id at high rates, that's a meaningful escalation worth its own decisions.md entry. Today's pattern is steady-state recon.
+
+**Generalizable lesson — Railway log scans are cheap operational intel, AND UA attribution is required before strategic interpretation.** A 2-minute scan of HTTP request patterns surfaces useful operational signals (5xx spikes, unexpected 404s, traffic shape). But strategic claims about adoption signal require UA + IP attribution; without it, you cannot distinguish competitor recon from adopter interest. Future operational readiness passes should include UA-attribution from the deploy-log JSON (not just the Railway dashboard's terse HTTP log view) before any "leading indicator firing" claim is banked.
+
+**Backlog for week of 2026-06-02 (post-Strata maintenance window) — unchanged from first-pass entry:**
+- Ship `/.well-known/agent-card.json` (minimal A2A-shape file or redirect to trustbench.json).
+- Investigate /.well-known/x402 — emerging convention or noise?
+- Add `/robots.txt` (one-line file; currently 404).
+- Add `/openapi.json` (could be auto-generated from Hono routes; defer if Hono doesn't have a clean plugin).
+- Consider `/.well-known/agent.json` + variants as cheap aliases pointing at the canonical trustbench.json.
+
+Cross-references: STANCE.md (MAKO Pulse severity 4 / @ChrisDMacro), `project_mako_pulse_competitor_2026_05_15.md` memory, audit v2.1 § 4.2 Strata maintenance contract, audit v2.1 § 6 leading indicators, audit v2.1 § 10 correlated-AI-cross-check risk note, drafts/inbound-traffic-readiness-runbook.md.
+
+
 ## 2026-05-19 — X reply cap rules apply to cold outreach, not hot-thread engagement
 
 **What happened.** AxiomBot (verified, automated by @0xAxiom in a thread also containing @bankrbot) replied to TrustBench's first-touch reply with vocab adoption ("receipt-as-durable-artifact is the right frame") plus a direct technical question ("what's the client's verification surface when they dispute a receipt? that's the real trust audit"). Reply budget for the day was already 2/2 used (CLU_AGENT close-and-lock + AxiomBot first-touch). I recommended holding the responsive reply until tomorrow morning Sweden time (~18h delay) to respect the cap-per-day rule from `feedback_x_reply_pattern.md`. Johan corrected: cold-outreach max-2-per-day rule shouldn't apply the same way to answering a hot thread.
@@ -1816,3 +1850,78 @@ Applying the cold-outreach cap to a hot-thread response means engaged builders g
 **Where this lands in the rules.** `feedback_x_reply_pattern.md` updated 2026-05-19 with explicit cold-outreach-vs-hot-thread distinction in the pacing section, including the 48h "thread cools" boundary for reverting to cold-outreach status. The cap stays at 2/day for cold outreach, max 1 cold reply per person per day. Hot-thread responses are uncapped numerically but disciplined by conversation-shape (don't run threads into the ground, default to one reply per back-and-forth beat).
 
 **Broader pattern.** Numerical caps that work for one category (cold outreach) frequently get over-applied to adjacent categories (hot threads, partner DMs, scheduled comms) because the discipline-feel of the rule is appealing even when the underlying risk-model doesn't fit. Check the rule against the actual failure mode it was protecting against before invoking it on a new category.
+
+## 2026-05-19 — agentic.market catalog entries aren't ground truth for x402 conformance
+
+**What happened.** An authenticated client at `135.232.224.115` was tight-looping on POST /route for `capability=data` starting ~2026-05-19 18:24 UTC, getting 502s on every call. Diagnosis pulled two distinct catalog-quality bugs that both reduced to the same root cause: the agentic.market crawler trusts agentic.market's catalog as authoritative for "this URL emits an x402 challenge," but agentic.market is just a catalog — it doesn't validate the underlying endpoint actually returns 402.
+
+Two specific entries had landed in the `providers` table from `crawler.ts:crawlAgenticMarket()`:
+
+- `https://api.brave.com/search` — Brave's regular search API expecting a Bearer token. Returns **200 OK** to anonymous GET probes. The probe layer at `route-handlers.ts:944-945` requires `resp.status === 402` and returns null otherwise, which `validateChallenge` translates to `provider_unavailable`. Never had a chance to route.
+- `https://x402.browserbase.com/browser/session/:id/extend` — a URL template with `:id` as a placeholder. The probe sends the URL verbatim, the merchant treats `:id` as a malformed session ID and returns 404, same `status !== 402 → provider_unavailable` chain.
+
+Both were the **only two providers** in the capability=data routing pool (other than three Infopunks endpoints whose host returns 503 since the Pay.sh pivot on 2026-05-11). Every paying capability=data call was guaranteed to 502 regardless of which top-2 selection picked.
+
+**Why the failure didn't catch itself earlier.** The crawler runs hourly and the providers table is upsert-only — once a bad URL lands, it stays until something deletes it. The prober (`prober.ts`) does HEAD-based liveness, not x402-conformance checks; an endpoint that returns 200 to HEAD reads as "alive" for scorecard purposes. The route-handlers.probeFor402Challenge step IS the conformance check, but it's a per-request runtime probe, not a registry-validation step — by the time it fires, a paying client is already in flight, and the only signal we get is a 502 in the response. No alarm on registry quality.
+
+**Fixes shipped 2026-05-19:**
+
+1. Stop-the-bleed: direct DB DELETE of the two URLs from `providers` and `scorecards` via Supabase SQL.
+2. Prevent-recurrence: URL hygiene filter in `crawler.ts` (commit `894321d`). Two constants — `URL_TEMPLATE_PATTERN = /\/:[a-z_]+(?:\/|$)/i` and `URL_DENYLIST = new Set(['https://api.brave.com/search'])` — applied inside the agentic.market for-loop. URL templates with un-substituted `:placeholder` segments and exact-match known-bad endpoints are skipped with a `console.warn` log before the upsert.
+
+**Why static filter not live-probe validation.** Live-probing every agentic.market catalog entry on every crawl would add ~600 outbound HTTP calls per run and slow the pipeline meaningfully. Deferred to Path B if the catalog-quality issue recurs with new failure shapes the static filter doesn't catch.
+
+**Pattern to catch.** Whenever a new external catalog or registry source is added to the crawler (CDP merchant-discovery, Heurist Mesh, agentic.market, any future Pay.sh/PEAC integration), assume the catalog's claim of "this URL is x402" is *not* validated until TrustBench proves it. Either:
+
+- Live-probe at crawl time (slow but bulletproof).
+- Static URL-shape filter as a guard (fast but only catches known patterns).
+- Filter at routing time so bad entries fail with a correct error code rather than a misleading 502 (the existing probe layer already does this for the *runtime* call, but not for the *registry quality* signal).
+
+The cheapest middle path is the static filter shipped here plus a periodic audit script that lists URL-template-shaped entries in the providers table and alarms if the count rises. Not built today; flagged as a future ergonomics improvement if catalog-quality issues recur.
+
+**Related memory:** `project_agentic_market_crawler_quality_2026_05_14.md` — earlier finding that agentic.market crawler over-enumerates per-resource URLs (33K rows from one domain). Different gotcha, same upstream-trust-issue pattern. Bank both together: agentic.market is a discovery catalog, not a validation surface.
+
+**Broader pattern.** Any external catalog or registry that drives routing decisions needs an explicit validation step on TrustBench's side. The cost of trusting the upstream is paid in 502s by paying clients — the worst possible error for a routing layer to surface. Always add the validation step before relying on the catalog for routing, even if it slows the crawl.
+
+## 2026-05-19 — Internal probes can fail 100% for 8 days while CI shows green; require explicit failure-mode signals
+
+**What happened.** Diagnosis of an unrelated 502 in production logs (Brave + Browserbase URL hygiene issue, separate `lessons.md` entry) surfaced that the `paid-probe` GitHub Actions workflow had been generating 100% errored rows in `idempotency_keys` since at least 2026-05-12. Query results: 24 errored rows per day from 2026-05-13 through 2026-05-17 (matching the cron cadence of 6 runs/day × 4 attempts per run), 20 on 2026-05-18, 12 partway through 2026-05-19. Every single row had `response_status_code=502` and `status='errored'`. Zero successful probes for 8 days.
+
+The probe was designed for exactly this purpose: hit production `/route` end-to-end every 4 hours, with real auth and real x402 payload construction, to catch production-routing breakage that the prober's HEAD-based liveness check wouldn't see. It instead became the breakage — silently — for over a week.
+
+**Why it wasn't caught.**
+
+1. The GitHub Actions workflow exits 0 (process-success) regardless of whether the route attempts inside the workflow succeeded. The CI badge stays green even when every individual `/route` POST in the run returns 502. Runs appear "successful" from a process standpoint while being 100% failed functionally.
+
+2. Errored idempotency_keys rows accumulate silently in Postgres. No alert wires to email / Slack / X / dashboard. The data is there but no one reads it unless they go looking for something else.
+
+3. The prober's HEAD-based liveness check (which IS visible in `/rankings`) continued to show all providers as "alive" because HEAD returning 200/401/404 still counts as alive. The paid-probe was the only end-to-end check; its failure was the only thing that would have surfaced the routing-pool collapse, and it failed silently.
+
+4. The capability=data lane was the most obviously broken (zero working providers since Brave + Browserbase entries got crawled in from agentic.market without x402 validation, and Infopunks went down on 2026-05-11). Whether the probe was attempting only data per run or rotating through search+inference+data and failing on the first attempt, the row count of exactly 24/day matching 6 cron × 4 providers points at single-capability-per-run behavior — a separate finding that may indicate a script-side bug worth understanding.
+
+**Root cause framing.** Two layers, both load-bearing:
+
+- *Tactical:* the registry was full of unvalidated catalog entries from agentic.market that fail the probe's `status === 402` check. Fixed via DELETE + crawler URL hygiene filter (separate `lessons.md` entry, 2026-05-19, commit `894321d`).
+- *Meta:* the canary for that tactical failure was itself broken in a way that made it invisible. The probe's exit code is a process-success signal, not a functional-success signal. Internal monitoring without explicit functional-failure exit codes is observational decoration, not actual alerting.
+
+**Fixes shipped 2026-05-19:**
+
+1. Paused the workflow schedule (`paid-probe.yml` schedule block commented out, `workflow_dispatch` retained for manual debugging). Stops 4 more errored rows per cron run from accumulating while debugging happens.
+2. Banked re-enable conditions in the workflow file comment: paid-probe.ts needs warn-vs-error distinction; root cause of 2026-05-11→2026-05-12 regression identified; capability=data has at least one verified provider (or `data` removed from rotation); a successful manual run with response_status_code=200 on at least one attempt.
+
+**Fixes deferred to next session:**
+
+- Read `scripts/paid-probe.ts` end-to-end to understand the capability rotation logic. The "24 rows/day = 6 cron × 4 providers" math implies one capability per run, not three; the workflow env says three. Reconcile.
+- Update `paid-probe.ts` to differentiate registry-empty (warn, exit 0) from all-attempts-failed (error, exit non-zero) and re-enable workflow schedule once both fixes are in place.
+- Audit other monitoring code paths in the codebase for the same silent-failure pattern. Specifically check `prober.ts` (does it exit non-zero on full failure?), `scripts/nightly-rollup-export.ts`, `scripts/post-to-x.js`, and any other automation that produces signal without exit-code semantics for functional failure.
+
+**Pattern to catch.** Whenever building or auditing internal monitoring / probes / canaries:
+
+- Process-success (exit 0) is NOT the same as functional-success (probe achieved its goal). They diverge silently.
+- Any monitor that produces observable data (logs, DB rows, metrics) but doesn't gate that data on a functional-success exit-code is decoration, not alerting.
+- "We have a probe for that" is only true if the probe surfaces *itself* failing. Otherwise the probe is just generating noise for a future engineer to discover during unrelated debugging.
+- Rule of thumb: every probe should have an explicit assertion at the end ("at least one X succeeded, otherwise exit non-zero") and that assertion should be on functional outcomes, not process completion.
+
+**Broader connection.** Same pattern shape as the `feedback_grok_scan_check_parent.md` lesson (Grok scan produces output that looks valid but doesn't validate the underlying premise — TrustBench-side has to verify before acting). Both are "looks-green-but-isn't-actually-green" failure modes that only get caught when something downstream forces verification.
+
+**Detection cost paid this time:** 8 days of silent failures, ~192 errored rows in idempotency_keys, ~$0 in actual on-chain spend (every probe failed at /route quote phase, never reached /route/settle), but real cost in losing the production-routing canary for over a week. If something genuinely broke in routing during that window, we wouldn't have known.

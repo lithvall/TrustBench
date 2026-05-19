@@ -16,11 +16,33 @@ name: Paid Probe
 #   - SUPABASE_SECRET_KEY      optional; service-role key for receipts query
 
 on:
-  schedule:
-    # Six runs per day at 4-hour intervals starting from 01:00 UTC.
-    # Distributing across the day catches providers that are up-some-of-the-time
-    # and prevents the daily cap firing in one early window.
-    - cron: '0 1,5,9,13,17,21 * * *'
+  # PAUSED 2026-05-19 — paid-probe has been 100% failed (502 on every attempt)
+  # since at least 2026-05-12, ~192 silent failures logged to idempotency_keys
+  # over 8 days with no alert because the workflow exits process-success even
+  # when every route attempt inside the run errors. The probe was designed to
+  # catch this class of production breakage end-to-end; it instead became the
+  # breakage and went undetected because CI green-status was treated as
+  # functional success.
+  #
+  # Re-enable conditions (all required):
+  #   1. paid-probe.ts updated to differentiate "no working providers in
+  #      registry" (warn, exit 0) from "all attempted providers failed at
+  #      probe time" (error, exit non-zero) — see lessons.md 2026-05-19.
+  #   2. Root cause of the 2026-05-11→2026-05-12 regression identified
+  #      (git log between paywall-v0.1.0-live and the day probe started
+  #      100% failing).
+  #   3. capability=data has at least one verified x402-conformant provider,
+  #      OR `data` is removed from SCRIPTS_PROBE_CAPABILITIES.
+  #   4. A successful manual workflow_dispatch run that completes with
+  #      response_status_code=200 on at least one /route call confirming
+  #      the end-to-end path is healthy.
+  #
+  # When re-enabling, restore the schedule line below and remove this comment
+  # block. workflow_dispatch is preserved so we can still trigger manually
+  # during debugging without re-enabling the cron.
+  #
+  # schedule:
+  #   - cron: '0 1,5,9,13,17,21 * * *'
   workflow_dispatch:
     inputs:
       dry_run:

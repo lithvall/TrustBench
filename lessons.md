@@ -4,6 +4,24 @@ A living log of patterns, surprises, and corrections worth remembering across se
 
 ---
 
+## 2026-05-19 — On an X reply with two URLs in the body, the second URL wins the card preview; refer to other domains by referent if you want the first URL's card
+
+Posted the v7 bundle-touch reply to nick.base.eth ("the bundles are live, feel free to test!"). First draft ended with: *"Curious about agentic.market's bundle submission process. DM open."* — `agentic.market` became an auto-linked second URL in the body. The first URL was `trustbench.io/bundles/receipt-backed-agent-to-agent-procurement`. X's card-preview crawler picked `agentic.market` for the card image (it has a well-established OG card; trustbench.io/bundles/... was brand-new). The compose-box preview rendered with the agentic.market chart instead of the TrustBench branding we'd just shipped HTML rendering for.
+
+Fix that worked: replace the second-domain phrase with a referent. *"Curious about your bundle submission process. DM open."* — Nick runs agentic.market, so "your" reads contextually as the same question without auto-linking a second domain. Single trustbench.io URL in the body, X has no other option, card preview renders from trustbench.io's OG metadata.
+
+**Three patterns worth banking:**
+
+1. **X's card preview picks the second URL when a tweet body has two URLs, not the first.** The selection is biased toward better OG metadata too, but in practice the recency-of-mention dominates. When you want a SPECIFIC URL's card, ensure that URL is the only auto-linked URL in the body. Refer to other domains by their operator/owner referent ("your," "the platform," "their," "Coinbase's") to prevent auto-link.
+
+2. **Card preview empty in X's compose box doesn't mean broken metadata.** X is slow to crawl fresh URLs. The compose-time preview is best-effort and often empty on URLs that don't already have a card cached. The card usually appears within minutes of posting once X's crawler catches up. Don't troubleshoot the metadata based on compose-box state alone; verify via direct `curl.exe -H "Accept: text/html" <url>` checks on the OG/twitter meta tags + the og:image asset itself.
+
+3. **For partner-touch tweets that route to a specific URL, audit the body for auto-link surface area before sending.** Domains, @handles, email-like strings, and #hashtags all become clickable links and can affect card selection or pull attention away from the load-bearing URL. The bundle-touch reply needed the trustbench.io URL to be the card and the only link; one minute spent rephrasing the agentic.market reference saved the on-brand card preview.
+
+**Meta-lesson.** The empty compose-box preview was a false alarm — both the OG image (`/og/home.png`) and the meta tags (og:title, og:description, og:image, twitter:*) returned correctly when curl-tested. The card eventually rendered post-publish. The lesson isn't "X's card preview is broken"; it's "X's card preview is unreliable in compose, AND chooses the wrong URL when two URLs are in body — both fixable, both worth knowing in advance." Generalizes to any future X outreach involving multiple domains: refer-by-referent for non-target domains.
+
+---
+
 ## 2026-05-18 — When another Claude instance and I disagree on a load-bearing architectural claim, verify against the source-of-truth design doc BEFORE counter-claiming, not after
 
 A dispatch session updated `SIGNAL-2026-05-17-agenticmarket-bundles.md` with the architectural finding that bundles are LLM prompts not HTTP runtimes, then drew a strategic conclusion: "/route is not bundle-step shaped because a bundle step calling `/route` would require two x402 flows plus a second HTTP call to the actual provider." Dispatch's verdict was that the clean bundle-integration story is the v0.2.0 `/verify` endpoint, not `/route`, and elevated `/verify`'s priority based on this read.

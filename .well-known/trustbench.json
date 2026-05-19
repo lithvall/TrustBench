@@ -158,6 +158,13 @@
     "model": "non-custodial",
     "claim": "TrustBench never holds funds, never signs payments, and never broadcasts transactions. The agent signs an EIP-3009 transferWithAuthorization with its own wallet; the merchant submits the on-chain transaction with its own gas wallet; TrustBench observes the resulting tx_hash and emits a signed receipt."
   },
+  "revenueWallet": {
+    "address": "REPLACE_BEFORE_COMMIT_paste_TRUSTBENCH_REVENUE_WALLET_ADDRESS_from_Railway_env",
+    "chain": "base",
+    "asset": "USDC",
+    "purpose": "Routing-fee receipts from x402-paywalled endpoints (POST /route in v0.1.0). Agent-A reconciliations in receipt-backed bundles filter delegated-wallet USDC outflows by `to == this address` to detect routing-fee withholding. The same address appears as the signed paid.payee_address in every valid routing receipt; this top-level field is a discovery convenience for callers that prefer a single manifest fetch over receipt parsing.",
+    "since": "2026-05-11"
+  },
   "pricing": {
     "model": "x402-native paywalled API",
     "description": "Endpoints are paywalled via x402 with per-call USDC settlement on Base through the Coinbase CDP facilitator at api.cdp.coinbase.com/platform/v2/x402. No subscriptions, no contracts. Full tier table at /pricing (HTML and JSON).",

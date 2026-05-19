@@ -22,7 +22,7 @@
 // Examples:
 //   node scripts/verify-receipt.js ./my-receipt.json
 //   node scripts/verify-receipt.js rcpt_01HV3K8M5C9X2ZBFYR4QWP8ND1
-//   node scripts/verify-receipt.js rrcpt_01KRGKSZACB4ECRPEQY1VC0F3N
+//   node scripts/verify-receipt.js rrcpt_01KRN8HYPPRD1MS9JE7045S77Q
 //   node scripts/verify-receipt.js rcpt_01HV3K8M5C9X2ZBFYR4QWP8ND1 \
 //       https://trustbench.io
 //

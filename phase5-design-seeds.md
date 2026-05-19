@@ -206,6 +206,32 @@ Until all three fire, this is notes-only.
 
 ---
 
+## x402 capability gap map (TrustBench-as-output, not TrustBench-as-scope)
+
+**Captured 2026-05-14** during a separate brainstorm about a "boring x402 endpoint portfolio" (research doc: `endpoint-portfolio-research-2026-05-14.md`). The brainstorm surfaced a strategic finding: TrustBench already crawls + probes the live x402 inventory across Base (Bazaar, agentic.market) and Solana (Heurist Mesh), and that crawler output can be turned into a public artifact — *"x402 capability coverage report, signed nightly"* — same shape as the Paddock partner rollup CSV.
+
+**Why this belongs in Phase 5 (or earlier as a small standalone artifact):**
+
+- Mirrors the Paddock partner rollup pattern: turn raw probe data into a partner-readable artifact with a stable URL.
+- Pulls agentic.market authors, agent framework devs, and competing registries (Pylon, agentsvc.io, Dexter, Heurist) toward TrustBench as the authoritative coverage source.
+- Reinforces TrustBench's discovery-upstream-of-curation positioning without adding any new product surface — it's purely a derivative of existing crawler + scoring output.
+- Cheap to ship: one SQL query, one nightly cron, one CSV/JSON file in `exports/`, optional HTML rendering at `/coverage`.
+- Honest-framing rule applies: must caveat that "absence from registry" ≠ "absence from ecosystem" (the crawler has known visibility gaps — Pylon and agentsvc.io exist on x402 but didn't appear in the 2026-05-14 capability probe).
+
+**Minimum-viable shape:**
+
+- Pre-defined category taxonomy (DeFi reads, search, registry lookups, security posture, fiat FX, validation, content extraction, on-chain RPC, etc.).
+- Nightly query bucketing live endpoints into categories via URL-pattern + name-keyword heuristics.
+- Per-category: count of endpoints, count alive (uptime_7d > X), best-latency representative, last-updated.
+- Public URL: `trustbench.io/coverage` (HTML) and `trustbench.io/coverage.json` / `coverage.csv` (machine-readable).
+- Same content-negotiation pattern as `/rankings` and `/receipts/:id`.
+
+**Hard rule (per the 2026-05-14 brainstorm):** TrustBench publishes the gap map. TrustBench *does not* build the endpoints that fill the gaps. The portfolio play, if pursued, ships as architecturally separate small projects that ride on TrustBench's receipt infrastructure but live in their own repos with their own minimal footprints. The two reinforce each other; they do not merge.
+
+**Tag:** P5-coverage-report. Pre-Phase-5-shippable as a small standalone artifact if/when listing-sprint follow-ups give a clear week of capacity. Defer if not.
+
+---
+
 ## How to apply this file
 
 - When Phase 5 work begins, this file becomes the design seed for the actual Phase 5 spec docs (analogous to `phase3-x402-construction.md`, `phase3-receipt-generator.md`, etc. for Phase 3).

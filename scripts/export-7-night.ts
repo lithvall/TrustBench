@@ -326,6 +326,61 @@ async function main() {
   console.error(
     `[export-7-night] Done. Wrote ${written} rows, skipped ${skipped} unprobed providers in ${elapsedMs}ms.`,
   );
+
+  // ---------------------------------------------------------------------
+  // Exit-code semantics (added 2026-05-20 per lessons.md 2026-05-19 entry
+  // "Internal probes can fail 100% for 8 days while CI shows green").
+  // ---------------------------------------------------------------------
+  // Failure modes the existing main().catch(exit 1) DOES catch:
+  //   - Supabase fetchAllPaged throws on any non-2xx (env missing, RLS
+  //     denial, table renamed, etc.)
+  //   - paged-overflow MAX_PAGES guard fires
+  //   - any unhandled Promise rejection in main()
+  //
+  // Failure mode the existing main().catch does NOT catch (silent-failure
+  // shape this block fixes):
+  //   - Supabase responds 200 with providers.length > 0 but the 7-day
+  //     probes window is empty (e.g. the nightly-pipeline workflow has
+  //     been red for >7 days, or `probes` table was truncated, or the
+  //     prober regressed silently per the 2026-05-19 incident).
+  //
+  //   In that case every provider gets skipped by the probed-only filter,
+  //   `written` is 0, the script exits 0, and the workflow then commits
+  //   a header-only `exports/rollup-latest.csv` and pushes it. Railway
+  //   redeploys, and Paddock's 00:05 UTC poll fetches a CSV with the
+  //   12-column header and zero data rows. The "last successful rollup
+  //   stays in place" failure-mode comment in the workflow YAML is only
+  //   true if THIS script fails-loud; silent-success with empty output
+  //   produces exactly the partner-data-corruption Paddock's pipeline
+  //   is supposed to be protected against.
+  //
+  // Rule:
+  //   - providers.length === 0: empty registry. This is observational
+  //     (e.g. brand-new DB, schema migration in flight). Exit 0 with
+  //     a warning so the operator sees it but the workflow doesn't go
+  //     red on a known empty state.
+  //   - providers.length > 0 AND written === 0: every provider was
+  //     skipped for lack of 7-day probe data. That is the silent-failure
+  //     shape — probes pipeline is broken upstream. Exit 1 so the
+  //     workflow goes red and the prior CSV stays in place. Recovery is
+  //     the same as any other workflow failure: re-run after probes
+  //     pipeline is fixed.
+  //   - written > 0: at least one provider produced a real row. Success.
+  //     Even if it's just one, the partner gets meaningful liveness
+  //     data and prior-day continuity is preserved.
+  //
+  // Failure mode if this is wrong: a legitimately empty 7-day window
+  // (e.g. first run after a long pause) goes red. Acceptable — same
+  // trade-off as prober.ts. Re-run after the pipeline catches up.
+  if (providers.length === 0) {
+    console.error('[export-7-night] WARN providers table empty; exiting 0 (header-only CSV)');
+    return;
+  }
+  if (written === 0) {
+    throw new Error(
+      `[export-7-night] all ${providers.length} providers skipped for lack of 7-day probe data — probes pipeline likely regressed upstream; refusing to emit header-only CSV`,
+    );
+  }
 }
 
 main().catch((err) => {

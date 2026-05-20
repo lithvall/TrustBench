@@ -1,7 +1,7 @@
 ---
 project: TrustBench
-date: 2026-05-19
-revision: 2
+date: 2026-05-20
+revision: 3
 phase: phase-4-post-listing-sprint
 
 # Universal schema: pillars are the defensible positions. Stable across long horizons.
@@ -28,7 +28,7 @@ active_competitors:
   - { name: "QuickNode x402", handle: "unknown", severity: 2, category: facilitator-absorption }
   - { name: "PEAC", handle: "unknown", severity: 3, category: receipt-format }
   - { name: "x402 v2 spec", handle: "unknown", severity: 3, category: receipt-format }
-  - { name: "Dexter", handle: "@divuspop", severity: 2, category: adjacent }
+  - { name: "Dexter", handle: "@dexteraisol", severity: 4, category: receipt-format }
   - { name: "PayAI", handle: "unknown", severity: 2, category: adjacent }
   - { name: "Infopunks radar", handle: "@InfopunksHQ", severity: 2, category: routing-overlap }
 
@@ -73,6 +73,8 @@ TrustBench is a non-custodial x402 router + signed-receipt layer on Base. Phase 
 The two pillars — canonical receipt-format standard, neutral routing+receipt layer — are the defensible positions. Pillar 2 is active via Phase 4 maintenance. Pillar 1 has a first concrete public artifact (the bundle) demonstrating Option B flavor, but the formal Option A (partner adoption) / B (canonical primitives) / C (original go-list) decision remains pending. No commitment to a specific Option as of this stance date.
 
 Discovery surface watch (banked 2026-05-19): agentic.market operator (@Nick_Prince12) publicly considering pay-to-rank for bundles (*"service providers would pay to get their service promoted to agentic buyers"*, in reply to @heisenburgirrs 2026-05-18). TrustBench's `out_of_scope` includes `pay-to-rank`. Not committed by Nick; flagged for watch. If implemented, the agentic.market relationship moves from pure discovery surface to a structural-differentiation moment — TrustBench's measurement-only routing layer becomes the sharper claim, with the routing-WITHIN-a-bundle vs bundle-DISCOVERY layers cleanly separable in framing.
+
+Direct competitor shift (banked 2026-05-19, revision 3): Dexter (@dexteraisol) shipped Instinct — pay-to-rank recommendation payloads baked into the x402 settlement receipt envelope as an "open extension." Severity moved from 2 (adjacent) to 4 (receipt-format), category reclassified from adjacent to direct Pillar 1 competitor with opposite philosophy. Counter-position narrative artifact pre-drafted in `drafts/dexter-counter-position.md` ready to ship within 24h if a named CDP / Cloudflare / x402 Foundation engineer publishes ≥3 substantive posts engaging Instinct positively (the pre-trigger from audit § 6). Do NOT counter-ship a feature; the differentiation (measurement-only vs pay-to-rank) IS the position. See memory `project_dexter_instinct_launch_2026_05_19.md`.
 
 Next milestone: first external paying agent. §10 Strata reference-agent integration closed 2026-05-15 (4 days ahead of target); next target path is post-launch external agent traffic following Strata's Show HN co-launch. Kill criterion: no paying external agent within 6 weeks of listing (~2026-06-27) triggers paywall pricing and discovery reassessment.
 

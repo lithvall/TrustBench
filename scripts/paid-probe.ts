@@ -440,14 +440,65 @@ async function pickProvidersToProbe(
     }
   }
 
-  // Sort: never-probed first (epoch 0), then least-recently-probed.
-  candidates.sort((a, b) => {
-    const ta = lastProbedByProvider.get(a.provider_id)?.getTime() ?? 0;
-    const tb = lastProbedByProvider.get(b.provider_id)?.getTime() ?? 0;
-    return ta - tb;
-  });
+  // Slot allocation: round-robin across capabilities (added 2026-05-20).
+  //
+  // Earlier behavior: flat LRU sort + slice(0, maxProviders). When the
+  // receipts table is empty (no successful settles to differentiate by),
+  // every candidate's lastProbed time defaults to 0, the sort comparator
+  // returns 0 for every pair, and V8 stable sort preserves insertion order.
+  // That means all maxProviders slots went to whichever capability is
+  // iterated first AND has enough score-≥40 candidates to fill them; other
+  // configured capabilities never got a probe slot.
+  //
+  // This was the shape behind the 2026-05-19 incident: capability=data was
+  // the only one returning score-≥40 candidates from /rankings (Infopunks
+  // reseeds plus the broken Brave/Browserbase agentic.market entries that
+  // were since deleted), so it filled all 4 slots every run while search
+  // and inference went unprobed. Even after dropping `data` from the env
+  // default, the same mechanism would silently bias all slots toward
+  // whichever of search/inference is iterated first as soon as one of them
+  // has enough candidates — preserving the silent-coverage-gap shape that
+  // the 2026-05-19 lessons.md entry warned about.
+  //
+  // New behavior: group by capability, sort within each group by LRU, then
+  // round-robin one slot at a time across capabilities until maxProviders
+  // are picked. Each configured capability with ≥1 candidate gets at least
+  // one slot before any capability gets a second. Spillover (capabilities
+  // with no candidates) is naturally absorbed by the round-robin — the loop
+  // just keeps cycling through the ones that still have items.
+  //
+  // Failure mode if this is wrong: if round-robin picks an unhealthy provider
+  // when a healthier alternative existed in the same capability, the [probe]
+  // ERROR fires the canary correctly — just on a different provider than the
+  // LRU-flat path would have chosen. No silent degradation; the canary surface
+  // stays load-bearing.
+  const byCapability = new Map<Capability, ProbeTarget[]>();
+  for (const cap of capabilities) {
+    const capList = candidates
+      .filter((c) => c.capability === cap)
+      .sort((a, b) => {
+        const ta = lastProbedByProvider.get(a.provider_id)?.getTime() ?? 0;
+        const tb = lastProbedByProvider.get(b.provider_id)?.getTime() ?? 0;
+        return ta - tb;
+      });
+    byCapability.set(cap, capList);
+  }
 
-  return candidates.slice(0, maxProviders);
+  const result: ProbeTarget[] = [];
+  let progress = true;
+  while (result.length < maxProviders && progress) {
+    progress = false;
+    for (const cap of capabilities) {
+      if (result.length >= maxProviders) break;
+      const queue = byCapability.get(cap);
+      if (queue && queue.length > 0) {
+        result.push(queue.shift()!);
+        progress = true;
+      }
+    }
+  }
+
+  return result;
 }
 
 // -----------------------------------------------------------------------------
@@ -460,7 +511,14 @@ async function main() {
   const baseUrl = optional('TRUSTBENCH_BASE_URL', 'http://localhost:3000');
   const dryRun = optional('SCRIPTS_PROBE_DRY_RUN', 'false') === 'true';
   const maxProviders = parseInt(optional('SCRIPTS_PROBE_MAX_PROVIDERS', '4'), 10);
-  const capsCsv = optional('SCRIPTS_PROBE_CAPABILITIES', 'search,inference,data');
+  // SCRIPTS_PROBE_CAPABILITIES default dropped `data` 2026-05-20.
+  // Infopunks's cognition-layer (the only verified-live capability=data x402
+  // provider as of seed 2026-05-04) pivoted off-product 2026-05-11; nightly
+  // seed re-inserts now amount to dead rows. Probing them produced 100%
+  // 502s for 8 days (see lessons.md 2026-05-19 "Internal probes can fail
+  // 100% for 8 days while CI shows green"). Re-add `data` to the env when
+  // a verified-live data provider lands in the registry organically.
+  const capsCsv = optional('SCRIPTS_PROBE_CAPABILITIES', 'search,inference');
   const probeAgentEmail = optional('SCRIPTS_PROBE_AGENT_EMAIL', 'probe@trustbench.io');
 
   if (!/^0x[0-9a-fA-F]{64}$/.test(walletPk)) {
@@ -486,20 +544,24 @@ async function main() {
 
   // 2. Soft monthly cap pre-check. Server enforces the hard cap — this is
   // just to avoid piling on after we're already over budget for the month.
+  // Outcome: WARN (exit 0). We hit the budget ceiling, not a routing failure.
   const mtd = await monthToDateSpendAtomic(probeAgentEmail);
   if (mtd !== null) {
     console.log(`[probe] month-to-date spend: ${mtd} atomic (cap ${MONTHLY_HARD_CEILING_ATOMIC})`);
     if (mtd >= MONTHLY_HARD_CEILING_ATOMIC) {
-      console.log('[probe] monthly hard ceiling reached — exiting cleanly');
-      return;
+      console.warn('[probe] WARN monthly hard ceiling reached — exiting 0');
+      process.exit(0);
     }
   }
 
   // 3. Pick which providers to probe.
+  // Outcome on empty: WARN (exit 0). Registry having no score-≥40 providers
+  // is a pipeline-state problem (e.g., prober hasn't run yet, or the lane
+  // is genuinely empty), not a routing failure.
   const targets = await pickProvidersToProbe(baseUrl, capabilities, maxProviders, probeAgentEmail);
   if (targets.length === 0) {
-    console.log('[probe] no eligible providers (score >= 40); exiting');
-    return;
+    console.warn('[probe] WARN no eligible providers (score >= 40); exiting 0');
+    process.exit(0);
   }
   console.log(`[probe] ${targets.length} target(s):`, targets.map(t => `${t.capability}:${t.provider_id}`).join('  '));
 
@@ -727,7 +789,43 @@ async function main() {
     }
   }
 
+  // -----------------------------------------------------------------------
+  // Exit-code semantics (added 2026-05-20 per lessons.md 2026-05-19 entry
+  // "Internal probes can fail 100% for 8 days while CI shows green").
+  // -----------------------------------------------------------------------
+  // CI badge / GitHub Actions surface ONLY the process exit code. A run
+  // that completes with okCount=0 / failCount=N must exit non-zero to
+  // ever go red. The earlier process-success-regardless behavior is what
+  // hid the 8-day 502 streak; this block fixes it.
+  //
+  // Rules:
+  //   - dryRun: never error. Dry runs intentionally skip /route/settle;
+  //     fail/ok counts are noise. Exit 0 with a summary line.
+  //   - okCount >= 1: at least one settle landed and we got a receipt.
+  //     Treat partial success (some 502s, some OK) as overall OK — that's
+  //     the production-routing-still-works signal we wanted.
+  //   - okCount === 0 AND failCount >= 1: every attempt failed. THIS is
+  //     the case that has to go red. Exit 1 + stderr summary.
+  //   - okCount === 0 AND failCount === 0: shouldn't reach here (we
+  //     would have early-returned in the targets.length===0 branch), but
+  //     defensive default = WARN exit 0.
+  //
+  // The /route 502 logs already land in idempotency_keys for postmortem;
+  // exit code is the *alerting* signal, not the audit signal.
+  if (dryRun) {
+    console.log(`[probe] DONE dry  ok=${okCount}  fail=${failCount}  targets=${targets.length}`);
+    process.exit(0);
+  }
+  if (okCount === 0 && failCount >= 1) {
+    console.error(`[probe] ERROR all ${failCount} probe attempt(s) failed; exiting 1`);
+    console.error(`[probe] done  ok=${okCount}  fail=${failCount}  dry=${dryRun}`);
+    process.exit(1);
+  }
+  if (okCount >= 1 && failCount >= 1) {
+    console.warn(`[probe] WARN partial success  ok=${okCount}  fail=${failCount}  (some providers 502'd; canary still green)`);
+  }
   console.log(`[probe] done  ok=${okCount}  fail=${failCount}  dry=${dryRun}`);
+  process.exit(0);
 }
 
 main().catch(err => {

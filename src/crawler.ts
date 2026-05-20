@@ -392,13 +392,25 @@ async function crawlHeurist(): Promise<number> {
 }
 
 // -----------------------------------------------------------------------------
-// Step 3: seedKnownX402Endpoints (manually verified, runs last)
+// Step 3: seedKnownX402Endpoints (DISABLED 2026-05-20)
 // -----------------------------------------------------------------------------
-// Each entry has been hit with curl and confirmed to return a valid x402 402
-// challenge body (scheme=exact, network=base, asset=USDC on Base, valid
-// pay_to address). Capability label is `data` for all three Infopunks
-// endpoints (analytical signal/score extraction). Easy to flip per-endpoint
-// if usage shows a better grouping.
+// Each entry was verified live by curl on 2026-05-04 (scheme=exact,
+// network=base, asset=USDC on Base, valid pay_to). Capability label is
+// `data` for all three Infopunks endpoints.
+//
+// DISABLED 2026-05-20: Infopunks pivoted off the cognition layer
+// 2026-05-11 (memory project_infopunks_pivot_to_paysh_radar_2026_05_11).
+// The Render host still serves the URLs but they no longer return valid
+// 402 challenges — the paid probe got 100% 502s for 8 days as a result
+// (lessons.md 2026-05-19 "Internal probes can fail 100% for 8 days while
+// CI shows green"). Continuing to reseed these as `capability=data`
+// keeps a dead lane lit on /rankings and is what the probe kept attempting.
+//
+// To revive: confirm with curl that each seed URL returns a valid x402
+// 402 challenge body (scheme, network=base, asset=USDC, fresh pay_to),
+// then uncomment the `await insertProviders(seeds)` line below. If the
+// pivot is permanent, replace the seed list with a different verified-live
+// data provider when one exists in the ecosystem.
 //
 // Why this list exists separately from Agentic Market: these endpoints are
 // POST-only and require a specific request body shape to elicit the 402
@@ -406,6 +418,16 @@ async function crawlHeurist(): Promise<number> {
 // metadata.x402_probe_method + x402_probe_body fields tell the router how to
 // probe them - see route-handlers.probeFor402Challenge().
 async function seedKnownX402Endpoints() {
+  // Disabled-reseed log line stays so anyone watching nightly crawl output
+  // sees the seed step was reached but skipped, vs. a silent removal that
+  // could mask future regressions.
+  console.log('[crawler] seedKnownX402Endpoints DISABLED 2026-05-20 (see comment block; revive when verified-live).');
+
+  // Preserved for revival. To re-enable: verify each URL still returns a
+  // valid x402 402 challenge (scheme=exact, network=base, asset=USDC on
+  // Base, fresh pay_to), then move this block back above the `return` and
+  // re-add `await insertProviders(seeds);`.
+  /*
   console.log('[crawler] Seeding verified-real x402 endpoints...');
   const INFOPUNKS_HOST = 'https://infopunks-cognition-layer-x402.onrender.com';
   const INFOPUNKS_PAY_TO = '0xe4E8908308a86aB43E5dEb6C0fd0F006786104c3';
@@ -466,6 +488,7 @@ async function seedKnownX402Endpoints() {
     },
   ];
   await insertProviders(seeds);
+  */
 }
 
 async function insertProviders(resources: any[]) {

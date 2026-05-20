@@ -16,7 +16,7 @@ name: Paid Probe
 #   - SUPABASE_SECRET_KEY      optional; service-role key for receipts query
 
 on:
-  # PAUSED 2026-05-19 — paid-probe has been 100% failed (502 on every attempt)
+  # PAUSED 2026-05-19 — paid-probe was 100% failed (502 on every attempt)
   # since at least 2026-05-12, ~192 silent failures logged to idempotency_keys
   # over 8 days with no alert because the workflow exits process-success even
   # when every route attempt inside the run errors. The probe was designed to
@@ -24,22 +24,31 @@ on:
   # breakage and went undetected because CI green-status was treated as
   # functional success.
   #
-  # Re-enable conditions (all required):
-  #   1. paid-probe.ts updated to differentiate "no working providers in
-  #      registry" (warn, exit 0) from "all attempted providers failed at
-  #      probe time" (error, exit non-zero) — see lessons.md 2026-05-19.
-  #   2. Root cause of the 2026-05-11→2026-05-12 regression identified
-  #      (git log between paywall-v0.1.0-live and the day probe started
-  #      100% failing).
-  #   3. capability=data has at least one verified x402-conformant provider,
-  #      OR `data` is removed from SCRIPTS_PROBE_CAPABILITIES.
-  #   4. A successful manual workflow_dispatch run that completes with
-  #      response_status_code=200 on at least one /route call confirming
-  #      the end-to-end path is healthy.
+  # Re-enable conditions:
+  #   1. ✓ DONE 2026-05-20 — paid-probe.ts now differentiates registry-empty
+  #      (WARN, exit 0) from all-attempts-failed (ERROR, exit 1). See the
+  #      "Exit-code semantics" block at the end of main().
+  #   2. ✓ DONE 2026-05-20 — root cause of the 2026-05-11→2026-05-12
+  #      regression identified: Infopunks pivoted off the cognition layer
+  #      2026-05-11 (memory project_infopunks_pivot_to_paysh_radar_2026_05_11),
+  #      leaving the three nightly-reseeded capability=data providers dead.
+  #      Probe was correctly picking 4 score-≥40 candidates per run; all 4
+  #      happened to be the dead Infopunks rows because search/inference
+  #      lanes had fewer candidates. The nightly reseed has been disabled
+  #      in src/crawler.ts → seedKnownX402Endpoints (rows commented out;
+  #      shell preserved for revival).
+  #   3. ✓ DONE 2026-05-20 — `data` removed from SCRIPTS_PROBE_CAPABILITIES
+  #      env below + the script default. Accept-the-gap decision: revisit
+  #      when a verified-live x402 data provider lands in the registry
+  #      organically. See decisions.md 2026-05-20 entry (90-day callback).
+  #   4. ✗ PENDING — one successful manual workflow_dispatch run with
+  #      okCount >= 1 (i.e., [probe] OK on at least one capability=search
+  #      or capability=inference target) before restoring the schedule.
   #
-  # When re-enabling, restore the schedule line below and remove this comment
-  # block. workflow_dispatch is preserved so we can still trigger manually
-  # during debugging without re-enabling the cron.
+  # To re-enable: run a workflow_dispatch with dry_run=false, confirm one
+  # [probe] OK line in the logs and exit 0 (or [probe] ERROR exit 1 surfaces
+  # the actual breakage, in which case fix-then-retry). Then uncomment the
+  # `schedule:` block below and delete this comment.
   #
   # schedule:
   #   - cron: '0 1,5,9,13,17,21 * * *'
@@ -86,6 +95,8 @@ jobs:
           # Manual-dispatch overrides (cron runs use defaults)
           SCRIPTS_PROBE_DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
           SCRIPTS_PROBE_MAX_PROVIDERS: ${{ github.event.inputs.max_providers || '4' }}
-          SCRIPTS_PROBE_CAPABILITIES: 'search,inference,data'
+          # `data` dropped 2026-05-20 — see paused-workflow comment above
+          # and decisions.md "Accept capability=data lane unsupported".
+          SCRIPTS_PROBE_CAPABILITIES: 'search,inference'
           SCRIPTS_PROBE_AGENT_EMAIL: 'probe@trustbench.io'
         run: npm run paid-probe

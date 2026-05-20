@@ -220,4 +220,38 @@ async function runFullProbeAndScore() {
   console.log('Probe + scoring pipeline complete.');
 }
 
-runFullProbeAndScore().catch(console.error);
+// Exit-code semantics (added 2026-05-20 per lessons.md 2026-05-19 entry
+// "Internal probes can fail 100% for 8 days while CI shows green").
+// -----------------------------------------------------------------------
+// Previously: `runFullProbeAndScore().catch(console.error)` logged any
+// thrown error (e.g. Supabase probes-insert RLS denial, scorecards-upsert
+// schema mismatch) to stderr and then exited 0 by default. The nightly-
+// pipeline workflow stayed green even when every insert was rejected —
+// the same silent-failure shape that hid the 2026-05-11→2026-05-19 paid-
+// probe regression. The 2026-05-11 fix that added `throw probeInsertError`
+// (described in the file header comment around line 32) was load-bearing
+// only if the top-level promise rejection also surfaced as a non-zero
+// exit. It did not.
+//
+// New behavior: log the error, then exit 1 so GitHub Actions goes red on
+// any thrown error inside the pipeline. Functional success for this
+// script = "every provider's probe samples landed in `probes` AND its
+// scorecard landed in `scorecards`." Both are guarded by `throw` already;
+// this just propagates that signal to the process layer.
+//
+// Failure mode if this is wrong: the workflow goes red on a transient
+// Supabase blip that would have self-recovered the next night. Acceptable
+// trade-off — false-positive red is a known noise; silent-green-while-
+// broken is the failure class we're systematically eliminating per the
+// lessons.md entry.
+//
+// What this does NOT change: a probe run where every endpoint returns
+// `success: false` (e.g. registry full of dead URLs) still exits 0. That
+// is observational data, not a probe-script failure — the data lands,
+// downstream consumers (`/rankings`, paid-probe canary) see the zero
+// success rate. The probe script's job is to *measure honestly*, not to
+// fail when the underlying registry is unhealthy.
+runFullProbeAndScore().catch((err) => {
+  console.error('[prober] pipeline failed:', err && err.message ? err.message : err);
+  process.exit(1);
+});

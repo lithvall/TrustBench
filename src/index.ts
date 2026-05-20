@@ -61,6 +61,15 @@ function loadStatic(relPath: string): string | null {
 const SKILL_MD_BODY = loadStatic('skill.md');
 const LLMS_TXT_BODY = loadStatic('llms.txt');
 const WELL_KNOWN_TRUSTBENCH_JSON_BODY = loadStatic('.well-known/trustbench.json');
+// /openapi.json — minimal-viable OpenAPI 3.1 discovery surface (added 2026-05-20).
+// Observable demand: Railway logs showed /openapi.json as the most-probed missing
+// surface (16+ misses in 12h from MAKO Pulse, CarbonMonitor, and contact-page
+// scrapers). AgentCash-conformant `x-payment-info` per-operation annotations
+// are deferred to the post-Strata sprint (target week of 2026-06-02); this
+// minimal version ships the OpenAPI envelope + operation entries only. See
+// CLAUDE.md § Mandatory Pre-Development Filter — passes as Pillar 2 maintenance
+// (discovery surface) with Pillar 1 propagation potential post-sprint.
+const OPENAPI_JSON_BODY = loadStatic('openapi.json');
 // Bundle artifacts — copy-paste LLM prompt templates that orchestrate x402 calls
 // via TrustBench /route and emit `trustbench_receipts[]` in their output.
 // Strategic context: Pillar 1 propagation surface; see SIGNAL-2026-05-17-agenticmarket-bundles.md.
@@ -566,6 +575,21 @@ app.get('/.well-known/trustbench.json', (c) => {
     });
   }
   return c.text(WELL_KNOWN_TRUSTBENCH_JSON_BODY, 200, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'public, max-age=3600',
+  });
+});
+
+// /openapi.json — OpenAPI 3.1 discovery surface (see comment at OPENAPI_JSON_BODY).
+// Same shape as the other static-json well-known route above: 503 if the file
+// was missing at boot, otherwise serve verbatim with a 1-hour cache.
+app.get('/openapi.json', (c) => {
+  if (!OPENAPI_JSON_BODY) {
+    return c.text('openapi.json is not deployed on this instance.\n', 503, {
+      'Content-Type': 'text/plain; charset=utf-8',
+    });
+  }
+  return c.text(OPENAPI_JSON_BODY, 200, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'public, max-age=3600',
   });

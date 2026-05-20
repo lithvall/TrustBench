@@ -1,0 +1,279 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "TrustBench",
+    "version": "0.1.0",
+    "summary": "Non-custodial routing and audit layer for x402 with Ed25519-signed receipts.",
+    "description": "TrustBench is a non-custodial routing and audit layer for x402. Every paid POST /route call emits an Ed25519-signed receipt covering the routing decision and the on-chain settlement reference, verifiable offline against a published public key with no dependency on TrustBench being online or honest. Hard spend caps, idempotency keys, and a fail-safe paywall (refuses to charge when the upstream merchant is non-conformant) are bundled in. Agents sign their own EIP-3009 transferWithAuthorization with their own wallet; TrustBench constructs the quote, routes to a probed and scored provider, observes the on-chain settlement, and emits the signed receipt.",
+    "x-guidance": "TrustBench is a routing layer that wraps third-party x402 endpoints with signed receipts. Agents pay POST /route via the x402 paywall (per-call USDC settlement on Base through the Coinbase CDP facilitator). The 402 challenge advertises the price; on success the response includes an Ed25519-signed RoutingReceipt envelope retrievable forever at GET /receipts/{id}. Verify receipts offline with @trustbench/verify-receipt (npm) against the public key at /.well-known/trustbench-pubkey. Canonical discovery surfaces: /openapi.json (this file), /.well-known/trustbench.json (machine manifest), /skill.md (agentic.market format), /llms.txt (llmstxt.org format).",
+    "contact": {
+      "name": "TrustBench",
+      "url": "https://trustbench.io",
+      "x-twitter": "https://x.com/TrustBench",
+      "x-github": "https://github.com/lithvall/TrustBench"
+    },
+    "license": {
+      "name": "MIT",
+      "url": "https://github.com/lithvall/TrustBench/blob/main/LICENSE"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://trustbench.io",
+      "description": "Production"
+    }
+  ],
+  "externalDocs": {
+    "description": "Methodology, receipt spec, and machine-readable manifest",
+    "url": "https://trustbench.io/methodology"
+  },
+  "tags": [
+    {
+      "name": "routing",
+      "description": "Paid endpoints that produce a Routing Decision plus an Ed25519-signed Routing Receipt."
+    },
+    {
+      "name": "receipts",
+      "description": "Public, immutable Routing Receipt envelopes addressable by ULID. No auth required."
+    },
+    {
+      "name": "telemetry",
+      "description": "Public liveness telemetry and pricing surfaces. HTML by default; JSON via content negotiation."
+    }
+  ],
+  "paths": {
+    "/route": {
+      "post": {
+        "tags": ["routing"],
+        "summary": "Quote a routing decision for a paid x402 call",
+        "description": "Produces a routing decision: scored primary provider + fallback, a 5-minute-validity quote, and (on completion of the matching POST /route/settle) an Ed25519-signed RoutingReceipt with on-chain settlement reference. Paid via the x402 paywall when TRUSTBENCH_PAYWALL_ENABLED=true (default in production). Falls back to Bearer tb_live_<key> auth otherwise. Idempotent on the Idempotency-Key header (16-128 chars, 24h replay window, 409 on body mismatch).",
+        "externalDocs": {
+          "description": "Pricing tiers",
+          "url": "https://trustbench.io/pricing"
+        },
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "description": "16-128 character idempotency token. Same key + same body returns the cached quote. Same key + different body returns 409.",
+            "required": true,
+            "schema": { "type": "string", "minLength": 16, "maxLength": 128 }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["capability", "max_price", "payer_address"],
+                "properties": {
+                  "capability": {
+                    "type": "string",
+                    "enum": ["search", "inference", "data", "media", "infra"],
+                    "description": "Coinbase Agentic Market 5-category taxonomy."
+                  },
+                  "max_price": {
+                    "type": "string",
+                    "description": "Atomic USDC integer string (6 decimals; 10000 = $0.01)."
+                  },
+                  "payer_address": {
+                    "type": "string",
+                    "pattern": "^0x[0-9a-fA-F]{40}$",
+                    "description": "0x-prefixed 40-hex EOA. Becomes the from address on the EIP-3009 authorization."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Routing quote (paywall passed or bearer auth accepted).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "route_id": { "type": "string", "description": "qt_<26-char ULID>. Hand back to /route/settle." },
+                    "payment_required": { "type": "object", "description": "Legacy v0.x flat shape." },
+                    "payment_requirements_v2": { "type": "object", "nullable": true, "description": "Raw merchant accepts[0] when present (null for v0.x merchants)." },
+                    "expires_at": { "type": "string", "format": "date-time", "description": "ISO 8601, 5-minute validity window." },
+                    "fallback_provider": { "type": "object", "description": "Secondary choice with score_at_decision." }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required. The x402 challenge advertises price and chain. Re-submit with an X-Payment header carrying the SDK-built x402 envelope (paymentauth.org-draft-compatible).",
+            "headers": {
+              "X-Payment-Required": {
+                "schema": { "type": "string" },
+                "description": "Echoed per x402 spec."
+              }
+            }
+          },
+          "409": { "description": "Idempotency-Key reused with a different request body." },
+          "422": { "description": "Validation error on capability / max_price / payer_address." }
+        }
+      },
+      "get": {
+        "tags": ["routing"],
+        "summary": "Returns the route resource descriptor",
+        "description": "Read-only descriptor that documents the POST /route flow for crawlers and validators. The real routing call is POST.",
+        "responses": {
+          "200": {
+            "description": "Route descriptor JSON.",
+            "content": { "application/json": {} }
+          }
+        }
+      }
+    },
+    "/route/settle": {
+      "post": {
+        "tags": ["routing"],
+        "summary": "Settle a previously-quoted route and receive the signed RoutingReceipt",
+        "description": "Step 2 of the two-step quote/settle flow. Accepts EITHER {route_id, signature} (legacy v0.x) OR {route_id, x_payment} (SDK-built X-PAYMENT base64). Bearer tb_live_<key> auth. Settle fee is paid at quote time via the /route paywall — this endpoint is itself unpaid. Idempotent on (route_id, payment); replays return x-idempotent-replay: true.",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["route_id"],
+                "properties": {
+                  "route_id": { "type": "string", "description": "qt_<26-char ULID> from POST /route." },
+                  "signature": { "type": "string", "description": "EIP-3009 signature (legacy v0.x path). Mutually exclusive with x_payment." },
+                  "x_payment": { "type": "string", "description": "Base64 X-PAYMENT envelope from an x402 SDK. Mutually exclusive with signature." }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Settlement success. Returns merchant response plus signed RoutingReceipt; X-Receipt-Id header carries the rrcpt_<ULID>.",
+            "headers": {
+              "X-Receipt-Id": {
+                "schema": { "type": "string" },
+                "description": "rrcpt_<26-char ULID> — lookup token for GET /receipts/{id}."
+              },
+              "X-Idempotent-Replay": {
+                "schema": { "type": "string", "enum": ["true"] },
+                "description": "Present when the response is served from the idempotency cache."
+              }
+            }
+          },
+          "409": { "description": "Idempotency replay on a different body." },
+          "410": { "description": "route_id expired (5-minute window closed)." },
+          "502": { "description": "Provider settlement missing — no tx_hash recoverable from merchant; no receipt issued." }
+        }
+      }
+    },
+    "/receipts/{id}": {
+      "get": {
+        "tags": ["receipts"],
+        "summary": "Fetch a public, immutable Routing Receipt envelope",
+        "description": "Public, no-auth endpoint. Returns the byte-exact signed envelope used by @trustbench/verify-receipt. Content-negotiated: Accept: text/html returns the rendered HTML view; any other Accept returns canonical JSON. The ULID acts as audit token; receipts are immutable, cache-friendly (public, max-age=86400, immutable).",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "description": "Receipt ULID: rcpt_<26> (Phase 3 settlement receipts) or rrcpt_<26> (Phase 4 routing receipts).",
+            "schema": { "type": "string", "pattern": "^r?rcpt_[0-9A-Z]{26}$" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Signed receipt envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "Canonical signed receipt. Schema is documented in receipt-spec-v1.md; verify with @trustbench/verify-receipt or scripts/verify-receipt.js.",
+                  "externalDocs": {
+                    "url": "https://github.com/lithvall/TrustBench/blob/main/receipt-spec-v1.md"
+                  }
+                }
+              },
+              "text/html": { "schema": { "type": "string" } }
+            }
+          },
+          "404": { "description": "No receipt found for this ULID." }
+        }
+      }
+    },
+    "/rankings": {
+      "get": {
+        "tags": ["telemetry"],
+        "summary": "Live registry rankings",
+        "description": "HTML by default; Accept: application/json returns the same payload as JSON. HTML is free permanently. JSON above the per-IP free-tier quota will be paid starting in v0.2.0 (60 req/IP/min free, then $0.0005 per call). Read-only — no auth.",
+        "responses": {
+          "200": {
+            "description": "Rankings document.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } },
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "scored_at": { "type": "string", "format": "date-time" },
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "description": "Ranking row: provider URL, capability, score, scorecard pointers."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/pricing": {
+      "get": {
+        "tags": ["telemetry"],
+        "summary": "Published TrustBench pricing tiers",
+        "description": "HTML by default; Accept: application/json returns the same tier table as JSON. Read-only — no auth.",
+        "responses": {
+          "200": {
+            "description": "Pricing document.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } },
+              "application/json": { "schema": { "type": "object" } }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "tb_live_<argon2id-key>",
+        "description": "Server-side API key. Used as the auth fallback on POST /route when the x402 paywall is disabled, and for POST /route/settle."
+      }
+    }
+  },
+  "x-trustbench": {
+    "phase": "phase-4",
+    "manifest": "https://trustbench.io/.well-known/trustbench.json",
+    "skill": "https://trustbench.io/skill.md",
+    "llmsTxt": "https://trustbench.io/llms.txt",
+    "publicKey": "https://trustbench.io/.well-known/trustbench-pubkey",
+    "receiptSpec": "https://github.com/lithvall/TrustBench/blob/main/receipt-spec-v1.md",
+    "verifierNpm": "https://www.npmjs.com/package/@trustbench/verify-receipt",
+    "custody": "non-custodial",
+    "networks": ["base"],
+    "settlementAssets": ["USDC"],
+    "note": "Discovery layer v0.1 — minimal-viable OpenAPI 3.1. AgentCash-conformant `x-payment-info` per-operation pricing annotations are planned for the post-Strata sprint (target week of 2026-06-02). Canonical pricing and 402-challenge behavior are the source of truth in the interim."
+  }
+}

@@ -1,7 +1,7 @@
 ---
 project: TrustBench
-date: 2026-05-20
-revision: 3
+date: 2026-05-21
+revision: 5
 phase: phase-4-post-listing-sprint
 
 # Universal schema: pillars are the defensible positions. Stable across long horizons.
@@ -31,6 +31,7 @@ active_competitors:
   - { name: "Dexter", handle: "@dexteraisol", severity: 4, category: receipt-format }
   - { name: "PayAI", handle: "unknown", severity: 2, category: adjacent }
   - { name: "Infopunks radar", handle: "@InfopunksHQ", severity: 2, category: routing-overlap }
+  - { name: "ScoutScore", handle: "@ScoutScoreAI", severity: 3, category: registry-overlap }
 
 # Live partner relationships. Public state.
 active_partners:
@@ -54,6 +55,7 @@ deferred_pivots:
   - { name: p402-Canton, gate: phase-5-after-first-paying-agent }
   - { name: Solana-settlement, ref: P4-3, status: timing-tbd }
   - { name: AP2-Mandate-Constraint-extension, gate: phase-6 }
+  - { name: receipt-envelope-v2-mandate-identity-binding, gate: phase-5-or-6, status: design-seed-banked-2026-05-20 }
 
 # Founder calibration. Drives capital + energy + boredom checks.
 founder_shape:
@@ -75,6 +77,12 @@ The two pillars — canonical receipt-format standard, neutral routing+receipt l
 Discovery surface watch (banked 2026-05-19): agentic.market operator (@Nick_Prince12) publicly considering pay-to-rank for bundles (*"service providers would pay to get their service promoted to agentic buyers"*, in reply to @heisenburgirrs 2026-05-18). TrustBench's `out_of_scope` includes `pay-to-rank`. Not committed by Nick; flagged for watch. If implemented, the agentic.market relationship moves from pure discovery surface to a structural-differentiation moment — TrustBench's measurement-only routing layer becomes the sharper claim, with the routing-WITHIN-a-bundle vs bundle-DISCOVERY layers cleanly separable in framing.
 
 Direct competitor shift (banked 2026-05-19, revision 3): Dexter (@dexteraisol) shipped Instinct — pay-to-rank recommendation payloads baked into the x402 settlement receipt envelope as an "open extension." Severity moved from 2 (adjacent) to 4 (receipt-format), category reclassified from adjacent to direct Pillar 1 competitor with opposite philosophy. Counter-position narrative artifact pre-drafted in `drafts/dexter-counter-position.md` ready to ship within 24h if a named CDP / Cloudflare / x402 Foundation engineer publishes ≥3 substantive posts engaging Instinct positively (the pre-trigger from audit § 6). Do NOT counter-ship a feature; the differentiation (measurement-only vs pay-to-rank) IS the position. See memory `project_dexter_instinct_launch_2026_05_19.md`.
+
+Protocol-stack framing clarified (banked 2026-05-20, revision 4): MPP research surfaced that the agentic-payments protocol space resolves into a four-layer stack — ACP (OpenAI+Stripe checkout) / AP2 (Google trust/mandates) / MPP (Stripe+Tempo settlement-session) / x402 (Coinbase execution) — not four competing protocols. TrustBench's existing x402-based `/route` is already MPP-charge-compatible without code changes (MPP `charge` intent maps directly to x402 `exact`). Updated Pillar 1 positioning frame: "TrustBench receipts as the cryptographic audit artifact ABOVE the four-protocol stack, regardless of which layer a transaction touches." Stronger than the prior "cross-chain audit artifact" frame because it composes above the entire stack rather than only the execution layer. Receipt envelope v2 design seed (bind AP2 mandate hash + ERC-8004 identity hash into signed body) added to `phase5-design-seeds.md` and to `deferred_pivots` above as the natural home for the AP2 Mandate Constraint extension. See memory `project_mpp_research_2026_05_20.md`.
+
+Registry-overlap competitor identified (banked 2026-05-21, revision 5): ScoutScore (scoutscore.ai, Chris Koziak / @tiltmode_, @ScoutScoreAI) — measurement-axis layer for x402 services. 2000+ services scored across Contract Clarity / Availability / Response Fidelity / Identity & Safety, public REST API + leaderboard + npm packages (@scoutscore/sdk, @scoutscore/mcp-server). Identified via Railway log probes (ScoutScore-HealthCheck/1.0 and ScoutScore-FidelityCheck/1.0 UAs hitting POST /route 2026-05-20). Severity 3 (registry-overlap) — they have no signed receipts, no routing, no on-chain settlement anchor. Lane: scoring as final product, structurally not Pillar 1 or Pillar 2. Engagement posture: no outreach (solo-velocity competitor; asymmetry favors them). Watch triggers: signed receipts ship (→ severity 4, direct Pillar 1 competitor), routing surface ships (→ severity 5, direct Pillar 2 competitor), Coinbase / facilitator partnership announced (→ Bazaar-blessed scoring shift). 30-day re-check scheduled for 2026-06-20. Counter-move baseline 2026-05-21: scoutscore.ai/.well-known/x402 = 404. See memory `project_scoutscore_competitor_2026_05_21.md`.
+
+Discovery surface shipped (banked 2026-05-21): TrustBench /.well-known/x402 and /.well-known/x402.json LIVE in prod (commit a01d36b → deployed as 1c2ab0f). Mirrors the 402 PAYMENT-REQUIRED accepts[] block for POST /route, declares the Ed25519-signed receipt envelope (Pillar 1 propagation hook). Demand signal: 40 hits/16h on the bare path from non-Bazaar crawlers (CarbonMonitor, ScoutScore-HealthCheck, ScoutScore-FidelityCheck, x402-atlas-probe, MPP32-Health, x402station). Filter-passed as Pillar 2 maintenance. Path source: draft-jeftovic-x402-dns-discovery-00 §6.1 informative convention — not a Coinbase x402 spec mandate; if Foundation specifies different shape, adapt then. Kill criterion + counter-move check at 2026-06-20.
 
 Next milestone: first external paying agent. §10 Strata reference-agent integration closed 2026-05-15 (4 days ahead of target); next target path is post-launch external agent traffic following Strata's Show HN co-launch. Kill criterion: no paying external agent within 6 weeks of listing (~2026-06-27) triggers paywall pricing and discovery reassessment.
 

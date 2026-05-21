@@ -24,7 +24,11 @@ import { join, dirname, relative } from "path";
 // script is standalone-portable; copy either into a new project alone).
 
 function parseFrontmatter(content: string): { fm: Record<string, any> | null; body: string } {
-  const match = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  // \r?\n tolerates Windows CRLF line endings — same fix pattern as
+  // check-staleness.ts. Without this, regenerate.ts errors on Windows
+  // checkouts with "STANCE.md missing frontmatter" even when the file
+  // is structurally correct.
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!match) return { fm: null, body: content };
   const yaml = match[1];
   const body = match[2];

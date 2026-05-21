@@ -18,7 +18,10 @@ import { join, relative } from "path";
 // See stance/README.md § YAML parser limitations.
 
 function parseFrontmatter(content: string): Record<string, any> | null {
-  const match = content.match(/^---\n([\s\S]*?)\n---/);
+  // \r?\n tolerates Windows CRLF line endings (git autocrlf converts on checkout
+  // for Windows users; without this, STANCE.md on a Windows checkout fails the
+  // regex and the script errors with "missing required frontmatter fields").
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!match) return null;
   const yaml = match[1];
   const result: Record<string, any> = {};

@@ -61,6 +61,23 @@ function loadStatic(relPath: string): string | null {
 const SKILL_MD_BODY = loadStatic('skill.md');
 const LLMS_TXT_BODY = loadStatic('llms.txt');
 const WELL_KNOWN_TRUSTBENCH_JSON_BODY = loadStatic('.well-known/trustbench.json');
+// /.well-known/x402[.json] — x402-protocol-flavored discovery manifest (added 2026-05-21).
+// Observable demand: Railway logs 2026-05-20→2026-05-21 showed 40 hits on the bare
+// /.well-known/x402 path in ~16h from non-Bazaar crawlers (CarbonMonitor,
+// ScoutScore-HealthCheck, ScoutScore-FidelityCheck, x402-atlas-probe, MPP32-Health,
+// x402station/uptime-probe). The path is an *informative* convention from
+// draft-jeftovic-x402-dns-discovery-00 (Independent Submission, Experimental,
+// expires 2026-05-11) — NOT a Coinbase x402 spec mandate. Coinbase's Bazaar uses
+// a different mechanism (the 402-response extensions echo, per Stone 0 fix
+// 2026-05-13). This manifest is for the non-Bazaar cohort.
+//
+// Schema: mirrors the 402 PAYMENT-REQUIRED accepts[] block we already emit on
+// POST /route (see paywall-handler.ts buildPaymentRequiredResponse). Adds a
+// receipts block declaring signed-receipt envelope shape — Pillar 1 propagation
+// hook. Stance-versioned via the _stance frontmatter inside the JSON body.
+// See CLAUDE.md § Mandatory Pre-Development Filter — filter pass logged in the
+// 2026-05-21 session; Pillar 2 maintenance with Pillar 1 propagation hook.
+const WELL_KNOWN_X402_JSON_BODY = loadStatic('.well-known/x402.json');
 // /openapi.json — minimal-viable OpenAPI 3.1 discovery surface (added 2026-05-20).
 // Observable demand: Railway logs showed /openapi.json as the most-probed missing
 // surface (16+ misses in 12h from MAKO Pulse, CarbonMonitor, and contact-page
@@ -579,6 +596,27 @@ app.get('/.well-known/trustbench.json', (c) => {
     'Cache-Control': 'public, max-age=3600',
   });
 });
+
+// /.well-known/x402 (bare) and /.well-known/x402.json — x402-flavored discovery
+// manifest for the non-Bazaar crawler cohort. Both paths serve the SAME bytes:
+// the bare path is what 100% of the May 2026 probers actually request, the
+// .json variant covers callers that follow the .well-known + extension idiom
+// from RFC 8615. application/json on both (the IETF draft requires JSON
+// support; HTML rendering deferred until a non-trivial demand signal). Same
+// boot-503-or-serve-verbatim pattern as the trustbench.json route above.
+function serveX402Manifest(c: import('hono').Context) {
+  if (!WELL_KNOWN_X402_JSON_BODY) {
+    return c.text('x402 manifest is not deployed on this instance.\n', 503, {
+      'Content-Type': 'text/plain; charset=utf-8',
+    });
+  }
+  return c.text(WELL_KNOWN_X402_JSON_BODY, 200, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'public, max-age=3600',
+  });
+}
+app.get('/.well-known/x402', serveX402Manifest);
+app.get('/.well-known/x402.json', serveX402Manifest);
 
 // /openapi.json — OpenAPI 3.1 discovery surface (see comment at OPENAPI_JSON_BODY).
 // Same shape as the other static-json well-known route above: 503 if the file

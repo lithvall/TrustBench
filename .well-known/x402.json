@@ -1,0 +1,105 @@
+{
+  "_stance": {
+    "stance_version": "2026-05-20",
+    "stance_phase": "phase-4-post-listing-sprint",
+    "stance_pillars": ["canonical-receipt-format-standard", "neutral-routing-receipt-layer"]
+  },
+  "_about": "Discovery manifest for TrustBench's x402-paywalled endpoints. Served at /.well-known/x402 and /.well-known/x402.json. Path is the informative convention from draft-jeftovic-x402-dns-discovery-00 (Independent Submission, Experimental). The authoritative shape for payment requirements is the 402 PAYMENT-REQUIRED response on each endpoint; this manifest mirrors that shape so non-Bazaar crawlers can index without round-tripping a 402.",
+  "x402Version": 2,
+  "service": {
+    "name": "TrustBench",
+    "homepage": "https://trustbench.io",
+    "description": "Non-custodial x402 router + signed-receipt layer on Base. Every paid /route call emits an Ed25519-signed receipt covering the routing decision and on-chain settlement reference, verifiable offline against the published public key.",
+    "custody": "non-custodial",
+    "operator": "single-operator (solo founder)",
+    "contact": {
+      "x": "https://x.com/TrustBench",
+      "github": "https://github.com/lithvall/TrustBench"
+    }
+  },
+  "endpoints": [
+    {
+      "path": "/route",
+      "method": "POST",
+      "paid": true,
+      "description": "Non-custodial routing decision with Ed25519-signed routing receipt. Two-payment shape: this fee pays TrustBench for the routing decision; provider payment is a separate x402 transaction paid directly to the selected provider after this call.",
+      "resource": "https://trustbench.io/route",
+      "accepts": [
+        {
+          "scheme": "exact",
+          "network": "eip155:8453",
+          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "amount": "5000",
+          "payTo": "0x552000Ffb06445D2dD7F4264c6595B4b11C33C35",
+          "maxTimeoutSeconds": 300,
+          "extra": {
+            "name": "USD Coin",
+            "version": "2",
+            "description": "TrustBench routing fee. Pays for the differentiated routing decision and signed routing receipt."
+          }
+        }
+      ]
+    },
+    {
+      "path": "/route/settle",
+      "method": "POST",
+      "paid": false,
+      "description": "Step 2 of the two-step quote/settle flow. Settle fee is paid at quote time via the /route paywall; no payment required here.",
+      "resource": "https://trustbench.io/route/settle"
+    },
+    {
+      "path": "/receipts/:id",
+      "method": "GET",
+      "paid": false,
+      "description": "Public, immutable signed-receipt envelope. ULID-keyed, cache-friendly, content-negotiated (JSON default, HTML for browsers).",
+      "resource": "https://trustbench.io/receipts/"
+    },
+    {
+      "path": "/rankings",
+      "method": "GET",
+      "paid": false,
+      "description": "Live registry telemetry. Liveness checks (HEAD probe, 3 samples per provider per night, 4xx/429 treated as alive). HTML free permanently; JSON paid above per-IP free-tier quota in v0.2.0.",
+      "resource": "https://trustbench.io/rankings"
+    }
+  ],
+  "receipts": {
+    "issued_per": "paid POST /route call",
+    "signature_alg": "ed25519",
+    "canonicalization": "JCS (RFC 8785)",
+    "envelope_prefixes": {
+      "rrcpt_": "Phase 4 routing receipt (paid /route, includes trust_signals[] when partner annotations present)",
+      "rcpt_": "Phase 3 settlement receipt (legacy two-step quote/settle, retained for backward compatibility)"
+    },
+    "spec": "https://github.com/lithvall/TrustBench/blob/main/receipt-spec-v1.md",
+    "spec_version": "1",
+    "public_key_url": "https://trustbench.io/.well-known/trustbench-pubkey",
+    "public_key_format": "PEM",
+    "verifier_npm": "@trustbench/verify-receipt",
+    "audit_endpoint_template": "https://trustbench.io/receipts/:id",
+    "verification": "Offline against the published Ed25519 public key. No dependency on TrustBench being online or honest. Optional on-chain settlement verification re-checks the tx_hash carried in the receipt body."
+  },
+  "discovery": {
+    "skill_md": "https://trustbench.io/skill.md",
+    "llms_txt": "https://trustbench.io/llms.txt",
+    "openapi": "https://trustbench.io/openapi.json",
+    "manifest_full": "https://trustbench.io/.well-known/trustbench.json",
+    "methodology": "https://trustbench.io/methodology",
+    "pricing": "https://trustbench.io/pricing",
+    "explorer": "https://trustbench.io/explorer"
+  },
+  "networks": ["eip155:8453"],
+  "settlement_assets": [
+    {
+      "network": "eip155:8453",
+      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "symbol": "USDC",
+      "decimals": 6
+    }
+  ],
+  "facilitator": {
+    "primary": "https://api.cdp.coinbase.com/platform/v2/x402",
+    "operator": "Coinbase Developer Platform",
+    "docs": "https://docs.cdp.coinbase.com/x402/welcome"
+  },
+  "methodology_disclosure": "TrustBench's liveness telemetry today is a HEAD probe from one host, sampled three times per provider per night, with 4xx/429 treated as alive. This is a liveness check, not a benchmark. Payment behavior of routed providers is not yet measured at the registry layer; the paid-probe layer for that ships separately. See /methodology for the full statement."
+}

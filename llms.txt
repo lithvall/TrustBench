@@ -1,6 +1,6 @@
 # TrustBench
 
-> Non-custodial, cross-network routing + verification layer for agentic x402 payments. Agents call TrustBench, TrustBench picks the best provider (live telemetry), constructs the x402 challenge, the agent signs, the provider settles on-chain, and TrustBench returns a signed receipt. Registry covers x402 endpoints across **Base** (via Coinbase Agentic Market, ~650 services) and **Solana** (via Heurist Mesh, ~150 endpoints; Pay.sh `pay-skills` catalog as a 4th source on the roadmap). Routing + settlement is **Base + USDC today**; Solana settlement (P4-3) is next, with the registry already pre-built so the transition is filter-removal, not re-crawl. Protocol-agnostic over time across x402, p402, and MPP. Phase 3 closed 2026-05-04 with the four primitives below (idempotency, spend caps, signed receipts, queryable audit). Phase 4 shipped 2026-05-04 / 2026-05-06: agent-discovery surfaces (skill.md, manifest, llms.txt), strict reservation-based spend caps, and the first public Railway-issued paid receipt (`rcpt_01KQY7C44GAPSXZPFQYRZ1D10C`) settled on Base against a real x402 provider. Phase 4 in flight: x402-paywalled API endpoints (per-call pricing surface), public receipt explorer, formal partner integrations.
+> Verify that x402 payments settled on-chain and get cryptographically signed proof. POST /verify with a receipt ID or raw envelope to confirm Ed25519 signature validity + on-chain settlement on Base, no trust required. Also routes paid x402 calls with server-side spend caps, idempotency, and a fail-safe paywall that refuses to charge when the upstream merchant is down. Non-custodial: TrustBench never holds funds. Registry covers x402 endpoints across **Base** (via Coinbase Agentic Market, ~650 services) and **Solana** (via Heurist Mesh, ~150 endpoints). Routing + settlement is **Base + USDC today**; Solana settlement next.
 
 This file is intended for AI agents, agent builders, and other automated consumers. Humans should start at the [README](https://github.com/lithvall/TrustBench/blob/main/README.md) and the live [methodology page](https://trustbench.io/methodology).
 
@@ -11,8 +11,9 @@ This file is intended for AI agents, agent builders, and other automated consume
 - **Networks routable today:** Base + USDC. Solana inventory is registered but not yet routable — P4-3 is the next sprint after the first paid receipts. Pay.sh / Solana-side facilitators (PayAI, Crossmint, Merit Systems, Corbits, MoonPay, Sponge, ATXP, Tektonic) are observed; cross-network routing through them is the Phase 5 ambition.
 - **Honest measurement:** the nightly probe is a `HEAD` (with `GET` fallback on 405) liveness check, 3 samples, from one cloud host. Status codes `200/201/204/401/402/403/404/405/429` are treated as "alive". This is a registry with telemetry, not a benchmark.
 
-## Public read endpoints (no auth)
+## Public endpoints (no auth)
 
+- [POST /verify](https://trustbench.io/verify) — verify an x402 payment receipt. Send `{"receipt_id": "rcpt_..."}` or `{"receipt_json": {...}}` and get back `signature_valid` + `on_chain_verified` booleans. Free, no auth. Use as the verify-after-pay step in any agent workflow.
 - [GET /health](https://trustbench.io/health) — liveness check for the API itself.
 - [GET /rankings?capability=search](https://trustbench.io/rankings?capability=search) — current ranked providers for a capability (`search`, `inference`, `data`, `media`, `infra`).
 - [GET /rankings/paid?capability=search](https://trustbench.io/rankings/paid?capability=search) — same payload, with each provider's signed scorecard included.
@@ -103,7 +104,8 @@ These are the things an agent or agent builder can rely on TrustBench enforcing 
 x402-native paywalled API endpoints. Per-call USDC settlement on Base. No subscriptions, no contracts. The full tier table is published at [GET /pricing](https://trustbench.io/pricing) (HTML for humans, JSON for agents via `Accept: application/json` or `?format=json`).
 
 - **v0.1.0 live:** `POST /route` at the score-provider tier ($0.005 per call). Differentiated routing decision plus Ed25519-signed routing receipt. Settles via the Coinbase CDP facilitator at `api.cdp.coinbase.com/platform/v2/x402` (the public `x402.org/facilitator` is testnet-only). TrustBench never holds funds; the agent's wallet signs and the facilitator submits on-chain.
-- **v0.2.0 planned:** `POST /score-provider` ($0.005), `POST /verify` ($0.002), `GET /receipts/:id?replay=true` ($0.01), and free-tier-quota on read endpoints with $0.0005 above-quota tier.
+- **v0.1.0 live:** `POST /verify` — free, no auth. Verify any x402 receipt (Ed25519 signature + on-chain settlement confirmation).
+- **v0.2.0 planned:** `POST /score-provider` ($0.005), `GET /receipts/:id?replay=true` ($0.01), and free-tier-quota on read endpoints with $0.0005 above-quota tier.
 - **v0.3.0 planned:** `POST /compliance-export` for signed multi-receipt bundles ($0.50 single, $2.00 bundle up to 100, negotiated above).
 - **HTML responses on `/rankings` and `/receipts/:id` are free permanently.** Paywall only applies to JSON above the per-IP quota (v0.2.0), and to differentiated-work endpoints listed above.
 - Percentage spreads on the routed amount were rejected during Phase 2 builder conversations on 2026-04-30 and remain off the table. Provider verification is a refundable pay-to-list bond, never pay-to-rank.

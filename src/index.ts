@@ -93,6 +93,7 @@ const OPENAPI_JSON_BODY = loadStatic('openapi.json');
 // Served as text/markdown so agents and crawlers can copy the prompt verbatim.
 // Archived/disproven drafts in bundles/archived-drafts/ are NOT served publicly.
 const BUNDLE_RECEIPT_BACKED_BODY = loadStatic('bundles/receipt-backed-agent-to-agent-procurement.md');
+const BUNDLE_VERIFIED_X402_BODY = loadStatic('bundles/verified-x402-payment.md');
 
 // Binary-safe variant of loadStatic for assets served as image/png etc.
 // Same boot-on-disk-or-503 semantics — we never crash boot on a missing card.
@@ -706,6 +707,55 @@ app.get('/bundles/receipt-backed-agent-to-agent-procurement', serveReceiptBacked
 app.get('/bundles/receipt-backed-agent-to-agent-procurement.md', serveReceiptBackedBundleMarkdown);
 
 // ---------------------------------------------------------------------------
+// Bundle 2: Verified x402 Payment — verify-after-pay step using POST /verify.
+// Unlike the receipt-backed procurement bundle (which routes THROUGH TrustBench),
+// this bundle positions TrustBench as a standalone verification step: the agent
+// pays any x402 provider directly, then calls /verify to confirm settlement.
+// This is the "terminal service" surface the adoption-gap diagnosis calls for.
+// ---------------------------------------------------------------------------
+const BUNDLE_VERIFIED_X402_TITLE = 'Verified x402 Payment — TrustBench Bundle';
+const BUNDLE_VERIFIED_X402_DESC = 'Verify-after-pay template: the agent pays any x402 provider directly, then calls TrustBench POST /verify to confirm Ed25519 signature + on-chain settlement. Free, no auth.';
+
+function serveVerifiedX402BundleMarkdown(c: any) {
+  if (!BUNDLE_VERIFIED_X402_BODY) {
+    return c.text('bundle is not deployed on this instance.\n', 503, {
+      'Content-Type': 'text/plain; charset=utf-8',
+    });
+  }
+  return c.text(BUNDLE_VERIFIED_X402_BODY, 200, {
+    'Content-Type': 'text/markdown; charset=utf-8',
+    'Cache-Control': 'public, max-age=3600',
+  });
+}
+
+function serveVerifiedX402Bundle(c: any) {
+  if (!BUNDLE_VERIFIED_X402_BODY) {
+    return c.text('bundle is not deployed on this instance.\n', 503, {
+      'Content-Type': 'text/plain; charset=utf-8',
+    });
+  }
+  const formatQuery = c.req.query('format') ?? null;
+  if (isBundleMarkdownFormatQuery(formatQuery)) {
+    return serveVerifiedX402BundleMarkdown(c);
+  }
+  const wantsHtml = preferHtml(c.req.header('Accept'), formatQuery);
+  if (wantsHtml) {
+    const html = renderBundleHtml(
+      BUNDLE_VERIFIED_X402_BODY,
+      BUNDLE_VERIFIED_X402_TITLE,
+      BUNDLE_VERIFIED_X402_DESC,
+    );
+    return c.html(html, 200, {
+      'Cache-Control': 'public, max-age=3600',
+    });
+  }
+  return serveVerifiedX402BundleMarkdown(c);
+}
+
+app.get('/bundles/verified-x402-payment', serveVerifiedX402Bundle);
+app.get('/bundles/verified-x402-payment.md', serveVerifiedX402BundleMarkdown);
+
+// ---------------------------------------------------------------------------
 // GET /og/:name — per-page OG/Twitter card image.
 // Returns the PNG corresponding to a page (home, methodology, rankings,
 // pricing, receipt) for inclusion in <meta property="og:image"> and
@@ -904,6 +954,198 @@ app.get('/receipts/:id', async (c) => {
   return c.json(data.receipt_json, 200, {
     'Cache-Control': 'public, max-age=86400, immutable',
   });
+});
+
+// ---------------------------------------------------------------------------
+// POST /verify — public receipt verification endpoint.
+//
+// Exposes TrustBench's Ed25519 signature + on-chain verification as a
+// standalone REST call. This is the "terminal service" surface: any agent
+// that just paid an x402 provider can POST here to get cryptographic proof
+// that the payment settled. Two modes, mirroring the MCP verify_receipt tool:
+//
+//   Mode 1 — Lookup: { "receipt_id": "rcpt_..." or "rrcpt_..." }
+//     Fetches the receipt from Supabase, runs sig + chain verification.
+//
+//   Mode 2 — Offline: { "receipt_json": { receipt, signature } }
+//     Verifies the supplied envelope directly against the published Ed25519
+//     public key. No database lookup. This is the third-party-verifier path.
+//
+// Response shape (always JSON):
+//   { receipt_id, mode, signature_valid, on_chain_verified, signature_alg,
+//     verify_url?, pubkey_url, details? }
+//
+// Free, no auth required. Rate-limited by default Hono middleware. This
+// endpoint exists to make TrustBench callable as a bundle step: any workflow
+// that pays an x402 provider can append a /verify call to get a signed proof.
+//
+// Cache: receipts are immutable, so verification results are cacheable.
+// Short cache (60s) to avoid stale "unavailable" results on transient RPC
+// errors without hammering the chain on every request.
+//
+// Failure mode: if chain RPC is down, signature_valid is still meaningful;
+// on_chain_verified returns false with a reason. Never 500s on a valid
+// receipt — worst case is partial verification.
+//
+// Filter pass: Pillar 1 (receipt-format adoption via standalone verification
+// service — every agent that calls /verify validates the receipt format) +
+// Pillar 2 (routing layer robustness — verification as a first-class surface).
+// ---------------------------------------------------------------------------
+app.post('/verify', async (c) => {
+  let body: Record<string, unknown>;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'invalid_json', detail: 'Request body must be valid JSON.' }, 400);
+  }
+
+  const receiptId = body['receipt_id'] as string | undefined;
+  const receiptJson = body['receipt_json'] as Record<string, unknown> | undefined;
+
+  // Exactly one of receipt_id or receipt_json required.
+  if (!receiptId && !receiptJson) {
+    return c.json({
+      error: 'missing_input',
+      detail: 'Provide either receipt_id (lookup mode) or receipt_json (offline mode).',
+      usage: {
+        lookup: { receipt_id: 'rcpt_... or rrcpt_...' },
+        offline: { receipt_json: { receipt: '...', signature: '...' } },
+      },
+    }, 400);
+  }
+  if (receiptId && receiptJson) {
+    return c.json({
+      error: 'ambiguous_input',
+      detail: 'receipt_id and receipt_json are mutually exclusive — pass exactly one.',
+    }, 400);
+  }
+
+  try {
+    // -----------------------------------------------------------------
+    // Mode 2 — Offline: verify a JSON envelope directly.
+    // -----------------------------------------------------------------
+    if (receiptJson) {
+      const envReceipt = (receiptJson as { receipt?: unknown }).receipt;
+      const envSig = (receiptJson as { signature?: unknown }).signature;
+      const inferredId =
+        (envReceipt && typeof envReceipt === 'object' && (envReceipt as { receipt_id?: string }).receipt_id) ||
+        (receiptJson as { receipt_id?: string }).receipt_id ||
+        'unknown';
+
+      if (!envSig) {
+        return c.json({ error: 'malformed_envelope', detail: 'receipt_json missing signature field.' }, 400);
+      }
+
+      // Phase 4 routing envelope (rrcpt_) has receipt.paid; Phase 3 has receipt.settlement.
+      const looksRouting =
+        envReceipt &&
+        typeof envReceipt === 'object' &&
+        'paid' in (envReceipt as Record<string, unknown>);
+
+      if (looksRouting) {
+        const envelope = receiptJson as unknown as SignedRoutingEnvelope;
+        const verify = await getOrComputeRoutingVerifyResults(envelope);
+        return c.json({
+          receipt_id: inferredId,
+          mode: 'offline',
+          signature_valid: verify.sig.kind === 'valid',
+          signature_detail: verify.sig.kind !== 'valid' ? verify.sig : undefined,
+          on_chain_verified: verify.chain.kind === 'verified',
+          chain_detail: verify.chain.kind !== 'verified' ? verify.chain : undefined,
+          signature_alg: 'ed25519',
+          pubkey_url: 'https://trustbench.io/.well-known/trustbench-pubkey',
+        }, 200, { 'Cache-Control': 'public, max-age=60' });
+      }
+
+      // Phase 3 settlement envelope (rcpt_).
+      const envelope = receiptJson as unknown as SignedReceipt;
+      const verify = await getOrComputeVerifyResults(envelope);
+      return c.json({
+        receipt_id: inferredId,
+        mode: 'offline',
+        signature_valid: verify.sig.kind === 'valid',
+        signature_detail: verify.sig.kind !== 'valid' ? verify.sig : undefined,
+        on_chain_verified: verify.chain.kind === 'verified',
+        chain_detail: verify.chain.kind !== 'verified' ? verify.chain : undefined,
+        signature_alg: 'ed25519',
+        pubkey_url: 'https://trustbench.io/.well-known/trustbench-pubkey',
+      }, 200, { 'Cache-Control': 'public, max-age=60' });
+    }
+
+    // -----------------------------------------------------------------
+    // Mode 1 — Lookup: fetch by ID then verify.
+    // -----------------------------------------------------------------
+    if (!RECEIPT_ID_RE.test(receiptId!)) {
+      return c.json({ error: 'receipt_id_invalid', detail: 'Expected rcpt_<ULID> or rrcpt_<ULID>.' }, 400);
+    }
+
+    if (receiptId!.startsWith('rrcpt_')) {
+      const { data, error } = await supabase
+        .from('paid_requests')
+        .select('response_body')
+        .filter('response_body->receipt->>receipt_id', 'eq', receiptId!)
+        .maybeSingle<{ response_body: any }>();
+
+      if (error) {
+        console.error('[verify] rrcpt lookup failed:', error.message);
+        return c.json({ error: 'receipt_unavailable' }, 503);
+      }
+      if (!data?.response_body) {
+        return c.json({ error: 'receipt_not_found' }, 404);
+      }
+
+      const { receipt, signature } = data.response_body;
+      if (!receipt || !signature) {
+        return c.json({ error: 'receipt_unavailable', detail: 'Envelope malformed.' }, 503);
+      }
+
+      const envelope = { receipt, signature } as unknown as SignedRoutingEnvelope;
+      const verify = await getOrComputeRoutingVerifyResults(envelope);
+      return c.json({
+        receipt_id: receiptId,
+        mode: 'lookup',
+        signature_valid: verify.sig.kind === 'valid',
+        signature_detail: verify.sig.kind !== 'valid' ? verify.sig : undefined,
+        on_chain_verified: verify.chain.kind === 'verified',
+        chain_detail: verify.chain.kind !== 'verified' ? verify.chain : undefined,
+        signature_alg: 'ed25519',
+        verify_url: `https://trustbench.io/receipts/${receiptId}`,
+        pubkey_url: 'https://trustbench.io/.well-known/trustbench-pubkey',
+      }, 200, { 'Cache-Control': 'public, max-age=60' });
+    }
+
+    // Phase 3 rcpt_ lookup.
+    const { data, error } = await supabase
+      .from('receipts')
+      .select('receipt_json')
+      .eq('id', receiptId!)
+      .maybeSingle<{ receipt_json: unknown }>();
+
+    if (error) {
+      console.error('[verify] rcpt lookup failed:', error.message);
+      return c.json({ error: 'receipt_unavailable' }, 503);
+    }
+    if (!data?.receipt_json) {
+      return c.json({ error: 'receipt_not_found' }, 404);
+    }
+
+    const envelope = data.receipt_json as SignedReceipt;
+    const verify = await getOrComputeVerifyResults(envelope);
+    return c.json({
+      receipt_id: receiptId,
+      mode: 'lookup',
+      signature_valid: verify.sig.kind === 'valid',
+      signature_detail: verify.sig.kind !== 'valid' ? verify.sig : undefined,
+      on_chain_verified: verify.chain.kind === 'verified',
+      chain_detail: verify.chain.kind !== 'verified' ? verify.chain : undefined,
+      signature_alg: 'ed25519',
+      verify_url: `https://trustbench.io/receipts/${receiptId}`,
+      pubkey_url: 'https://trustbench.io/.well-known/trustbench-pubkey',
+    }, 200, { 'Cache-Control': 'public, max-age=60' });
+  } catch (err: any) {
+    console.error('[verify] unexpected error:', err?.message ?? err);
+    return c.json({ error: 'internal_error', detail: err?.message ?? 'Verification failed.' }, 500);
+  }
 });
 
 // ---------------------------------------------------------------------------

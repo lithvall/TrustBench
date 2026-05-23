@@ -206,6 +206,59 @@
         }
       }
     },
+    "/verify": {
+      "post": {
+        "tags": ["receipts"],
+        "summary": "Verify that an x402 payment settled on-chain and the receipt signature is valid",
+        "description": "Public, no-auth receipt verification endpoint. Two modes: (1) Lookup — pass receipt_id to fetch and verify a TrustBench-issued receipt. (2) Offline — pass receipt_json (the full {receipt, signature} envelope) to verify against the published Ed25519 public key without database lookup. Returns signature_valid (boolean) and on_chain_verified (boolean) with detail objects on failure. Use this as the verify-after-pay step in any agent workflow that calls an x402 provider.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "receipt_id": {
+                    "type": "string",
+                    "pattern": "^r?rcpt_[0-9A-Z]{26}$",
+                    "description": "Lookup mode: receipt ULID to fetch and verify. Mutually exclusive with receipt_json."
+                  },
+                  "receipt_json": {
+                    "type": "object",
+                    "description": "Offline mode: the full {receipt, signature} envelope to verify directly. Mutually exclusive with receipt_id."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Verification result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "receipt_id": { "type": "string" },
+                    "mode": { "type": "string", "enum": ["lookup", "offline"] },
+                    "signature_valid": { "type": "boolean", "description": "true if Ed25519 signature matches canonical receipt bytes." },
+                    "on_chain_verified": { "type": "boolean", "description": "true if tx_hash exists on Base, payer/payee/amount match, and tx succeeded." },
+                    "signature_detail": { "type": "object", "nullable": true, "description": "Present when signature_valid is false. Contains kind and reason." },
+                    "chain_detail": { "type": "object", "nullable": true, "description": "Present when on_chain_verified is false. Contains kind and reason." },
+                    "signature_alg": { "type": "string", "const": "ed25519" },
+                    "verify_url": { "type": "string", "description": "Human-readable receipt page (lookup mode only)." },
+                    "pubkey_url": { "type": "string", "description": "Published Ed25519 public key URL." }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Missing or invalid input (no receipt_id or receipt_json, or both provided)." },
+          "404": { "description": "No receipt found for the given ID (lookup mode)." }
+        }
+      }
+    },
     "/rankings": {
       "get": {
         "tags": ["telemetry"],

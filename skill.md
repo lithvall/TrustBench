@@ -1,12 +1,16 @@
 name: trustbench-policy-router
-description: Add server-side spend caps, idempotency, and signed audit receipts to any x402 paid call across networks. Use when the agent needs to enforce a budget cap per call or per day, when retries on a flaky network must not double-charge, when the user asks for a verifiable record of what the agent paid for, when the user mentions audit, compliance, governance, policy layer, signed receipts, signed audit, idempotency, double-charge, duplicate charge, spend cap, budget cap, hard cap, dollar cap, USDC cap, cross-network routing, multi-network payment, or non-custodial routing for agents. Augments the existing Coinbase Agentic Market / Agentic Wallet (Base) and Solana Foundation Pay.sh / Heurist Mesh (Solana) flows rather than replacing them: the agent sets up its preferred wallet first per agentic.market/skill.md or pay.sh, then routes its paid calls through TrustBench's quote and settle endpoints to get the policy layer plus a signed receipt for free. TrustBench routes Base today and registers Solana endpoints; Solana settlement is the next sprint. TrustBench never holds funds. The agent's wallet signs the payment authorization, the merchant submits the on-chain transaction, TrustBench observes the result and emits an Ed25519-signed receipt that anyone can verify with the published public key. Phase 4 access is invite-only during the build, request a key by direct messaging @TrustBench on X.
+description: Verify that an x402 payment actually settled on-chain and get a cryptographically signed proof. POST /verify with a receipt ID or a raw receipt envelope and get back signature_valid + on_chain_verified booleans backed by Ed25519 + Base chain RPC, no trust required. Also routes paid x402 calls with server-side spend caps (hard budget per call or per day), idempotency (retries never double-charge), and a signed audit receipt on every call. Use when the agent just paid an x402 provider and needs proof it settled, when the user asks for a verifiable record of what the agent paid for, when the user mentions audit, compliance, governance, signed receipts, spend cap, budget cap, USDC cap, verify payment, check receipt, or non-custodial routing. Augments Coinbase Agentic Market / Agentic Wallet (Base) and Solana Foundation Pay.sh / Heurist Mesh (Solana) rather than replacing them. TrustBench never holds funds. The agent's wallet signs the payment authorization, the merchant settles on-chain, TrustBench observes the result and emits an Ed25519-signed receipt verifiable by anyone against the published public key.
 ---
 
-# TrustBench: signed receipts + on-chain evidence + fail-safe paywall on top of x402
+# TrustBench: verify x402 payments settled on-chain, with signed proof
 
-TrustBench is a non-custodial routing and audit layer that sits in front of Coinbase Agentic Market (Base), Solana x402 facilitators like Pay.sh / Heurist Mesh (registry today, routing next), and other x402 services. It produces signed evidence rather than opinion: every paid call emits an Ed25519-signed receipt covering the routing decision and the on-chain settlement reference, verifiable offline against a published public key. The paywall is fail-safe by design: if the upstream merchant is non-conformant or down, the agent isn't charged, so money never moves on bad routes. Use TrustBench when the agent has a real reason to want any of these: signed evidence of what was paid for, server-side spend caps, idempotency on retries, or a stable third-party verifier for receipts.
+TrustBench does two things for agents making x402 payments:
 
-If the agent just needs to make a paid call with no budget or audit requirements, the existing Agentic Wallet flow at agentic.market/skill.md is enough. TrustBench adds value when the call is part of a budgeted workflow, a compliance-bound process, or anywhere a verifiable record of "what was paid, to whom, for what" matters later.
+1. **Verify payments.** POST /verify with a receipt ID or a raw receipt envelope. TrustBench checks the Ed25519 signature against its published public key AND confirms the transaction settled on Base via chain RPC. You get back `signature_valid` and `on_chain_verified` booleans, no trust required. Free, no auth.
+
+2. **Route payments with guardrails.** POST /route to pay an x402 provider through TrustBench and get an Ed25519-signed receipt automatically. Includes server-side spend caps (hard budget per call or per day), idempotency (retries never double-charge), and a fail-safe paywall (if the upstream merchant is non-conformant, the agent isn't charged).
+
+If the agent just needs to make a paid call with no verification or budget requirements, the existing Agentic Wallet flow at agentic.market/skill.md is enough. TrustBench adds value when the agent needs proof a payment settled, when the call is part of a budgeted workflow, or anywhere a verifiable record of "what was paid, to whom, for what" matters later.
 
 ## Set up Agentic Wallet first
 
@@ -175,11 +179,11 @@ endpoints:
     description: Reads liveness telemetry plus risk annotations for any registered URL.
   - path: /verify
     method: POST
-    paid: true
-    pricing_tier: verify
-    price_usdc: 0.002
-    available_in: v0.2.0
-    description: Hosted verifier for externally-provided TrustBench receipts.
+    paid: false
+    pricing_tier: free
+    price_usdc: 0
+    available_in: v0.1.0
+    description: Verify an x402 receipt (Ed25519 signature + on-chain settlement). Two modes: lookup by receipt_id or offline with raw envelope. Free, no auth.
   - path: /receipts/:id?replay=true
     method: GET
     paid: true

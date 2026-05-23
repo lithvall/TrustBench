@@ -74,12 +74,12 @@
     {
       "path": "/verify",
       "method": "POST",
-      "paid": true,
-      "pricing_tier": "verify",
-      "price_usdc": "0.002",
-      "amount_atomic": "2000",
-      "available_in": "v0.2.0",
-      "description": "Hosted verifier for externally-provided TrustBench receipts."
+      "paid": false,
+      "pricing_tier": "free",
+      "price_usdc": "0",
+      "amount_atomic": "0",
+      "available_in": "v0.1.0",
+      "description": "Verify an x402 receipt: Ed25519 signature check + on-chain settlement confirmation. Two modes: lookup by receipt_id, or offline with a raw {receipt, signature} envelope. Returns signature_valid + on_chain_verified booleans. Free, no auth."
     },
     {
       "path": "/receipts/:id?replay=true",

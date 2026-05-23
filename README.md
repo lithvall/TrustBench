@@ -1,15 +1,17 @@
 # TrustBench
 
-A non-custodial routing and audit layer for x402 that produces signed
-evidence rather than opinion. Every paid call emits an Ed25519-signed
-receipt covering the routing decision and the on-chain settlement
-reference, verifiable offline against a published public key. The paywall
-is fail-safe by design: if the upstream merchant is non-conformant, the
-agent isn't charged, so money never moves on bad routes.
+Verify that x402 payments settled on-chain and get cryptographically signed
+proof. POST `/verify` with a receipt ID or raw envelope to confirm Ed25519
+signature validity + on-chain settlement on Base, no trust required.
+
+Also routes paid x402 calls with server-side spend caps, idempotency, and a
+fail-safe paywall (agent isn't charged when the upstream merchant is
+non-conformant). Non-custodial: TrustBench never holds funds. Every paid
+call emits an Ed25519-signed receipt verifiable offline against a published
+public key.
 
 Cross-network: routes Base today, registers Solana endpoints (Heurist
-Mesh, Pay.sh skills), Solana settlement next; protocol-agnostic over time
-across x402, p402, and MPP.
+Mesh, Pay.sh skills), Solana settlement next.
 
 ## What's live today
 - Public registry of x402 endpoints across Base (Coinbase Agentic Market,

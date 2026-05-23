@@ -56,6 +56,8 @@ TrustBench's Phase 5 ambition: route across all of these from a unified API. Age
 - Regulatory analysis of multi-protocol routing — particularly anything that touches custody adjacent to fiat (MPP).
 - A second design partner beyond Infopunks who has explicit interest in cross-protocol receipts.
 
+**2026-05-20 calibration update.** The MPP framing above ("fiat-hybrid alternative — different design philosophy") was partially wrong. Verified from Cloudflare canonical docs + Stripe blog: MPP is NOT a peer protocol to x402; it's a coordination layer ABOVE x402. The MPP `charge` intent maps directly to the x402 `exact` flow. TrustBench's x402-only `/route` is already MPP-charge-compatible without code changes. The only Phase 5 protocol gap is MPP `session` intent (streaming payments) and p402/Canton (regulatory settlement). MPP `charge` coverage requires no implementation work — it's already there via x402 interop. The Phase 5 ambition is therefore narrower than the 2026-05-04 baseline implied: route across x402, MPP-session, p402 from a unified API. ACP (OpenAI+Stripe checkout) and AP2 (Google trust/mandates) are separate layers above settlement, not settlement alternatives. See `project_mpp_research_2026_05_20.md` for the four-protocol stack analysis (ACP / AP2 / MPP / x402).
+
 ---
 
 ## Seed observations not yet ranked into phases
@@ -229,6 +231,37 @@ Until all three fire, this is notes-only.
 **Hard rule (per the 2026-05-14 brainstorm):** TrustBench publishes the gap map. TrustBench *does not* build the endpoints that fill the gaps. The portfolio play, if pursued, ships as architecturally separate small projects that ride on TrustBench's receipt infrastructure but live in their own repos with their own minimal footprints. The two reinforce each other; they do not merge.
 
 **Tag:** P5-coverage-report. Pre-Phase-5-shippable as a small standalone artifact if/when listing-sprint follow-ups give a clear week of capacity. Defer if not.
+
+---
+
+## Receipt envelope v2: bind AP2 mandate + ERC-8004 identity into signed body (2026-05-20)
+
+**Trigger.** Three independent signals on 2026-05-20 converged on the AP2 mandate vocabulary as the trust/authorization-layer primitive of the agentic-payments stack: (a) Aggelos Kappos (@0xAggelos) tweet articulating the agentic payments framework as "Mandates. Budgets. Policies. Receipts. Audit trails. Trust." with `#mpp` hashtag; (b) BNBAgent SDK shipping ERC-8004 as the official Identity & Trust module (agent NFT identity + reputation registry + offchain registration file); (c) MPP research confirming the four-protocol stack landscape (ACP / AP2 / MPP / x402) where AP2 sits at the trust/authorization layer with cryptographically signed mandates.
+
+**Design seed.** TrustBench receipt envelope v2 binds two additional cryptographic primitives into the signed body:
+
+1. **AP2 mandate hash** — the cryptographic hash of the AP2-signed mandate authorizing the agent's spend. Carries through whatever AP2 vehicle (Intent Mandate / Cart Mandate / Payment Mandate per AP2 v0.2). Establishes "this transaction was authorized by this specific signed mandate from this principal."
+2. **ERC-8004 agent identity hash** — the agent's NFT identity registry entry hash. Establishes "this specific identified agent executed the call."
+
+Combined with the existing Phase 3/4 envelope (Ed25519 + JCS + on-chain settlement anchor + provider/route/amount/policy metadata), the resulting v2 receipt becomes the explicit cryptographic record of:
+
+> *"This identified agent (ERC-8004), under this signed mandate (AP2), paid via this protocol intent (MPP charge or session, x402 exact), and this is the verifiable proof (TrustBench Ed25519 + JCS + on-chain anchor)."*
+
+That's a strictly stronger Pillar 1 artifact than today's anonymous-agent receipts: it closes the current gap where TrustBench receipts identify the *provider* + the *transaction* but not the *agent identity* or the *authorization mandate*. The artifact composes ABOVE the entire four-protocol stack (ACP / AP2 / MPP / x402), making the same TrustBench-format receipt verifiable regardless of which layer-combination a transaction touches.
+
+**Hard prerequisites before implementation.**
+
+- ERC-8004 must be live on at least one chain TrustBench routes to (today: Base, where ERC-8004 adoption is unverified — confirmed live on BNB Chain via BNBAgent SDK).
+- AP2 mandate format must be stable enough to hash deterministically (AP2 v0.2 is current; future revisions could change the canonical form).
+- At least one partner must publicly request the binding — either an ERC-8004-issuing agent platform (Virtuals Protocol candidate) or an AP2-mandate-issuing app (any Google-side AP2 adopter).
+- Phase 5 envelope-extension contract must preserve byte-identical replay for v1 consumers (verifiers built against v1 must still verify v1-shaped receipts after v2 ships).
+- Migration plan must include a version discriminator so `@trustbench/verify-receipt` can dual-probe v1 + v2 envelopes (per the existing `rcpt_` settlement vs `rrcpt_` paid dual-probe pattern documented in `project_envelope_shapes_dual_probe_2026_05_13.md`).
+
+**What this is NOT.** This is not a custody change, not a routing change, not a billing change. It's an envelope-shape extension that adds two optional fields (`agent_identity_hash`, `mandate_hash`) to the signed body. v1 receipts stay verifiable; v2 receipts carry strictly more cryptographic proof. Backward compatibility is preserved by version discriminator.
+
+**Tag:** P5-receipt-envelope-v2. Notes-only at this stage; not on the active roadmap. Trigger conditions to start: ERC-8004 adoption visible on at least two chains TrustBench cares about, OR a partner explicitly asks for agent-identity-bound receipts, OR Phase 5 kickoff happens and Johan endorses receipt-spec evolution as part of the Phase 5 scope.
+
+**Cross-reference:** `project_mpp_research_2026_05_20.md` (the four-protocol-stack analysis that motivates this binding), `project_bnbagent_sdk_launch_2026_05_18.md` (ERC-8004 surface), `project_ap2_compatibility_2026_05_07.md` (AP2 v0.2 verdict — complementary not competing, P6-M2 Policy SKU should be AP2 Mandate Constraint extension; receipt envelope v2 is the natural home for that extension).
 
 ---
 

@@ -438,7 +438,7 @@ function build402(
   status: 402;
   body: {
     x402Version: number;
-    resource: { url: string; description: string; mimeType: string };
+    resource: { url: string; description: string; mimeType: string; serviceName: string; tags: string[]; iconUrl: string };
     error: string;
     accepts: PaymentRequirements[];
     extensions?: Record<string, unknown>;
@@ -475,7 +475,7 @@ function build402(
   // surface drift). See src/bazaar-extension.ts for the declaration source.
   const body: {
     x402Version: number;
-    resource: { url: string; description: string; mimeType: string };
+    resource: { url: string; description: string; mimeType: string; serviceName: string; tags: string[]; iconUrl: string };
     error: string;
     accepts: PaymentRequirements[];
     extensions?: Record<string, unknown>;
@@ -485,6 +485,18 @@ function build402(
       url: routeResourceUrl,
       description: 'TrustBench: non-custodial routing and audit layer for x402. Returns a signed routing receipt with on-chain settlement reference, verifiable offline against a published Ed25519 key.',
       mimeType: 'application/json',
+      // Bazaar discovery metadata (2026-05-22).
+      // Injected here on the resource object so any x402 catalog indexer
+      // (agentic.market / CDP Bazaar) picks them up automatically on the
+      // first payment flow, without a portal submission. Schema per:
+      // https://docs.cdp.coinbase.com/x402/bazaar (x402DiscoveryResource).
+      // serviceName + tags are matched directly by agent search queries in
+      // addition to URL/description. iconUrl is a square identity icon.
+      // iconUrl: /favicon.ico is the live, served 64×64 PNG (no logo.svg
+      // exists on disk; favicon is the canonical square icon for the service).
+      serviceName: 'TrustBench',
+      tags: ['receipt', 'verification', 'signed-receipt', 'x402', 'payment-routing', 'agent-commerce', 'trustless', 'audit-trail', 'ed25519'],
+      iconUrl: 'https://trustbench.io/favicon.ico',
     },
     error: 'payment_required',
     accepts: [

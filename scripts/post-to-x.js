@@ -88,15 +88,20 @@ const METHODOLOGY_NOTES = [
 // receipt, npm package, GitHub release, etc.). Drop or comment out entries
 // older than ~30 days so the rotation doesn't recycle stale "shipped" claims.
 const BUILD_IN_PUBLIC = [
-  // Phase 4 Path P push-through 2026-05-12. If Bazaar indexing lands before
-  // this rotation slot fires, swap or edit to reflect that — comment below.
-  `Yesterday on TrustBench: three real paid /route settles confirmed on-chain ($0.015 USDC, three signed receipts). ` +
-    `Two bug fixes shipped: idempotency replay is now byte-identical, /route 402 emits resource field for v2 spec compliance. ` +
-    `Bazaar indexing still pending, first-index latency for a new payTo+URL looks longer than the docs' ~10min. ` +
-    `Honest signal beats theater.`,
+  // COMMENTED OUT 2026-05-25 (pre-Strata HN launch sweep).
+  // Original Phase 4 Path P push-through 2026-05-12 entry was 369 chars
+  // (over 280, would have crashed the cron on day-of-year 150 = 2026-05-30).
+  // Also stale: Bazaar indexing has since landed 2026-05-13. Kept here as
+  // historical reference; do not uncomment without a char + freshness rewrite.
+  //
+  // `Yesterday on TrustBench: three real paid /route settles confirmed on-chain ($0.015 USDC, three signed receipts). ` +
+  //   `Two bug fixes shipped: idempotency replay is now byte-identical, /route 402 emits resource field for v2 spec compliance. ` +
+  //   `Bazaar indexing still pending, first-index latency for a new payTo+URL looks longer than the docs' ~10min. ` +
+  //   `Honest signal beats theater.`,
 
-  // POST-INDEXING VARIANT (uncomment + delete the above once /route appears on
-  // agentic.market):
+  // POST-INDEXING VARIANT (also stale 2026-05-25; Bazaar indexing landed
+  // 2026-05-13 — see project_stone_0_listing_validated_2026_05_13 memory).
+  // Kept as a template shape for future "X is now listed on Y" posts.
   // `TrustBench /route is now listed on agentic.market. Non-custodial routing ` +
   //   `with signed receipts, on-chain settlement, fail-safe paywall. Routes ` +
   //   `Base today, Solana endpoints in the registry, routing next sprint.\n\n${BASE_URL}`,

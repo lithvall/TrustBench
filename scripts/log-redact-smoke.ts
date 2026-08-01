@@ -12,7 +12,7 @@
  * this change removes.
  */
 
-import { redactQueryValues } from '../src/log-redact.js';
+import { redactQueryValues, redactedLogPrint } from '../src/log-redact.js';
 
 // Synthetic stand-ins with the same shape as the real gateway values.
 const FAKE_KEY = '00000000-1111-2222-3333-444444444444';
@@ -111,6 +111,30 @@ if (leaked.length) {
   console.log('PASS  backstop: no UUID-shaped token survives in any output');
 }
 
+// Fail-closed guard: redactedLogPrint must never throw (Hono awaits it inside
+// the request path, so a throw would fail a live request) and must never fall
+// back to printing the raw input. Force the throw by passing a non-string.
+const captured: string[] = [];
+const realLog = console.log;
+let threw = false;
+try {
+  console.log = (...args: unknown[]) => { captured.push(args.map(String).join(' ')); };
+  // Deliberate type violation — simulates any unexpected internal failure.
+  redactedLogPrint(undefined as unknown as string);
+} catch {
+  threw = true;
+} finally {
+  console.log = realLog;
+}
+const guardOk = !threw && captured.length === 1 && captured[0] === '<log-redaction-error>';
+if (!guardOk) {
+  failed++;
+  console.log('FAIL  fail-closed guard: expected marker without throwing');
+  console.log(`      threw: ${threw}  captured: ${JSON.stringify(captured)}`);
+} else {
+  console.log('PASS  fail-closed guard: marker emitted, no throw, raw input never printed');
+}
+
 console.log('='.repeat(60));
-console.log(failed === 0 ? `ALL ${CASES.length + 1} CHECKS PASSED` : `${failed} CHECK(S) FAILED`);
+console.log(failed === 0 ? `ALL ${CASES.length + 2} CHECKS PASSED` : `${failed} CHECK(S) FAILED`);
 process.exit(failed === 0 ? 0 : 1);

@@ -27,13 +27,28 @@
  *
  * FAILURE MODE — if this is wrong, what breaks and how would we notice?
  * --------------------------------------------------------------------
- * Only log readability. Request handling never executes this code: Hono calls
- * the print function with an already-formatted string and ignores the return
- * value, so a bug here cannot change a response body, a status code, an
- * x402 payment path, or a receipt. The realistic failure is OVER-redaction
- * (a param we wanted to read shows as <redacted>), which is the safe
- * direction — the allowlist is closed, so any newly-added query param is
- * redacted by default until deliberately listed here.
+ * Two distinct paths, and only one of them is harmless:
+ *
+ * 1. WRONG OUTPUT — harmless. Hono ignores the print function's return
+ *    value, so producing a bad string cannot change a response body, a
+ *    status code, an x402 payment path, or a receipt. The realistic failure
+ *    is OVER-redaction (a param we wanted to read shows as <redacted>),
+ *    which is the safe direction: the allowlist is closed, so any newly
+ *    added query param is redacted by default until deliberately listed.
+ *
+ * 2. A THROW — NOT harmless. Hono's logger `await`s the print call inside
+ *    the request path (before next() on the way in, after it on the way
+ *    out), so an exception raised here would propagate and fail the
+ *    request. There is no realistic throw path — `line` is always a string
+ *    built by Hono's own template literal, and String.replace / Set.has /
+ *    toLowerCase do not throw on strings — but `redactedLogPrint` guards
+ *    with try/catch anyway so this is structurally impossible rather than
+ *    merely improbable. The guard fails CLOSED: it never falls back to
+ *    printing the raw line, because the raw line is precisely what carries
+ *    the credential.
+ *
+ * How we'd notice: `<log-redaction-error>` appearing in the Railway log
+ * stream in place of a request line.
  *
  * Verified by scripts/log-redact-smoke.ts against real captured log lines.
  */
@@ -85,5 +100,16 @@ export function redactQueryValues(line: string): string {
  * nothing else about log formatting or destination.
  */
 export function redactedLogPrint(message: string, ...rest: string[]): void {
-  console.log(redactQueryValues(message), ...rest);
+  // Start from the fail-closed value: if redaction throws for any reason we
+  // emit a marker rather than the raw line. Falling back to `message` would
+  // reintroduce exactly the credential leak this module exists to prevent.
+  // The try/catch also guarantees this function never throws — see the
+  // FAILURE MODE note above on why a throw here would fail live requests.
+  let line = '<log-redaction-error>';
+  try {
+    line = redactQueryValues(message);
+  } catch {
+    /* keep the marker */
+  }
+  console.log(line, ...rest);
 }

@@ -20,7 +20,8 @@
     "smoke:bazaar-spike": "tsx scripts/bazaar-spike-smoke.ts",
     "export-7-night": "tsx scripts/export-7-night.ts",
     "import-paddock-bazaar": "tsx scripts/import-paddock-bazaar.ts",
-    "smoke:c3": "tsx scripts/smoke-c3-concurrency.ts"
+    "smoke:c3": "tsx scripts/smoke-c3-concurrency.ts",
+    "smoke:log-redact": "tsx scripts/log-redact-smoke.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.11.0",

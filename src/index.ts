@@ -29,6 +29,7 @@ import { renderTermsHtml } from './terms-html.js';
 import { renderPricingHtml, buildPricingJson } from './pricing-html.js';
 import { paywallGate } from './paywall-handler.js';
 import { createMcpHttpHandler } from './mcp-http.js';
+import { redactedLogPrint } from './log-redact.js';
 import { renderAnalyticsHtml, type AnalyticsData, type CategoryCard } from './analytics-html.js';
 import { renderBundleHtml } from './bundle-html.js';
 import {
@@ -157,7 +158,11 @@ const supabase = createClient(
 const app = new Hono();
 
 app.use('*', cors());
-app.use('*', logger());
+// Request logging with query-string redaction. Hono's default print function
+// writes the full URL including query params, which leaked third-party MCP
+// gateway credentials (`?api_key=...&profile=...`) into the Railway log
+// stream. See src/log-redact.ts for the rationale and failure mode.
+app.use('*', logger(redactedLogPrint));
 
 // Health
 app.get('/health', (c) => c.json({ status: 'ok', project: 'TrustBench' }));

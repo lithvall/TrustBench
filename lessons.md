@@ -2039,3 +2039,34 @@ Conflating the two produced an entry whose leading-indicator depended on the wro
 **A second-order trap this exposes.** Because discovery and conversion are independent, a criterion that bundles them ("reassess pricing AND discovery") can fire while pointing at the wrong remedy. Here, the mandated response was to reassess pricing — but the logs contain no price signal at all: every 402 went to a crawler, so nobody ever declined on price. Acting on the criterion as literally written would have meant repricing against zero data points. **When a kill criterion fires, re-derive which variable actually moved before executing its prescribed remedy.** A fired criterion licenses investigation, not automatic execution of whatever fix was imagined months earlier.
 
 **Accountability-loop flag.** Per CLAUDE.md, "the same issue appears in `lessons.md` more than twice without a structural fix" is a flag condition. Proxy-vs-load-bearing is now at instance two (2026-05-20, 2026-08-01). A third instance should trigger a structural change to how gates are written — not another lesson entry.
+
+---
+
+## 2026-08-02 — Instance three. Structural change, as promised.
+
+Instance three arrived the next day, in `SIGNAL-2026-05-14-xrpl-agent-commerce-launch.md`. Its re-engagement trigger read *"Review in 30 days or when t54 announces second live service."* Every premise in that signal was correct — t54 and Virtuals were real, Ripple-backed, and genuinely shipping. The conclusion was wrong anyway, because the trigger was denominated in **announcements** rather than **settled value**. Fifteen weeks later the ecosystem had produced ~1.7M transactions worth $10–15k total and ~$280 in network fees, while the signal's chosen instrument — *"BlockRunAI transaction volume is the leading demand indicator"* — was the right instrument, never read.
+
+Three instances, one shape: **the easy proxy was measured, the load-bearing property was not.** Script proxy vs real property (2026-05-20). Listing presence vs conversion (2026-08-01). Announcement velocity vs settled value (2026-08-02).
+
+### The structural change (this is the deliverable, not the observation)
+
+**Rule: every SIGNAL, WATCH, gate, or kill criterion must state its trigger in load-bearing units. Proxy-denominated triggers are not permitted.**
+
+| Not permitted (proxy) | Required instead (load-bearing) |
+|---|---|
+| "when X announces …" | "when settled value exceeds $N" |
+| "when the service count reaches N" | "when a named counterparty asks in writing" |
+| "when we're listed in N directories" | "when one external party pays" |
+| "when request volume hits N" | "when N requests carry a payment header" |
+| "in 30 days" with no metric | a date **plus** a numeric threshold |
+
+Two supporting requirements, both of which this pass exercised:
+
+1. **Name the anti-triggers explicitly.** The XRPL entry lists "another Ripple or Mastercard press release" and "the counter crossing 5M" as *explicitly not triggers*. Without that, a proxy event re-opens the question by default and the discipline leaks back in through the side door.
+2. **Enrol it in `decisions.md`** per the 2026-08-01 fix, so the callback scan can actually see it. A load-bearing trigger written only in a SIGNAL file is still invisible.
+
+### Why this is the right fix rather than "try harder"
+
+The failure is not carelessness — each of the three was written by someone paying attention. It recurs because proxy metrics are *cheap to observe and emotionally satisfying*, while load-bearing metrics are usually zero and saying so is unpleasant. A rule that forbids the cheap denominator removes the choice at authoring time, which is the only point where it is cheap to remove.
+
+**Falsifier for this fix:** if a fourth instance occurs *despite* a trigger written in load-bearing units, the diagnosis was wrong and the problem is elsewhere — probably in how often the callbacks are actually run, not how they are written.

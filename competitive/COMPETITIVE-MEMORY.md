@@ -53,6 +53,8 @@ First refresh since 2026-05-17 (89 days). The gap is not a scan cadence failure 
 
 Surfaced while placing a TrustBench entry in `xpaysh/awesome-x402` (the list moved from `Merit-Systems`; TrustBench appears **0** times, MAKO once, ScoutScore once, Dexter twice). All eight below sit in `Tools & Utilities → Monitoring & Analytics`, the same subsection as ScoutScore — i.e. the densest concentration of direct peers in the ecosystem, and this index missed all of them.
 
+**Full dossier with verified figures, per-project TrustBench takeaways and a ranked improvement list: [DOSSIER-2026-08-14-awesome-x402-cluster.md](DOSSIER-2026-08-14-awesome-x402-cluster.md).** Headline from it: SmartFlow reports 79,567 catalogued endpoints against TrustBench 79,480 crawled — within 0.1 percent, almost certainly the same upstreams — but they expose the whole catalogue with conformance metadata and sell bulk export, where TrustBench filters to 1,545 and was about to prune the remainder. Do not prune before deciding whether to expose.
+
 **No severities assigned deliberately.** These are self-descriptions in an awesome-list: scale claims unverified, and on this quarter's evidence (Strata, MAKO, Infopunks, x402route all dormant or dead behind live infrastructure) a meaningful fraction are likely inactive. Per the 2026-08-14 rule, `commit_cadence` is required before anything is ranked ≥3. Verify before ranking.
 
 **Contest the discovery-first position chosen 2026-08-14 — check these first:**

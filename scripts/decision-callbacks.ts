@@ -198,6 +198,21 @@ function main() {
     if (rel === "decisions.md" || rel === "lessons.md" || rel.startsWith("prompts/")) continue;
     let text: string;
     try { text = readFileSync(file, "utf-8"); } catch { continue; }
+
+    // Enrollment marker. Once a file's dated commitment has been copied into
+    // decisions.md as a real entry, the file declares `callback_tracked_in:
+    // decisions.md` and stops being reported here. Without this the scanner
+    // would flag the same enrolled commitments on every run forever, which is
+    // the permanent-false-positive failure the prompts/ exclusion also guards
+    // against: an alarm that never clears is an alarm that stops being read.
+    //
+    // The marker is deliberately a claim the author makes, not something the
+    // script verifies by matching text across files — the commitments are
+    // prose and any matching heuristic would be brittle. The cost of a false
+    // claim is one untracked commitment; the cost of brittle matching is a
+    // scanner nobody trusts.
+    if (/callback_tracked_in\s*:\s*decisions\.md/i.test(text)) continue;
+
     const re = /(check_back_date|review_trigger)\s*:?\s*(\d{4}-\d{2}-\d{2})/gi;
     let m: RegExpExecArray | null;
     while ((m = re.exec(text)) !== null) {

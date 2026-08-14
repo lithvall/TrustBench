@@ -79,6 +79,7 @@ Walk `decisions.md` from the bottom up. For each entry with `status: open` AND `
    - **disproven**: assumption broke. Name the specific way it broke in one sentence.
    - **rescheduled**: insufficient evidence yet. Set new `check_back_date` 30 days forward. Increment a reschedule counter; refuse beyond 3 reschedules.
    - **superseded**: a later decision invalidated this one. Reference the YYYY-MM-DD of the superseding entry.
+   - **lapsed**: the decision was action-shaped and the action never happened, so the assumption was never tested. Added 2026-08-14 after the first full backlog pass, where none of the four existing grades fit two outreach entries that simply were not executed: `disproven` implies a tested assumption that broke, `superseded` requires a later contradicting decision, and `rescheduled` implies the entry is still maturing rather than that a commitment quietly expired. Name why it lapsed (paused project, unmet precondition, dependency that never materialised). **A lapsed grade licenses no conclusion about the decision's merits** — see the warning below.
 4. Append the grade to the entry inline (new line under the existing fields, do NOT rewrite the original fields).
 5. For every `disproven` grade: append a one-paragraph entry to `lessons.md` describing the assumption-class failure. Format: "Decision X (YYYY-MM-DD) was disproven because <specific way>. Pattern to watch for: <generalized assumption type>. Next time, before committing this kind of decision: <one mitigation>."
 
@@ -89,10 +90,21 @@ Callbacks processed: N
   Disproven: M (pattern entries added to lessons.md: ...)
   Rescheduled: J
   Superseded: P
+  Lapsed: L (not executed — no conclusion drawn about merits)
 Open with check-back due in next 30 days: Q
 ```
 
 Be ruthless on the disproven calls. The point of this loop is to catch assumption-class failures while they're fresh. "Mostly worked out" is not validated. The leading indicator either fired or didn't.
+
+**Run `npm run callbacks` rather than scanning by hand.** It reports overdue entries, entries due within 14 days, and dated commitments living in files other than `decisions.md` (which are invisible to this loop and will drift). Once such a commitment is enrolled here as a real entry, mark its source file `callback_tracked_in: decisions.md` so it stops re-reporting.
+
+### Three traps this loop has already fallen into
+
+Learned from the 2026-08-14 backlog pass; check each before writing a grade.
+
+1. **A disproven indicator is not a refuted thesis.** If the indicator required a counterparty to act and the counterparty vanished, or required outreach that was never sent, the idea was never tested. Say which broke — the indicator or the thesis. Retiring a sound idea on the strength of a quiet quarter is the most expensive mistake this loop can make, because it looks like rigour.
+2. **A failure-rate indicator reads green on a zero denominator.** ">5% of settle calls failed" over zero settle calls is undefined, not healthy. Grade `rescheduled`, never `validated`. Prefer indicators with an explicit minimum denominator.
+3. **An indicator that waits to be told will miss what is already happening.** The MCP-server entry asked for "at least one external user reports using the tools" and would have graded disproven while 6 recurring third-party clients were using them, undetected for seven weeks. When the load-bearing property is "someone is using it," instrument the thing itself and treat inbound reports as corroboration only.
 
 ---
 

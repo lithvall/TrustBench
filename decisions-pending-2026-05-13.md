@@ -1,3 +1,6 @@
+<!-- callback_tracked_in: decisions.md -->
+<!-- ENROLLED in decisions.md 2026-08-14 (appended at file end, graded lapsed). This file is now a historical draft; the tracked copy is authoritative. -->
+
 # Pending decision journal entry — 2026-05-13
 
 **Status:** Draft, not committed. Append to `decisions.md` only if the SKU paywall pivot is approved. If not approved, discard this file.

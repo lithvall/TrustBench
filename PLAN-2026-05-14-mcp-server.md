@@ -1,3 +1,6 @@
+<!-- callback_tracked_in: decisions.md -->
+<!-- ENROLLED in decisions.md 2026-08-14 (appended at file end, graded validated-with-mis-specified-indicator). This file is now a historical plan; the tracked copy is authoritative. -->
+
 # TrustBench MCP Server — Plan
 
 **Created:** 2026-05-14

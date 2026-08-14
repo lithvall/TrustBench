@@ -75,6 +75,25 @@ Surfaced while placing a TrustBench entry in `xpaysh/awesome-x402` (the list mov
 
 **Process lesson recorded with these:** this index was built from X, Reddit and direct discovery, and missed the public README any agent sweep enumerates first. The discovery blind spot and the competitive blind spot were the same blind spot — not being in the list meant not reading the list. Add awesome-x402 delta-checking to the weekly scan.
 
+## Found 2026-08-14 in the MCP-ecosystem sweep — 30 verified, severity proposals pending Johan
+
+**Full dossier: [DOSSIER-2026-08-14-mcp-landscape.md](DOSSIER-2026-08-14-mcp-landscape.md).** Two-pass sweep of 8 directory sources → 327 deduped lane matches → 30 deep-verified (live probe + tools/list + commit cadence per the 2026-08-14 rule). Of the 30: 7 dead, 12 dormant, 11 active — directories never delist, so raw listing counts are not a live field.
+
+Headlines that change existing entries:
+
+- **MAKO Pulse is ACTIVE — the same-day sev 4→3 downgrade was stale when written.** Telemetry ran 2026-08-14 morning (2,727 services, ~48 probes/svc/day, verified via live `/pulse.json`); a post-May paid "Assurance" product ships buyer policy + allow/deny payTo + dispute-ready receipts (TrustBench's declared moat, as product); development moved to a private repo; $2,500 consulting sidecar. "Zero public commits" was the wrong vantage. **Proposed: restore sev 4.**
+- **ScoutScore's counter-move baseline is broken.** `/.well-known/x402` still 404s, but `GET /api/bazaar/score/:domain` has served a live x402 v2 402 ($0.001 USDC, Base) since the March refresh — the "no x402 surface in 85 days" claim is disproven; the probe watched the wrong path. Registry verified at 60,970 services. Watch triggers (receipts/routing) have NOT fired; sev 3 holds; replace the probe.
+- **Coinbase Bazaar MCP is live, keyless, first-party**: 15,498-resource discovery (verified) + payment-proxied execution via `proxy_tool_call`; SDK-level spend controls landed 2026-08-13. Absorption of the discovery/routing slice is shipped, not hypothetical. **Proposed: facilitator sev 3→4.** Not covered first-party: signed receipts, independent telemetry, neutrality, BYO-key signing.
+- **Smithery was acquired by Arcade.dev** (announced 2026-08-05, verified via Forbes + Arcade's blog) — the registry hosting TrustBench's 1,029-use listing changed owners this week.
+- **Smithery useCount decorrelates from usage** (third-party evidence: PressureDesk 729 uses/password-walled homepage; Synmerco 3,239/smoke-test marketplace; dominion 3,449/2 external calls ever) — shifts the prior on TrustBench's own 1,029 toward heartbeat; 2026-08-21 log read still decides.
+- **The paid-MCP-tool funnel converts at zero across five independent operators** (dropwatchhq receiver wallet: zero on-chain transactions; dominion: 2 calls; BoltHub: $9 lifetime) — the frozen fourth tool is likely costing ~nothing, and the pattern is routable-around (x402-list ships the exact frozen tool in production via npm + own remote).
+
+New entries proposed (cadence-verified; STANCE not modified this session): **x402-list sev 4** (active; paid MCP funnel in production; on-chain-traction ranking ahead of TrustBench's method) · **nohumans.directory sev 3** (active; 57.6k probes/day registry, v1/v2 conformance columns; no receipts/routing — compose candidate) · **mainstreet sev 3** (active, commits daily; settlement-history trust scoring + EIP-712 verifiable attestations) · **KYA-OS/Checkpoint (Vouched) sev 3** (DIF-ratified action-receipt standard, 1k npm dl/wk; absorber if it adds commerce) · sev 2: Ontario Protocol, Pulsefeed x402, paybond.ai, Countersign, TWZRD, Xaip, 402 Index (→3 if its routing commits ship) · watch: MetaMask Smart Accounts Kit (wallet-layer ERC-7710 spend controls).
+
+Corrections recorded in the dossier: the x402 dossier's "Paybound" conflated two entities (pando-b/paybound ≈ dead; **paybond.ai is the active one** with an "Agent Receipt Standard"); "hourly caps" is Sentinel-only, not a lane pattern; gap-map's x402index/x402search references are stale (both dead); "AgentPay" is three distinct products.
+
+Pillar 1 field note: **nobody verified in the wild ships TrustBench's full triple (Ed25519 + JCS + on-chain settlement anchor) as an adopted format** — but PEAC (spec rigor, zero adoption), KYA-OS (adoption machinery, no payment semantics), Xaip (IETF I-D), and paybond (closed ARS) are all moving, and the payment-receipt slot at IETF appears empty.
+
 ## Logged but unranked (need first scan to assign severity)
 
 - QBT-Labs/x402 — compose-friendly today; severity unknown; @0xAggelos.

@@ -120,7 +120,28 @@ function percentile(sortedAsc: number[], p: number): number | null {
 // (100 = 100k rows) as a defensive ceiling: if a table grows beyond that
 // we throw rather than loop silently, so we notice loudly.
 const PAGE_SIZE = 1000;
-const MAX_PAGES = 100;
+// Runaway backstop, raised 100 -> 500 on 2026-08-14.
+//
+// Why it was raised. MAX_PAGES=100 caps a fetch at 100k rows. Measured
+// 2026-08-14: the `providers` table is at 79,480 rows and growing ~320/day
+// (it was ~50k on 2026-05-14). That put the ceiling roughly 64 days out, at
+// which point this script would have started throwing every night, the
+// workflow would have gone red, and Paddock's feed would have frozen at the
+// last good CSV. Failing loud is the correct design (see fetchAllPaged), but
+// failing loud on a *predictable* schedule is just a scheduled outage.
+//
+// Why the growth is unbounded. Only ~6.5k of those 79k providers are actually
+// probed and exported; the other ~73k are catalog accumulation that no longer
+// resolves (per-resource URL enumeration, reconnaissance paths, dead hosts).
+// Nothing prunes them. Raising the ceiling buys ~3.5 years of headroom but
+// does NOT fix that — a retention policy on unprobed providers is the real
+// fix and is deliberately not done here, because deleting provider rows is
+// destructive and needs Johan's explicit call.
+const MAX_PAGES = 500;
+// Soft alarm, well below the backstop, so the accumulation problem surfaces in
+// the nightly workflow log with ~7 months of lead time instead of arriving as
+// a hard failure. ~1.9x the 2026-08-14 providers count.
+const WARN_ROWS = 150_000;
 
 async function fetchAllPaged<T>(
   label: string,
@@ -140,6 +161,16 @@ async function fetchAllPaged<T>(
         `[export-7-night] ${label}: hit MAX_PAGES (${MAX_PAGES}) ceiling at ${out.length} rows — raise the ceiling or add filtering`,
       );
     }
+  }
+  // Soft alarm: visible in the nightly workflow log long before MAX_PAGES.
+  // If this fires for `providers`, the fix is a retention policy on unprobed
+  // rows, not another ceiling bump — see the MAX_PAGES comment.
+  if (out.length >= WARN_ROWS) {
+    console.error(
+      `[export-7-night] WARN ${label}: ${out.length} rows >= WARN_ROWS (${WARN_ROWS}). ` +
+      `MAX_PAGES backstop is ${MAX_PAGES} pages (${MAX_PAGES * PAGE_SIZE} rows). ` +
+      `Consider pruning unprobed providers rather than raising the ceiling again.`,
+    );
   }
   return out;
 }

@@ -87,7 +87,9 @@ Routing tools (`route_quote`, `route_settle`) require a `tb_live_…` API key an
   signs and the facilitator submits on-chain.
 - Existing partner agreements override the published table for that partner.
   Reach out for partner-volume credit before integration.
-- Refundable provider verification bond — pay-to-list, never pay-to-rank
+- Registry listing is currently free and automatic (crawled from public x402
+  catalogs). A refundable provider verification bond is a design intent, not a
+  shipped mechanism. Never pay-to-rank — routing decisions are measurement-based.
 
 ## Stack
 

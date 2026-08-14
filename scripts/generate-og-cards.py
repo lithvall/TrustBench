@@ -214,8 +214,11 @@ def card_rankings(out):
         d.rounded_rectangle([px, py, px + w, py + 32], radius=16, fill=fill_bg)
         d.text((px + 12, py + 7), label, font=pill_font, fill=fill_fg)
         px += w + 10
+    # Copy fix 2026-08-14: was "Pay-to-list (refundable bond) · Never
+    # pay-to-rank". The bond is a design intent, not a shipped mechanism.
+    # NOTE: the rendered PNGs are stale until this script is re-run.
     draw_footer(d, rail, "trustbench.io/rankings",
-                "Pay-to-list (refundable bond) · Never pay-to-rank")
+                "Free automatic listing · Never pay-to-rank")
     img.save(out, "PNG", optimize=True)
 
 def card_pricing(out):

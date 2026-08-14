@@ -149,6 +149,21 @@ export function renderNav(active: ActiveNav): string {
 
 // Shared footer. Three columns + a thin bottom strip with the build hash and
 // honest-framing reminder. Every link goes to a real surface that exists.
+//
+// Copy fix 2026-08-14: the bottom strip read "Pay-to-list (refundable bond),
+// never pay-to-rank." The pay-to-list/bond half advertised a listing mechanism
+// that does not exist anywhere in src/ — registry inclusion is crawler-only
+// (agentic.market + Heurist Mesh, see src/crawler.ts) and provider-selection.ts
+// is explicitly measurement-only with no bond logic. An x402 provider read that
+// copy and emailed asking what the manual listing step was, which is the
+// friction the copy itself created. "Never pay-to-rank" is retained everywhere:
+// it is true, and it is the load-bearing differentiator versus pay-to-rank
+// receipt formats (see STANCE.md out_of_scope). If a bond is ever built, this is
+// one of eight public surfaces to update together.
+//
+// Keep this rationale in TS comments, never in an HTML comment inside the
+// template literal — renderFooter() output ships on every page, so an HTML
+// comment would publish internal strategy notes into public page source.
 export function renderFooter(): string {
   return `<footer class="bg-surface border-t border-border mt-16">
   <div class="max-w-7xl mx-auto px-6 py-12 grid grid-cols-2 md:grid-cols-4 gap-8">
@@ -180,7 +195,7 @@ export function renderFooter(): string {
   </div>
   <div class="border-t border-border">
     <div class="max-w-7xl mx-auto px-6 py-4 flex flex-col md:flex-row justify-between items-center gap-2 text-xs text-faint">
-      <span class="mono">Pay-to-list (refundable bond), never pay-to-rank.</span>
+      <span class="mono">Indexed from public catalogs. Never pay-to-rank.</span>
       <div class="flex items-center gap-4 mono">
         <a href="/privacy" class="hover:text-primary transition-colors">Privacy</a>
         <a href="/terms" class="hover:text-primary transition-colors">Terms</a>

@@ -10,7 +10,9 @@
 //   - No "benchmark", "ranking authority", "trust score", "10x", etc.
 //   - Probe behavior described accurately ("HEAD-based, three samples per
 //     provider per day, sampled across 3 region tags from one host today").
-//   - Pay-to-list / never pay-to-rank surfaced as a soft-green strip.
+//   - Never pay-to-rank surfaced as a soft-green strip. (Was "pay-to-list
+//     (refundable bond), never pay-to-rank" until 2026-08-14; the bond half
+//     described an unimplemented mechanism — see the note in site-chrome.ts.)
 //   - Non-custodial language throughout.
 //
 // All copy was validated by Stitch as Variant 2 (Data-Forward) in project
@@ -82,7 +84,7 @@ ${renderNav('home')}
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
       <div class="bg-surface border border-border rounded-lg p-6">
         <div class="label-caps text-primary mb-3">Registry</div>
-        <p class="text-sm text-ink leading-relaxed">Public list of x402-style endpoints across Base (Coinbase Agentic Market) and Solana (Heurist Mesh, Pay.sh skills), refreshable nightly. Pay-to-list with refundable bond, never pay-to-rank.</p>
+        <p class="text-sm text-ink leading-relaxed">Public list of x402-style endpoints across Base (Coinbase Agentic Market) and Solana (Heurist Mesh, Pay.sh skills), indexed automatically from public catalogs and refreshed nightly. Never pay-to-rank.</p>
       </div>
       <div class="bg-surface border border-border rounded-lg p-6">
         <div class="label-caps text-primary mb-3">Live Telemetry</div>
@@ -119,7 +121,7 @@ ${renderNav('home')}
   <section class="bg-soft-green border-y border-border mt-16">
     <div class="max-w-5xl mx-auto px-6 py-10 text-center">
       <p class="text-xl text-primary-dark font-medium leading-relaxed">
-        Pay-to-list (refundable bond), never pay-to-rank. Routing decisions are measurement-based.
+        Indexed automatically from public catalogs. Never pay-to-rank. Routing decisions are measurement-based.
       </p>
     </div>
   </section>

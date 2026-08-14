@@ -173,7 +173,7 @@
     "facilitator": "Coinbase CDP facilitator",
     "facilitatorUrl": "https://api.cdp.coinbase.com/platform/v2/x402",
     "facilitatorDocs": "https://docs.cdp.coinbase.com/x402/welcome",
-    "providerVerificationBond": "refundable, pay-to-list, never pay-to-rank",
+    "providerListing": "Registry inclusion is free and automatic: TrustBench crawls public x402 catalogs (Coinbase Agentic Market for Base, Heurist Mesh for Solana) nightly and probes what it finds. No application, no fee, no manual approval. A refundable pay-to-list verification bond is a design intent, not a shipped mechanism. Never pay-to-rank.",
     "partnerCredit": "Existing partner agreements override the published table for that partner. Reach out via GitHub for partner-volume credit before integration locks in."
   },
   "policyPrimitives": {

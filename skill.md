@@ -208,7 +208,7 @@ The v0.1.0 paywall is rolling out behind a feature flag; until the flag flips, `
 
 For service discovery itself, defer to Agentic Market. TrustBench does not fork the discovery surface, it routes against providers it has independently probed for liveness and signed scores for. The full ranked list per capability is at `https://trustbench.io/rankings?capability=<capability>` (no auth required), with each provider's signed scorecard.
 
-To add a provider to TrustBench's registry, the provider self-attests with TrustBench's pay-to-list bond. See `https://trustbench.io/methodology` for the current registry policy. Pay-to-list, never pay-to-rank.
+Registry inclusion is automatic and crawler-driven. TrustBench discovers Base-settled endpoints from the Coinbase Agentic Market catalog (`api.agentic.market/v1/services`) and Solana endpoints from the Heurist Mesh feed, then probes what it finds. There is no application, no fee, and no manual approval step on the TrustBench side: a provider listed in one of those upstream catalogs is picked up by the next nightly crawl. See `https://trustbench.io/methodology` for the current registry policy. Never pay-to-rank — routing decisions are measurement-based.
 
 ## Common issues
 

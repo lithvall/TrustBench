@@ -97,7 +97,7 @@ These are the things an agent or agent builder can rely on TrustBench enforcing 
 - Sign authorizations on behalf of the agent. The agent signs; we forward.
 - Submit transactions on-chain. The provider submits with their own gas wallet.
 - Hold agent funds at any point.
-- Rank providers by payment. Pay-to-list (refundable verification bond, Phase 4) is fine; pay-to-rank is not.
+- Rank providers by payment. Registry inclusion is crawler-driven from public catalogs and free; pay-to-rank is not on the table.
 
 ## Pricing
 
@@ -108,7 +108,7 @@ x402-native paywalled API endpoints. Per-call USDC settlement on Base. No subscr
 - **v0.2.0 planned:** `POST /score-provider` ($0.005), `GET /receipts/:id?replay=true` ($0.01), and free-tier-quota on read endpoints with $0.0005 above-quota tier.
 - **v0.3.0 planned:** `POST /compliance-export` for signed multi-receipt bundles ($0.50 single, $2.00 bundle up to 100, negotiated above).
 - **HTML responses on `/rankings` and `/receipts/:id` are free permanently.** Paywall only applies to JSON above the per-IP quota (v0.2.0), and to differentiated-work endpoints listed above.
-- Percentage spreads on the routed amount were rejected during Phase 2 builder conversations on 2026-04-30 and remain off the table. Provider verification is a refundable pay-to-list bond, never pay-to-rank.
+- Percentage spreads on the routed amount were rejected during Phase 2 builder conversations on 2026-04-30 and remain off the table. Registry listing is currently free and automatic from public catalogs; a refundable pay-to-list verification bond is a design intent, not a shipped mechanism. Never pay-to-rank.
 - Existing partner agreements override the published table for that partner. Reach out via GitHub for partner-volume credit conversations before integration.
 
 ## Repository

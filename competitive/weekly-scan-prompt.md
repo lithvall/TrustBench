@@ -1,6 +1,6 @@
 ---
-stance_version: 2026-05-17
-stance_phase: phase-4-post-listing-sprint
+stance_version: 2026-08-14
+stance_phase: phase-4-conversion-reassessment
 stance_pillars: [canonical-receipt-format-standard, neutral-routing-receipt-layer]
 ---
 

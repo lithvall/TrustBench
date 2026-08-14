@@ -1,6 +1,6 @@
 ---
-stance_version: 2026-05-17
-stance_phase: phase-4-post-listing-sprint
+stance_version: 2026-08-14
+stance_phase: phase-4-conversion-reassessment
 stance_pillars: [canonical-receipt-format-standard, neutral-routing-receipt-layer]
 ---
 
@@ -52,6 +52,9 @@ If you find yourself thinking "TrustBench's signed-receipt envelope differentiat
 - When asked "is TrustBench defensible against X?", the default answer is "not obviously," and you have to argue your way to "yes" with current evidence.
 - "Differentiation" claims must be tested every scan, not assumed durable.
 - If a memory entry says "TrustBench differentiates on signed receipts," and the latest scan shows the competitor now ships signed receipts (EIP-191, 60s validity — MAKO Pulse as of 2026-05-15), the entry is updated and the differentiator is downgraded. Old memory does not protect TrustBench from current reality.
+- **A live endpoint is not a live competitor.** Added 2026-08-14 after three tracked entities — MAKO Pulse, Infopunks, and partner-side Strata — were found dormant in the same quarter with their infrastructure still answering. Crons outlive founders. For any competitor at severity 3 or above, record `commit_cadence` (last push across their public repos) alongside capability, and treat capability-without-velocity as a lower threat than capability-with-velocity. One GitHub API call on `pushed_at` is the whole check.
+- **Never scan against an unverified domain.** Same date, and nearly an error of record: `makopulse.com` serves a polished uptime-monitoring product by an unrelated company, and this project's MAKO Pulse threat file had carried a guessed URL (`mako.tools?`) for 89 days. Scanning the guess would have filed "MAKO pivoted off x402" as a finding. Resolve identity from the operator's own profile links before recording any capability observation.
+- **Symmetry check.** The dormancy pattern applies to TrustBench too. A scan that reports competitor dormancy while TrustBench itself had a 68-day commit gap (2026-05-25 → 2026-08-01) is scoring on a curve. Note both when it is true.
 
 ## Memory partition rules
 

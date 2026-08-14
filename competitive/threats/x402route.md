@@ -2,8 +2,10 @@
 name: x402route
 handle: unknown
 url: "https://x402route.vercel.app"
-severity: 3
-last_scanned: 2026-05-12
+severity: 1
+previous_severity: 3
+last_scanned: 2026-08-14
+status: apparently-dead
 category: routing-overlap
 ---
 
@@ -50,3 +52,21 @@ Next scheduled scan: weekly per `weekly-scan-prompt.md`. **Specific questions fo
 - Team / handle — has anyone publicly claimed this project? Look for X mentions of `x402route` from a stable handle.
 - Pricing — still $0.001/call, or has it moved up (gives breathing room) or down (escalates)?
 - agentic.market positioning — are they still surfaced next to trustbench.io? Promoted? Demoted?
+
+---
+
+## Scan 2026-08-14 — apparently dead, severity 3 → 1
+
+**Verified:** `https://x402route.vercel.app` returns **HTTP 404 at the root**, not merely at `/v1/route`. A Vercel deployment serving 404 on its own root is the signature of a removed or expired project, not a route change.
+
+### Written downgrade reason (required by COMPETITIVE-BRIEF)
+
+The entire tracked capability — a routing lane at $0.001/call, 5× cheaper than TrustBench — is unreachable. A competitor that cannot be called is not competing. Severity 1 rather than deletion: Vercel projects come back, and the entry earns its place in the index for the calibration lesson below.
+
+**Upgrade trigger:** any HTTP 200 from the root or `/v1/route` returns this to severity 3 pending a capability re-scan. One curl per weekly scan.
+
+### The calibration lesson — why this entry stays in the index
+
+The 2026-05-12 decision entry that tracked x402route was **graded validated on 2026-08-14, but by a different competitor entirely.** Its indicator read: *"within 60 days, EITHER x402route ships signed receipts OR a similar competitor enters at the same trust-layer tier at lower price."* The second branch fired — Dexter shipped Instinct on 2026-05-19, embedding pay-to-rank payloads in the settlement receipt envelope — while the named subject of the entry quietly died.
+
+So the indicator was **right about the tier and wrong about the name.** Watching a named competitor is not the same as watching the capability tier they occupy; names churn faster than tiers do. Competitive indicators should be written against the tier, naming current occupants only as examples. This entry is retained as the concrete instance of that rule.

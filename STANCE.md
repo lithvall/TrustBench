@@ -20,7 +20,7 @@ signing: Ed25519-plus-JCS
 # Live competitors with current severity (1-5). Source of truth for the competitive role.
 active_competitors:
   - { name: "MAKO Pulse", handle: "@ChrisDMacro", severity: 4, category: direct-1to1 }
-  - { name: "x402route", handle: "unknown", severity: 3, category: routing-overlap }
+  - { name: "x402route", handle: "unknown", severity: 1, category: routing-overlap-apparently-dead }
   - { name: "Sangria", handle: "unknown", severity: 2, category: routing-overlap }
   - { name: "Meterflow", handle: "@meterflowsol", severity: 2, category: routing-overlap }
   - { name: "Coinbase x402 facilitator", handle: "unknown", severity: 3, category: facilitator-absorption }

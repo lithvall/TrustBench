@@ -57,6 +57,30 @@ type Entry = {
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
+/**
+ * Is this entry still awaiting a grade?
+ *
+ * Status values in decisions.md are free-form prose in practice, and two
+ * grading conventions coexist:
+ *   - grade embedded in status: `disproven (2026-05-11). assumption broke...`
+ *   - grade in dedicated fields: `graded-disproven-2026-08-14` + `grade:` lines
+ * and open entries sometimes carry a parenthetical update:
+ *   `open (status update at T+35min from third settle 2026-05-12: ...)`
+ *
+ * Exact `=== "open"` matching missed that last shape entirely. Found 2026-08-14
+ * by cross-checking this script's count against an independent parse: the
+ * script said 15 overdue, the manual count said 16. An under-reporting callback
+ * scanner is worse than none, because it looks authoritative while hiding the
+ * very entry that has drifted longest.
+ *
+ * So: compare the FIRST token only, lowercased, punctuation trimmed.
+ */
+function isOpen(status: string | undefined): boolean {
+  if (!status) return false;
+  const first = status.trim().split(/[\s(,.:]/)[0].toLowerCase();
+  return first === "open";
+}
+
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -100,8 +124,6 @@ function parseDecisions(content: string): Entry[] {
       const d = value.match(/\d{4}-\d{2}-\d{2}/);
       if (d) current.checkBack = d[0];
     } else if (key === "status") {
-      // Status can carry a suffix ("open", "superseded-same-day-by-..."), so
-      // keep the first token for comparison but preserve the full string.
       current.status = value.trim();
     }
   }
@@ -145,7 +167,7 @@ function main() {
   }
 
   const entries = parseDecisions(content);
-  const open = entries.filter((e) => e.status === "open" && e.checkBack && ISO.test(e.checkBack));
+  const open = entries.filter((e) => isOpen(e.status) && e.checkBack && ISO.test(e.checkBack));
 
   const overdue = open
     .filter((e) => e.checkBack! <= today)

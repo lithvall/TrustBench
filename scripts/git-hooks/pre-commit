@@ -1,0 +1,92 @@
+#!/bin/sh
+# =============================================================================
+# TrustBench pre-commit guard — blocks internal material and secrets
+# =============================================================================
+#
+# Why this exists
+# ---------------
+# 2026-08-14: a `git add -A ... drafts` staged 11 deliberately-untracked files
+# and pushed them to this PUBLIC repo. Among them: counter-positioning against
+# a named active competitor including its ship-trigger, two partner DM drafts,
+# and Show HN prep. Nothing leaked that was catastrophic, but the failure mode
+# is structural — `.gitignore` did not cover `drafts/`, and a bulk `git add`
+# does not ask.
+#
+# `.gitignore` alone is not the fix: it is silent, it only covers paths someone
+# thought of in advance, and `git add -f` walks straight past it. This hook is
+# the mechanical backstop that fails LOUD instead.
+#
+# Install (one-time, per clone):
+#     git config core.hooksPath scripts/git-hooks
+#
+# Verify:  git config --get core.hooksPath   ->  scripts/git-hooks
+#
+# The hook lives in the repo rather than .git/hooks precisely so it survives
+# clones and is reviewable. .git/hooks is not version-controlled.
+#
+# Bypass, when you genuinely mean it:  git commit --no-verify
+# If you find yourself typing that routinely, the denylist is wrong — fix the
+# list, do not build the habit.
+#
+# Failure mode if this hook is wrong: a legitimate commit is blocked and the
+# author reads a message naming the exact file and pattern. That is a cheap
+# failure. The failure it prevents is public disclosure, which is not.
+# =============================================================================
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+[ -z "$staged" ] && exit 0
+
+fail=0
+
+# ---- 1. Path denylist -------------------------------------------------------
+# Internal-by-convention locations. `drafts/` is also in .gitignore; it is
+# repeated here so that `git add -f` still trips the guard.
+for f in $staged; do
+  case "$f" in
+    drafts/*|*/drafts/*)
+      echo "BLOCKED  $f"
+      echo "         drafts/ is internal: partner DMs, competitor counter-positioning, launch prep."
+      echo "         This repo is PUBLIC. See .gitignore and lessons.md 2026-08-14."
+      fail=1 ;;
+    .env|.env.*|*/.env|*/.env.*)
+      echo "BLOCKED  $f"
+      echo "         Environment files are never committed."
+      fail=1 ;;
+    *secrets/*|*/private-keys/*|*.pem|*.key)
+      echo "BLOCKED  $f"
+      echo "         Looks like key or secret material."
+      fail=1 ;;
+  esac
+done
+
+# ---- 2. Secret-shaped content in staged diffs -------------------------------
+# Prefix-anchored patterns only. Deliberately NOT matching bare long hex —
+# Ed25519 public keys, tx hashes and receipt IDs are legitimately all over this
+# repo, and a guard that cries wolf on those gets bypassed within a week.
+#
+# ifk_    IBANforge API keys (one was pasted into an email 2026-08-14)
+# tb_live_ TrustBench production agent keys
+# sk_live_ / sk-  Stripe / OpenAI-style secrets
+# BEGIN ... PRIVATE KEY  PEM blocks
+secret_re='(ifk_[A-Za-z0-9]{16,}|tb_live_[A-Za-z0-9]{8,}|sk_live_[A-Za-z0-9]{8,}|sk-[A-Za-z0-9]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|SUPABASE_SECRET_KEY\s*=\s*[A-Za-z0-9]|SERVICE_ROLE_KEY\s*=\s*[A-Za-z0-9])'
+
+for f in $staged; do
+  # Only scan text blobs that still exist in the worktree.
+  [ -f "$f" ] || continue
+  if git diff --cached -U0 -- "$f" | grep -qE "^\+.*$secret_re"; then
+    echo "BLOCKED  $f"
+    echo "         Staged diff contains a secret-shaped string."
+    echo "         Move it to .env and reference it by variable name."
+    fail=1
+  fi
+done
+
+if [ "$fail" -ne 0 ]; then
+  echo ""
+  echo "pre-commit: commit refused. Nothing was committed."
+  echo "Unstage with:  git restore --staged <file>"
+  echo "Override only if you are certain:  git commit --no-verify"
+  exit 1
+fi
+
+exit 0

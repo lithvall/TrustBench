@@ -67,6 +67,84 @@ Once Phase 1 has produced a landscape, run the loop. Protocol and script are por
 
 Phase 1 is a research pass and can run alone. Phase 2 needs Phase 1's landscape as input — the whole point is that the path-forward debate should be informed by what actually exists, which is precisely what was missing when discovery-first was chosen on 2026-08-14 with an eight-competitor blind spot.
 
+## The kickoff prompt (paste this into a fresh session)
+
+```
+Read these in order before doing anything:
+1. STANCE.md (rev 6)
+2. SESSION-2026-08-14-handoff.md
+3. NEXT-SESSION-2026-08-15-mcp-landscape-brief.md  (this brief)
+4. competitive/DOSSIER-2026-08-14-awesome-x402-cluster.md
+5. tools/CROSS_LLM_WORKFLOW.md
+
+Then run `npm run callbacks` and `npm run stance-check`. Both were green at
+the end of 2026-08-14, so anything red is new. Report it before proceeding.
+
+PHASE 1 — deep research: the MCP-provider landscape.
+
+Do for the MCP ecosystem what the x402 dossier did for awesome-x402. That
+sweep found 8 direct competitors COMPETITIVE-MEMORY had never heard of, three
+of them sitting in the discovery-first position TrustBench adopted the same
+morning. TrustBench's only surface with real adoption is its MCP server, and
+that ecosystem has never been swept at all.
+
+Sweep: registry.smithery.ai (JSON API), mcp.so, mcpmarket.com,
+glama.ai/mcp/servers, github.com/modelcontextprotocol/servers, awesome-mcp-
+servers lists on GitHub, and the Anthropic Connectors Directory.
+
+Then narrow to what matches or closely correlates to TrustBench's lanes:
+registry/directory servers, payment/x402/agent-commerce servers,
+receipt/audit/attestation servers, trust/scoring/reputation servers, and
+spend-control/policy servers.
+
+Per match document: what it does, VERIFIED scale, tool surface (tools/list if
+remote and unauthenticated), whether tools are read-only or payment-capable,
+commit_cadence, and — the actual point — what TrustBench can learn or adopt.
+
+Method discipline, non-negotiable: verify by live API call wherever an
+endpoint exists; mark README/self-description claims as unverified. In the
+x402 sweep SmartFlow's README said 22,251 endpoints while its live API
+reported 79,567. Only one of those is a fact. Assign no severities until
+commit_cadence is checked — a live HTTP 200 says nothing about whether anyone
+is working on it.
+
+Output: competitive/DOSSIER-<date>-mcp-landscape.md, plus an index entry in
+competitive/COMPETITIVE-MEMORY.md.
+
+HARD CONSTRAINT: reading other people's MCP servers is fine. Do NOT change
+TrustBench's own MCP tool surface — no new tools, nothing payment-capable.
+The Anthropic escalated review is open and that freeze is grounded in their
+email, not inference. See handoff §2.
+
+PHASE 2 — the cross-LLM dialectic, after Phase 1 has a landscape.
+
+Run it per tools/CROSS_LLM_WORKFLOW.md as a GENUINE DIALECTIC. Write your own
+answer FIRST to out/chatgpt/path-forward_claude.md. Then compose an OPEN-ENDED
+prompt with no solution of yours embedded. Then debate, rebut on the real
+disagreement, converge, and write out/chatgpt/path-forward_converged.md with
+BOTH positions. Bring me the converged plan AND the disagreement.
+
+The questions to pose open-ended:
+- Given zero paying agents in 93 days, a category where six comparable
+  projects show the same zero, an MCP surface with 1,029 uses of unproven
+  depth, and a competitive field far denser than assumed — what is the
+  strongest path forward for TrustBench?
+- Is discovery-first the right read of the evidence, or pattern-matching on
+  the one surface that happened to have numbers?
+- What would a TrustBench that is neither a registry nor a router look like,
+  and is it stronger?
+- Which of the nine improvements in the x402 dossier are load-bearing, and
+  which are busywork that feels like progress?
+
+Then implement what converged, and check back with codex against what
+actually happened — not against the previous round's plan.
+
+One more thing: if the 2026-08-21 scheduled task has already run, its
+tools/call count is an INPUT to Phase 2. Heartbeat rather than real tool use
+materially weakens the discovery-first premise the whole debate starts from.
+Check before you begin Phase 2.
+```
+
 ## Also on the timer, unrelated but do not miss
 
 - **2026-08-21** — scheduled task `trustbench-mcp-log-read` fires. The `tools/call` count settles whether the 1,029 Smithery uses are real tool use or gateway heartbeat. **That number is an input to Phase 2** and materially changes the discovery-first read.

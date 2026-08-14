@@ -2120,3 +2120,26 @@ The failure is not carelessness — each of the three was written by someone pay
 **Meta — the tool built to find this had two bugs, both found by cross-checking rather than by using it.** `scripts/decision-callbacks.ts` shipped this morning reported 15 overdue. An independent parse said 16 (exact `status === "open"` missed `open (status update at ...)`). After fixing that, a mismatched summary-vs-indicator in the output revealed a second bug: entry heads carrying a qualifier before the colon (`2026-05-12 (Day 6, GET /route):`) were not recognised as entries at all, so their fields were silently attributed to the *preceding* entry. True count was **19**, not 15 — under-reporting by 21%, with misattribution on top. Both were found by comparing the tool against a second observer, never by reading its output alone. That is the "name the observer" rule from earlier today applied to a tool I had just written, and it is the strongest argument for the rule: **a measuring instrument is not exempt from needing to be measured, and it is most dangerous immediately after you build it, when confidence in it is highest and evidence for it is lowest.**
 
 ---
+
+## 2026-08-14 — Inference hardening: three claims in one day that outran their evidence
+
+**The pattern.** A plausible reading gets recorded without its uncertainty marker. Downstream readers — including future-me — cite it as established. Nobody re-checks, because it reads like a fact. Three instances surfaced today, all mine, all within hours of each other:
+
+1. **"The nightly export has been dead for 13 days."** Read off local `git log` without `git fetch`. The pipeline had never missed a night. Corrected within the hour by Johan's Actions screenshot.
+2. **"External parties do install and use the MCP tools."** The logs established *installs* (6 Smithery profiles); *use* was never distinguished from a gateway heartbeat, and the 2026-08-01 entry had explicitly marked that UNPROVEN. I restated it as settled in a grade, then corrected it after Johan asked what the Smithery finding actually meant.
+3. **"The Anthropic Connectors Directory escalated review."** Originated in the 2026-08-01 entry as *"the category concern that **most plausibly** triggered the escalation"* — explicitly hedged. By 2026-08-14 it had hardened into a treated-as-fact constraint appearing in two further decision entries and in `STANCE.md` `out_of_scope`, where it froze the obvious funnel fix for six weeks. Verification took ten minutes: the submission portal requires a Team or Enterprise plan, Johan is on Max, and `claude.ai/admin-settings/directory/submissions` returns "You don't have access to organization settings." There is most likely no submission and no review.
+
+**Why instance 3 is the expensive one.** The first two were caught in under an hour because someone looked. The third survived six weeks and shaped strategy — it is cited in the kill-criterion grading as the reason the funnel fix is out of scope, which means a *diagnosis* ("conversion is zero because there is no funnel") was paired with a *blocker* that did not exist. The cost was not a wrong belief; it was a real decision deferred on a phantom.
+
+**The mechanism, stated precisely.** Hedged language does not survive being quoted. "Most plausibly triggered" becomes "the escalation" the first time it is referenced, and "the escalation" becomes a constraint the second time. The hedge lives in the original sentence; the citation carries only the noun. This is not a memory problem or a carelessness problem — it is a property of how prose propagates.
+
+**Structural fix — mark inference at the point of writing, not the point of citation.** When recording something not directly observed, the uncertainty belongs in a *field*, not in an adverb:
+- `status_source: inferred` vs `status_source: observed 2026-08-14 via <method>`
+- Anything without a `status_source: observed` is not a constraint yet, and specifically must not enter `STANCE.md` `out_of_scope`, which is the file downstream systems treat as ground truth.
+- For any claim that gates work — a freeze, a blocker, a kill criterion — record the **one check that would confirm it** alongside the claim. If that check is cheap (here: open a URL), the claim is not allowed to gate anything until someone runs it. A six-week freeze justified by an unrun ten-minute check is the failure in one line.
+
+**Connection to the observer rule added to `Claude.md` today.** That rule says name the vantage before trusting the observation. This is its twin for claims that have *no* vantage: name the absence. "I have not verified this" is a fact about the claim and belongs in the record with it.
+
+**Calibration note, in fairness to the original entry.** The 2026-08-01 grading was careful — it hedged correctly, marked the MCP-usage reading UNPROVEN, and named its own distinguishing test. The failure was not in writing it. It was that nothing in the system distinguishes a hedged claim from a settled one once both are sitting in `decisions.md` as prose. That is why the fix is a field, not more discipline.
+
+---

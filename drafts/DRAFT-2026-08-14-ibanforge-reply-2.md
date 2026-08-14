@@ -66,6 +66,8 @@ The bank_code_check detail is the most interesting thing in what you sent. Resol
 
 Glad the receipt design lands. It is the part I am most confident in and the part with the least external validation so far, so that is genuinely useful to hear.
 
+One curiosity before I let you go, and no obligation to answer. How did you come across TrustBench in the first place? I ask because I have never promoted it. No ads, almost no posting. So everyone who turns up got here through something I cannot see from my side, and I am trying to work out which surfaces actually do anything. If you happen to remember whether it was the registry itself, the GitHub repo, the MCP server listing, Agentic Market, or something recommending it to you, that would be more useful to me than it sounds.
+
 Best,
 Johan
 
@@ -78,5 +80,13 @@ Johan
 **What went right:** the first reply's straight answer produced exactly the behaviour you wanted. They stopped asking to be manually listed and went to fix the upstream cause. That is the cheapest possible outcome for a solo founder — no listing mechanism to build, no relationship debt.
 
 **Open, if you want it later:** they are the only inbound in three months claiming production x402 revenue. Whether that is worth a question about volume and customer shape is a judgement call, but it would be the single most informative data point available about whether anyone is actually paying for x402 endpoints. Not in this reply; it would read as due diligence on a relationship that has not been established yet.
+
+**On the discovery question added to the reply.** This is the highest-value question available to ask anyone right now, and it costs one paragraph. TrustBench's open strategic question is whether discovery works; the 2026-08-01 grading answered "yes" on 689 MCP requests, but that reading is still marked UNPROVEN pending the 2026-08-21 log read. IBANforge is a *confirmed* arrival — found TrustBench unprompted, with zero promotion, and acted on it. Which surface carried them is direct evidence on the discovery-first thesis, and it is available a week before the log sample.
+
+Phrasing matters more than usual. Their first email already said "I came across TrustBench," which is exactly the non-answer the naive version of this question reproduces. The draft anchors the options (registry / GitHub / MCP listing / Agentic Market / something recommending it) and states why the answer is wanted, because people answer specifically when they understand what is being learned.
+
+What each answer would imply: an LLM or agent surfacing it validates the AEO surfaces (`skill.md`, `llms.txt`, `.well-known`), which is the discovery-first thesis's core mechanism and the hardest thing to measure any other way. The MCP listing would connect directly to the heartbeat-vs-real-use question and partly answer it early. Agentic Market would mean the listing does work beyond being indexed. GitHub, X or Reddit would mean the agent-facing surfaces are not the draw.
+
+**Caution, and it is the one that matters: n=1.** A single founder's discovery path does not generalise, and the failure mode is obvious given the rest of today — one answer becomes "our discovery works via X" and then a constraint. If they say an LLM recommended TrustBench, that is a *hypothesis worth testing*, not a validated channel. Record whatever comes back as a single observation with `status_source: reported`, and let it accumulate against the 2026-08-21 log read and any later arrivals rather than standing alone.
 
 *Draft prepared 2026-08-14. Not sent. Johan to review, edit, and send.*

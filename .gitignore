@@ -44,3 +44,8 @@ ProjectAutonomous/
 Xpictures/
 banner-x.png
 banner-x.svg
+
+# Internal drafts — partner DMs, competitor counter-positioning, launch prep.
+# Deliberately untracked: this repo is PUBLIC. Added 2026-08-14 after a
+# 'git add -A drafts' pushed 11 of these by accident.
+drafts/

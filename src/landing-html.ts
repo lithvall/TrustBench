@@ -34,7 +34,16 @@ export type LandingStats = {
 
 export function renderLandingHtml(stats: LandingStats): string {
   const title = 'TrustBench — Cross-network registry + live telemetry for x402 endpoints';
-  const description = 'Non-custodial routing and audit layer for x402: signed receipts with on-chain settlement evidence, fail-safe paywall, hard spend caps. Cross-network registry of endpoints across Base and Solana, with nightly liveness telemetry. Multi-protocol on the roadmap (x402, p402, MPP).';
+  // Meta description leads with the same clause as the <title> (2026-08-14).
+  // Rationale: an agent sourcing sweep found TrustBench on 2026-07-28 and
+  // retained exactly one line as its reason — "Cross-network registry + live
+  // telemetry for x402 endpoints" — which appears in both the title and the
+  // hero copy. Which of the two it read is undetermined, so the safe move is
+  // to make the head of the page reinforce one characterisation instead of
+  // offering two. The routing/receipt content is retained after the lead; it
+  // is the differentiator, not the identity, and it stays consistent with the
+  // pending Anthropic connector listing rather than diverging from it.
+  const description = 'Cross-network registry + live telemetry for x402 endpoints across Base and Solana, with nightly liveness probing. Also a non-custodial routing and audit layer: signed receipts with on-chain settlement evidence, fail-safe paywall, hard spend caps. Multi-protocol on the roadmap (x402, p402, MPP).';
 
   const stat = (label: string, value: string) => `
     <div class="p-6">

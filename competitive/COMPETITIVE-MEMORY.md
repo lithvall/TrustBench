@@ -49,6 +49,30 @@ First refresh since 2026-05-17 (89 days). The gap is not a scan cadence failure 
 - [x402route](threats/x402route.md) — **sev 3 → 1** — `x402route.vercel.app` returns **HTTP 404 at the root**, not just `/v1/route`, verified 2026-08-14. The project appears gone. Retained in the index rather than deleted because the 2026-05-12 decision entry that tracked it graded *validated-by-a-different-competitor* — the tier was right, the name was wrong — and that lesson is worth keeping visible. Re-check on any scan; a revived deployment returns it to sev 3.
 - Infopunks radar — **sev 2 → 1** — cognition layer shut down, not paused. The 2026-05-11 decision assuming a temporary Render suspension was **graded disproven 2026-08-14**: paid probe returned 100% 502s for 8 days and the crawler seed list has been disabled since 2026-05-20. Pivot to radar.infopunks.fun on Pay.sh is the surviving surface; not currently a TrustBench-lane competitor.
 
+## Found 2026-08-14 in awesome-x402 — UNRANKED, verification pass required
+
+Surfaced while placing a TrustBench entry in `xpaysh/awesome-x402` (the list moved from `Merit-Systems`; TrustBench appears **0** times, MAKO once, ScoutScore once, Dexter twice). All eight below sit in `Tools & Utilities → Monitoring & Analytics`, the same subsection as ScoutScore — i.e. the densest concentration of direct peers in the ecosystem, and this index missed all of them.
+
+**No severities assigned deliberately.** These are self-descriptions in an awesome-list: scale claims unverified, and on this quarter's evidence (Strata, MAKO, Infopunks, x402route all dormant or dead behind live infrastructure) a meaningful fraction are likely inactive. Per the 2026-08-14 rule, `commit_cadence` is required before anything is ranked ≥3. Verify before ranking.
+
+**Contest the discovery-first position chosen 2026-08-14 — check these first:**
+- **x402 List** (x402-list.com) — "Agent-first directory of x402 API services with live uptime monitoring and machine-readable discovery for AI agents (JSON API, OpenAPI 3.1, llms.txt)." TrustBench's new positioning nearly word for word, llms.txt included.
+- **SmartFlow Mapper API** (api.smartflowproai.com) — "22,251+ catalogued x402 endpoints with uptime, payment-success, and facilitator metadata. Free tier + paid bulk export." ~14x TrustBench's ranked registry, and **already monetising the registry** — the problem TrustBench has not solved.
+- **Cinderwright Discovery Hub** (api.ideafactorylab.org) — "Cross-protocol discovery hub indexing 2,771+ services across x402, MPP, and L402/Lightning." Ships the cross-protocol coverage that is TrustBench's Phase 5 ambition.
+
+**Contest Pillar 1 (signed receipts):**
+- **Tersign** (tersign.ai) — "Neutral evidence layer... seller-signed EIP-712 receipts... counter-signed into per-seller hash chains on a public ledger, verifiable by anyone without an account, with refunds, deterministic dispute triage, and exportable evidence packs." Closest thing found to TrustBench's receipt thesis, and further developed on dispute/evidence tooling.
+- **Mycelium Trails** (github.com/giskard09/giskard-stack) — signed trail records, `payment_hash` + `action_ref` SHA-256 commitment + **dual-chain anchor (Arbitrum One + Base)**. TrustBench anchors on one chain.
+
+**Contest spend caps / policy:**
+- **Sentinel** (sentinel.valeocash.com) — enterprise audit & compliance layer; per-call/hourly/daily budget enforcement, audit trails, public payment explorer, npm SDK.
+- **Paybound** (github.com/pando-b/paybound) — open-source governance proxy; per-agent budgets, circuit breakers, SQLite audit trail.
+
+**Contests the measurement methodology:**
+- **Assay** (assay.nominal-labs.com) — "Service-quality oracle for x402: **pays real USDC to probe** machine-payable services on a schedule and scores what actually comes back." Methodologically stronger than TrustBench's HEAD-probe liveness check, which is the limitation TrustBench documents honestly everywhere.
+
+**Process lesson recorded with these:** this index was built from X, Reddit and direct discovery, and missed the public README any agent sweep enumerates first. The discovery blind spot and the competitive blind spot were the same blind spot — not being in the list meant not reading the list. Add awesome-x402 delta-checking to the weekly scan.
+
 ## Logged but unranked (need first scan to assign severity)
 
 - QBT-Labs/x402 — compose-friendly today; severity unknown; @0xAggelos.

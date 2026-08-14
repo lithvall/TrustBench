@@ -4,6 +4,7 @@ stance_phase: phase-4-post-listing-sprint
 stance_pillars: [canonical-receipt-format-standard, neutral-routing-receipt-layer]
 signal_date: 2026-05-17
 review_trigger: 2026-06-17
+stance_frozen: true   # point-in-time signal capture; NOTE review_trigger 2026-06-17 passed ungraded
 ---
 
 # Signal: agentic.market Week 4 — Bundles + $50M TPV

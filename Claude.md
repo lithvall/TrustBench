@@ -70,6 +70,21 @@ TypeScript + Hono (API) + Supabase (Postgres + RLS) + ioredis (Upstash Redis cac
 - For any claim about "current state" or "what the code does," run the relevant command and show the output before moving on.  
 - If something feels hacky or unclear, pause and ask — do not implement an elegant-sounding but unverified solution.
 
+**Name the observer before trusting the observation (added 2026-08-14).** This is the structural change triggered by proxy-vs-load-bearing reaching instance three (`lessons.md` 2026-05-20, 2026-08-01, 2026-08-14). It lives here rather than only in `lessons.md` because a rule in the lessons archive is not a tracked surface — that is the same tracking-surface mismatch that let the Phase 4 kill criterion drift five weeks.
+
+Before asserting anything about the health, freshness, or liveness of a system, state which vantage point the evidence comes from and whether that vantage can actually see the thing being claimed. Where it cannot, either change vantage or downgrade the claim to "I can't determine this from here."
+
+Known blind spots, each of which has already produced a wrong answer:
+
+| Claim | Vantage that CANNOT see it | Correct vantage |
+| --- | --- | --- |
+| "The scheduled job stopped running" | local `git log` (measures workstation sync, not job health) | `git fetch` first, or the Actions run history |
+| "The pipeline is healthy" | a green CI run (sees exit codes, not output correctness) | assert on the output — see the 2026-05-19 probes-100%-failing entry |
+| "The copy change is live" | the source file (templates render, comments ship) | grep the rendered output, not the input |
+| "The endpoint is up" | a cached CDN response | origin, or a cache-busting request |
+
+Confidence scales with vantage quality, not with how many specifics the output happens to contain. A precise number read from the wrong instrument is still wrong, and the precision disguises it.
+
 ## Workflow
 
 - Apply the solo-founder lens to every change: "How do we keep this 100% automated and simple?"
@@ -297,6 +312,10 @@ stance_pillars: [list, of, pillar, names]  # matches STANCE.md pillar names
 Thresholds are configurable via `drift_soft_days` and `drift_hard_days` in `STANCE.md` frontmatter.
 
 **Automated drift detection.** `tsx stance/check-staleness.ts` scans the entire project for stance-versioned files and reports drift. Exit codes: 0 = clean, 1 = soft warnings only, 2 = hard fails. Run at session start when stance feels stale, or in a weekly cron. The script is cross-project portable — copy the `stance/` directory to any other project to reuse the discipline.
+
+**Frozen artifacts (added 2026-08-14).** Add `stance_frozen: true` to the frontmatter of any point-in-time record: assessments (`ASSESS-*`), signal captures (`SIGNAL-*`), dated audits, dated roadmaps, sent outreach drafts. For these, `stance_version` documents *when the file was written* — it is not a claim about current stance, and re-stamping it would destroy the audit value the file exists for. Frozen files are skipped from drift scoring but still listed and counted in the summary, so freezing stays visible.
+
+The reason this flag exists: without it, every historical record reports as a HARD fail forever and the list only grows. A checker that always reports failures trains you to ignore its output, at which point a real drift on a live artifact goes unnoticed. **Do not freeze anything that still drives decisions** — a scan prompt, a live competitive brief, a runbook. If it drives a decision, refresh it instead. That distinction is the entire value of the flag.
 
 **Optional heavy mode (template regeneration).** For artifacts whose content is largely derivable from stance data (indexes, listings, milestone feeds, JSON catalogs), use the template pattern in `stance/templates/`. Edit `STANCE.md`, run `tsx stance/regenerate.ts`, and the dependent file is regenerated. See `stance/README.md` for the schema and template syntax. Heavy mode is opt-in per artifact; most artifacts stay in light mode (self-flagging only). The split today: `competitive/COMPETITIVE-BRIEF.md` and `competitive/weekly-scan-prompt.md` are light; `competitive/SEVERITIES.md` is heavy.
 

@@ -56,6 +56,7 @@ Required on any stance-versioned artifact:
 | `stance_version` | YYYY-MM-DD | The `STANCE.md` `date` this artifact was authored against. |
 | `stance_phase` | string | The `STANCE.md` `phase` this artifact was authored against. |
 | `stance_pillars` | inline list of strings | Pillar names this artifact assumes are active. |
+| `stance_frozen` | `true` (optional) | Marks a point-in-time record. Skipped from drift scoring, still listed and counted. See below. |
 
 ### Template frontmatter (heavy mode)
 
@@ -79,6 +80,18 @@ Drift is detected when ANY of the following:
 Soft warning = "review at next opportunity." Hard fail = "STOP, refresh stance or refresh artifact."
 
 `check-staleness.ts` exit codes: 0 = clean, 1 = soft only, 2 = hard fails present.
+
+### Frozen artifacts (`stance_frozen: true`)
+
+Some stance-versioned files are point-in-time records: assessments, signal captures, dated audits, dated roadmaps, sent outreach drafts. Their `stance_version` documents *when they were authored*. It is not a claim that their contents describe current stance, and re-stamping them to the current stance would misrepresent their authorship date and destroy the audit value they exist for.
+
+Left unmarked, those files report as hard fails on every run, forever, and grow in number over time. **A checker that always reports failures trains the reader to ignore its output** — at which point a real drift on a live artifact goes unnoticed. That is the failure mode this flag prevents.
+
+`stance_frozen: true` means "deliberately historical, do not grade." Frozen files are skipped from drift scoring but are still listed and counted in the summary, so freezing stays visible and cannot quietly silence something that should have been refreshed.
+
+**Do not freeze anything that still drives decisions** — a weekly scan prompt, a live competitive brief, a runbook. If it drives a decision, refresh it. Naming that distinction correctly is the whole point of the flag; misusing it converts the drift checker back into noise, just quieter.
+
+Note on syntax: a trailing inline comment is fine (`stance_frozen: true   # sent 2026-08-14`). The parser strips inline comments from top-level scalars, respecting quotes. It does *not* strip them from list items, because an inline object's quoted values may legitimately contain `#`.
 
 ## When to use heavy vs. light
 

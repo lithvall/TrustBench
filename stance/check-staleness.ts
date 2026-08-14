@@ -54,7 +54,7 @@ function parseFrontmatter(content: string): Record<string, any> | null {
         .filter((s) => s.length > 0);
       currentList = null;
     } else {
-      result[key] = stripQuotes(value);
+      result[key] = stripQuotes(stripInlineComment(value));
       currentList = null;
     }
   }
@@ -91,6 +91,29 @@ function parseInlineObject(inner: string): Record<string, string> {
     obj[k] = stripQuotes(v);
   }
   return obj;
+}
+
+// Strip a trailing YAML inline comment from a scalar value.
+//
+// YAML treats `#` as starting a comment only when it is at the start of the
+// string or preceded by whitespace, and never inside a quoted scalar. The
+// parser previously stripped only whole-line comments, so `key: value  # note`
+// parsed as the literal value "value  # note". Any equality check against
+// "value" then failed silently — which is exactly how the first
+// `stance_frozen: true  # reason` attempt failed closed on 2026-08-14: the flag
+// was present, correctly spelled, and simply ignored, with no error.
+//
+// Applied to top-level scalars only, NOT to list items: a list item can be an
+// inline object whose quoted values may legitimately contain " #", and naive
+// stripping would corrupt it.
+function stripInlineComment(s: string): string {
+  if (s.startsWith('"') || s.startsWith("'")) {
+    const q = s[0];
+    const end = s.indexOf(q, 1);
+    return end >= 0 ? s.slice(0, end + 1) : s;
+  }
+  const idx = s.search(/(^|\s)#/);
+  return idx < 0 ? s : s.slice(0, idx).trim();
 }
 
 function stripQuotes(s: string): string {
@@ -166,6 +189,7 @@ function main() {
   const files = walkDir(root);
   let softWarns = 0;
   let hardFails = 0;
+  const frozen: string[] = [];
 
   for (const file of files) {
     // Skip STANCE.md itself and the stance system internals.
@@ -177,6 +201,33 @@ function main() {
     try { content = readFileSync(file, "utf-8"); } catch { continue; }
     const fm = parseFrontmatter(content);
     if (!fm || !fm.stance_version) continue;
+
+    // Frozen artifacts (added 2026-08-14).
+    //
+    // Some stance-versioned files are point-in-time records: assessments,
+    // signal captures, dated audits, dated roadmaps, sent outreach drafts.
+    // Their stance_version documents WHEN they were authored — it is not a
+    // claim that their contents describe current stance. Re-stamping them to
+    // the current stance would misrepresent their authorship date and destroy
+    // exactly the audit value they exist for.
+    //
+    // But leaving them unmarked means they report as HARD fails on every run,
+    // forever, and grow in number over time. A checker that always reports
+    // failures trains the reader to ignore its output — at which point a REAL
+    // drift on a live artifact goes unnoticed. That is the failure mode this
+    // flag prevents.
+    //
+    // `stance_frozen: true` means "deliberately historical, do not grade."
+    // Frozen files are skipped from drift scoring but are still listed and
+    // counted in the summary, so freezing stays visible and cannot be used to
+    // quietly silence a live artifact that should have been refreshed. If you
+    // find yourself adding this flag to something that still drives decisions
+    // (a scan prompt, a live brief, a runbook), that is the wrong fix: refresh
+    // the artifact instead.
+    if (fm.stance_frozen === "true" || (fm.stance_frozen as unknown) === true) {
+      frozen.push(`${rel} (authored against stance ${fm.stance_version})`);
+      continue;
+    }
 
     const issues: string[] = [];
     let isHard = false;
@@ -217,7 +268,17 @@ function main() {
     }
   }
 
-  console.log(`\nstance check complete: ${softWarns} soft, ${hardFails} hard.`);
+  // Frozen artifacts are listed rather than silently dropped: the count is the
+  // guard against this flag being used to mute live artifacts (see the comment
+  // at the frozen check above).
+  if (frozen.length) {
+    console.log(`\nfrozen (point-in-time records, not graded):`);
+    for (const f of frozen) console.log(`  - ${f}`);
+  }
+
+  console.log(
+    `\nstance check complete: ${softWarns} soft, ${hardFails} hard, ${frozen.length} frozen.`,
+  );
   if (hardFails > 0) process.exit(2);
   if (softWarns > 0) process.exit(1);
   process.exit(0);

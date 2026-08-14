@@ -2,6 +2,7 @@
 stance_version: 2026-05-21
 stance_phase: phase-4-post-listing-sprint
 stance_pillars: [canonical-receipt-format-standard, neutral-routing-receipt-layer]
+stance_frozen: true   # point-in-time assessment; stance_version records when it was written
 ---
 
 > **STANCE DRIFT WARNING.** `STANCE.md` is dated 2026-05-21 (revision 5), **73 days**

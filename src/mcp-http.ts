@@ -34,6 +34,11 @@
 
 import type { Context } from 'hono';
 import type { SupabaseClient } from '@supabase/supabase-js';
+// Reuses the throw-proof, fail-closed print function that backs the global
+// request logger (src/log-redact.ts). Sharing it means MCP lines get the same
+// redaction discipline and the same guarantee that a logging failure can never
+// take down a request.
+import { redactedLogPrint } from './log-redact.js';
 import {
   TOOLS,
   handleGetRankingsInternal,
@@ -84,6 +89,57 @@ export function createMcpHttpHandler(supabase: SupabaseClient) {
     }
 
     const id = body.id ?? null;
+
+    // -- Method-level observability -------------------------------------------
+    //
+    // Added 2026-08-14. This handler previously logged NOTHING, which is why the
+    // 2026-08-01 kill-criterion grading could see 689 MCP requests arriving from
+    // 6 distinct Smithery profiles but could not tell whether they represented
+    // real tool use or a gateway heartbeat repeating initialize + tools/list.
+    // That ambiguity is the open branch of that entry's leading indicator, and
+    // it is load-bearing: real use sharpens the absent-funnel diagnosis, while
+    // heartbeat means discovery is thinner than it looks and the reassessment
+    // widens toward product-market fit. One log line resolves it.
+    //
+    // WHAT IS LOGGED: the JSON-RPC method, the tool name on tools/call, and the
+    // sorted ARGUMENT KEY NAMES. Key names are schema-defined by TOOLS in this
+    // file — they are our own vocabulary, not user data — and they let us see
+    // request-shape diversity without touching values.
+    //
+    // WHAT IS NEVER LOGGED: argument VALUES, in any form. The 2026-08-01 entry
+    // specifies "log JSON-RPC method + tool name, NEVER arguments" and that is
+    // the binding constraint here. A receipt_id is public and a capability is
+    // low-sensitivity, but a rule with carve-outs is a rule that erodes, and
+    // the decisive signal (does tools/call appear at all?) needs no values
+    // whatsoever. If a future question genuinely requires value distributions,
+    // log a salted hash, never the value.
+    //
+    // Failure mode if this is wrong: over-logging leaks third-party usage
+    // detail into Railway logs. Mitigated by emitting key names only. Under-
+    // logging leaves the heartbeat-vs-use question open for another quarter,
+    // which is the status quo this replaces. The line is prefixed [mcp] so it
+    // is greppable against the existing redacted request-logger output.
+    const argKeys =
+      body.method === 'tools/call'
+        ? Object.keys(
+            ((body.params as { arguments?: Record<string, unknown> } | undefined)?.arguments) ?? {},
+          ).sort()
+        : [];
+    const toolNameForLog =
+      body.method === 'tools/call'
+        ? (body.params as { name?: string } | undefined)?.name ?? 'unknown'
+        : '';
+    // `profile` is the Smithery gateway's caller identifier and already appears
+    // in the request URL, so logging it here adds no new exposure — it is what
+    // makes per-client attribution possible at all.
+    const profile = c.req.query('profile') ?? '';
+    redactedLogPrint(
+      `[mcp] method=${body.method}` +
+        (toolNameForLog ? ` tool=${toolNameForLog}` : '') +
+        (argKeys.length ? ` argKeys=${argKeys.join(',')}` : '') +
+        (profile ? ` profile=${profile}` : '') +
+        ` notification=${body.id === undefined}`,
+    );
 
     // -- Dispatch ------------------------------------------------------------
     switch (body.method) {

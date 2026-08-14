@@ -9,16 +9,35 @@ name: Nightly Rollup Export
 # request time. Once this workflow commits + pushes, Railway auto-redeploys
 # and the new container ships the updated rollup.
 #
-# Why 23:55 UTC (and not 00:05 UTC, which is what we told Paddock)
+# Why 20:17 UTC (revised 2026-08-14; was 23:55 UTC)
 # -----------------------------------------------------------------
-# Committed in the Paddock Reddit DM 2026-05-14 as the partner-poll target.
-# Paddock's snapshot cron polls trustbench.io/exports/rollup-latest.csv at
-# 00:05 UTC each day. Railway redeploys take ~1-3 minutes after a push, so
-# running at 00:05 UTC would race Paddock's poll. Running at 23:55 UTC the
-# previous day gives ~10 minutes of slack: export (~1 min) + commit + push
-# (~10s) + Railway redeploy (~2-3 min) + buffer. By 00:05 UTC the new
-# container is live and Paddock fetches the fresh file. The "same window
-# as your snapshot cron" framing in the DM still holds.
+# Committed in the Paddock Reddit DM 2026-05-14: Paddock's snapshot cron
+# polls trustbench.io/exports/rollup-latest.csv at 00:05 UTC each day, and
+# we promised the file would be fresh by then. The original 23:55 UTC slot
+# budgeted ~10 minutes of slack: export (~1 min) + commit + push (~10s) +
+# Railway redeploy (~2-3 min) + buffer.
+#
+# That 10-minute margin was too thin for GitHub's scheduled-cron queue.
+# Observed 2026-08-14: the last four runs started 00:43-00:45 UTC, i.e.
+# ~50 minutes late, consistently. GitHub explicitly does not guarantee
+# scheduled start times and delays are worst at high-load slots (top of
+# the hour, and the 23:00-00:00 UTC band). Net effect: the fresh CSV landed
+# ~40 minutes AFTER Paddock had already polled, so he read the previous
+# day's file every single day. Not corruption (the last_probed_at column
+# makes the age visible) but the opposite of the intended guarantee.
+#
+# 20:17 UTC fixes it with margin instead of precision:
+#   - ~3h45m of slack before Paddock's 00:05 UTC poll, which absorbs even
+#     a pathological 2-3 hour cron delay.
+#   - Still strictly after the nightly prober (scheduled 03:00 UTC, observed
+#     finishing ~05:48 UTC), so each export captures that same morning's
+#     probe run rather than the prior day's.
+#   - :17 rather than :00 or :55 — off-peak minutes see materially shorter
+#     queue delays than the top and bottom of the hour.
+#
+# Expected result: Paddock's data age drops from ~44h behind newest probes
+# to ~14h. If GitHub delays ever exceed ~3h45m this silently regresses to
+# the old behaviour, which is why last_probed_at stays in the CSV.
 #
 # Failure mode
 # ------------
@@ -30,7 +49,7 @@ name: Nightly Rollup Export
 
 on:
   schedule:
-    - cron: '55 23 * * *'   # 23:55 UTC nightly (10 min before Paddock's 00:05 UTC poll)
+    - cron: '17 20 * * *'   # 20:17 UTC nightly (~3h45m before Paddock's 00:05 UTC poll)
   workflow_dispatch:         # Manual trigger from the Actions tab
 
 permissions:

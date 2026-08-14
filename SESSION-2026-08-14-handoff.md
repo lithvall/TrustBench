@@ -129,6 +129,18 @@ Real use → discovery-first is well-founded. Heartbeat → discovery is thinner
 
 ---
 
+## 6b. Commissioned for next session — MCP landscape scan, then the cross-LLM loop
+
+Johan commissioned this at the end of the session. Brief: **** — read it after this handoff.
+
+Two phases. **Phase 1:** deep-research sweep of the MCP-provider ecosystem (Smithery, mcp.so, mcpmarket, glama, modelcontextprotocol/servers, awesome-mcp lists, Anthropic directory), then narrowing to subjects that match TrustBench lanes, with a per-subject TrustBench-takeaway column. Same shape and discipline as . **Phase 2:** the cross-LLM dialectic on the path forward, informed by Phase 1.
+
+The loop is **ported and verified working**:  + , adapted from Frisyr. codex-cli 0.139.0, ChatGPT auth live, smoke test returned a correct read of . codex lives in WSL so calls route through .
+
+**The protocol is a GENUINE DIALECTIC and this is enforced:** Claude writes its own answer FIRST, the codex prompt is OPEN-ENDED with no Claude solution embedded, then debate, rebut, converge, and document both positions. Handing codex a finished plan to react to defeats the entire mechanism.
+
+Note the dependency: the 2026-08-21 log read is an **input** to Phase 2. If those 1,029 Smithery uses are heartbeat rather than tool calls, the discovery-first premise the debate starts from is much weaker.
+
 ## 7. Suggested first moves next session
 
 1. `npm run callbacks` and `npm run stance-check`. Both green at close; anything red is new.

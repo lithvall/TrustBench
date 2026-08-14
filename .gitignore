@@ -49,3 +49,4 @@ banner-x.svg
 # Deliberately untracked: this repo is PUBLIC. Added 2026-08-14 after a
 # 'git add -A drafts' pushed 11 of these by accident.
 drafts/
+out/

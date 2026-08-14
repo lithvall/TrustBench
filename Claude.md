@@ -91,6 +91,8 @@ Confidence scales with vantage quality, not with how many specifics the output h
 
 - Apply the solo-founder lens to every change: "How do we keep this 100% automated and simple?"
 - Conventional commits (`feat:`, `fix:`, `chore:`, `docs:`).
+- **Stage explicit file paths. Never `git add -A`, `git add .`, or `git add <directory>`.** This repo is PUBLIC. On 2026-08-14 a `git add -A ... drafts` pushed 11 deliberately-untracked files — competitor counter-positioning including its ship-trigger, partner DM drafts, Show HN prep. A bulk add does not ask, and untracked-by-convention is invisible to it. Name every file you intend to commit; if that feels tedious, the commit is probably too large.
+- **A pre-commit guard backstops this** (`scripts/git-hooks/pre-commit`). It blocks `drafts/`, `.env*`, key material, and secret-shaped strings (`ifk_`, `tb_live_`, `sk_live_`, `sk-`, PEM private keys). Install once per clone: `git config core.hooksPath scripts/git-hooks`. Verify with `git config --get core.hooksPath`. Do not make `--no-verify` a habit — if it fires on legitimate work, fix the denylist instead.
 - Test locally with `npm run pipeline` and check the live `/analytics` page after every push that touches probing or scoring.
 - Prefer small, shippable PRs over big refactors.
 - When in doubt — especially anything that touches payment construction, signing keys, or public framing — ask before implementing.

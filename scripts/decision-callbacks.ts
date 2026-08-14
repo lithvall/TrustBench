@@ -107,7 +107,16 @@ function parseDecisions(content: string): Entry[] {
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const head = line.match(/^(\d{4}-\d{2}-\d{2}):\s*(.+)$/);
+    // Entry heads are usually `YYYY-MM-DD: summary`, but several carry a
+    // qualifier between the date and the colon — `2026-05-12 (Day 6, GET
+    // /route): ...`. Without the optional-parenthetical group those lines are
+    // not recognised as entry starts at all, and every field beneath them
+    // (check_back_date, status, leading_indicator) is silently attributed to
+    // the PRECEDING entry. Found 2026-08-14 when a grading pass surfaced an
+    // entry whose summary and leading_indicator described different decisions.
+    // Misattribution is worse than a miss: it makes the scanner confidently
+    // wrong about which commitment is overdue.
+    const head = line.match(/^(\d{4}-\d{2}-\d{2})(?:\s*\([^)]*\))?:\s*(.+)$/);
     if (head) {
       if (current) entries.push(current);
       current = { date: head[1], summary: head[2], line: i + 1 };

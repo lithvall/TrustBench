@@ -1,14 +1,14 @@
 ---
 project: TrustBench
-date: 2026-05-21
-revision: 5
-phase: phase-4-post-listing-sprint
+date: 2026-08-14
+revision: 6
+phase: phase-4-conversion-reassessment
 
 # Universal schema: pillars are the defensible positions. Stable across long horizons.
 # Inline objects only (one per line) — see stance/README.md § Schema for why.
 pillars:
   - { name: canonical-receipt-format-standard, status: decision-pending-first-surface-shipped-2026-05-19, short: "signed-receipt envelope becomes the spec other projects adopt" }
-  - { name: neutral-routing-receipt-layer, status: active-phase-4-maintenance, short: "/route + receipts as protocol-agnostic routing surface" }
+  - { name: neutral-routing-receipt-layer, status: shipped-but-unconverted-kill-criterion-fired-2026-08-01, short: "/route + receipts as protocol-agnostic routing surface" }
 
 # Project-specific posture. Drift triggers if any of these change.
 protocol: x402
@@ -49,6 +49,8 @@ out_of_scope:
   - paid-services-without-approval
   - pay-to-rank
   - complex-enterprise-sales
+  - payment-capable-mcp-tools-during-directory-review
+  - repricing-the-paywall-without-a-real-price-signal
 
 # Pivots considered but not active. Re-evaluate quarterly.
 deferred_pivots:
@@ -84,7 +86,13 @@ Registry-overlap competitor identified (banked 2026-05-21, revision 5): ScoutSco
 
 Discovery surface shipped (banked 2026-05-21): TrustBench /.well-known/x402 and /.well-known/x402.json LIVE in prod (commit a01d36b → deployed as 1c2ab0f). Mirrors the 402 PAYMENT-REQUIRED accepts[] block for POST /route, declares the Ed25519-signed receipt envelope (Pillar 1 propagation hook). Demand signal: 40 hits/16h on the bare path from non-Bazaar crawlers (CarbonMonitor, ScoutScore-HealthCheck, ScoutScore-FidelityCheck, x402-atlas-probe, MPP32-Health, x402station). Filter-passed as Pillar 2 maintenance. Path source: draft-jeftovic-x402-dns-discovery-00 §6.1 informative convention — not a Coinbase x402 spec mandate; if Foundation specifies different shape, adapt then. Kill criterion + counter-move check at 2026-06-20.
 
-Next milestone: first external paying agent. §10 Strata reference-agent integration closed 2026-05-15 (4 days ahead of target); next target path is post-launch external agent traffic following Strata's Show HN co-launch. Kill criterion: no paying external agent within 6 weeks of listing (~2026-06-27) triggers paywall pricing and discovery reassessment.
+Kill criterion FIRED and graded 2026-08-01 (revision 6). The Phase 4 criterion — "no paying external agent within 6 weeks of listing (~2026-06-27)" — passed its date ungraded and was caught five weeks late, by accident, while reading Railway logs for an unrelated reason. Evidence from 6,006 log entries sampled 2026-07-25 → 2026-08-01: 419 requests reached `POST /route` with **zero** `hasXPayment=true` and **zero** `hasAuth=true`. Every one was an automated crawler (`mako-pulse-prober/0.1` 297, `preflight402-probe/0.1` 99, `CoinbaseBazaarDiscovery/1.0` 6, `ScoutScore-HealthCheck/1.0` 1, others). Simultaneously the free read-only MCP surface saw 689 requests from 6 distinct recurring third-party clients on a Smithery-shaped gateway URL, 3 still active on 2026-08-01.
+
+The two halves grade differently: **discovery works, conversion is zero.** The diagnosis is an absent funnel, not price and not product-market fit — all three MCP tools (`get_rankings`, `get_receipt`, `verify_receipt`) are read-only by design, so an agent reaching TrustBench via MCP has no in-band path to becoming a paying agent. Zero conversion is the architecturally predicted outcome. Two constraints follow and are now in `out_of_scope`: (1) **repricing is frozen** because the data contains no price signal — nobody reached a 402 and declined; reassessing pricing on this evidence would be fitting a curve to zero points; (2) **exposing `/route` or any payment-capable operation as a fourth MCP tool is frozen** for the duration of the Anthropic Connectors Directory escalated review, since adding a payment-capable tool mid-review would confirm the category concern that most plausibly triggered it. The funnel question reopens only after the directory decision lands, in either direction. Full entry + 2026-10-30 callback in `decisions.md`; assumption-class lesson in `lessons.md`.
+
+Next milestone: a funnel path to first paying agent that does NOT touch the frozen MCP surface. Provider-side partnership is the open lane — an inbound from IBANforge (api.ibanforge.com, x402-native, Base USDC, claims existing paying customers) landed 2026-08-13 and is unresolved as of this stance date; draft reply in `drafts/DRAFT-2026-08-14-ibanforge-reply.md`.
+
+**Fields NOT re-verified in the revision-6 refresh (treat as revision-5 vintage, 2026-05-21).** This refresh was evidence-driven from the 2026-08-01 log grading, live endpoint checks, and the live agentic.market catalog. It did NOT re-verify: `active_partners` statuses (Strata post-Show-HN outcome unknown, Paddock/QBT-Labs/QuickNode unconfirmed), `active_competitors` severities beyond the observation that MAKO Pulse is now the single largest prober of `/route` (297 of 419 requests) and ScoutScore is still probing, and whether the Option A outreach committed for 2026-06-01 in `decisions.md` actually happened. Confirm these before relying on them for a partnership or competitive decision.
 
 # How to use this file
 

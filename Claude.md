@@ -306,7 +306,7 @@ Thresholds are configurable via `drift_soft_days` and `drift_hard_days` in `STAN
 
 **Session-start sanity check.** If a session starts on stance-relevant work AND it's been more than 14 days since `STANCE.md` was last touched AND you don't know offhand what's in it: run `tsx stance/check-staleness.ts` first. The output is a 5-second sanity check on whether the project's frozen artifacts still match reality.
 
-## Mission Map (fast-start for new sessions — as of 2026-05-15)
+## Mission Map (fast-start for new sessions — as of 2026-08-14)
 
 > Full phased history is in ## Phased plan below. This section is the quick-read state. Update it when priorities shift.
 
@@ -326,9 +326,18 @@ Thresholds are configurable via `drift_soft_days` and `drift_hard_days` in `STAN
 - Phase 5: p402/Canton — gate: first paying external agent + ≥4 weeks of paywall live.
 - Options A/B/C: no commitment. Pillar 2 maintenance continues regardless.
 
-**Next milestone:** First Strata (or any external) agent wallet hitting paywalled `/route` and generating a signed `rrcpt_` receipt against a real provider.
+**Next milestone:** A funnel path to a first paying agent that does NOT touch the frozen MCP surface (see kill criterion below). Provider-side partnership is the open lane.
 
-**Kill criterion:** If no paying external agent within 6 weeks of listing (~2026-06-27), reassess paywall pricing and discovery strategy before adding any new features.
+**Kill criterion — FIRED and graded 2026-08-01. Do not read this as pending.**
+The criterion was "if no paying external agent within 6 weeks of listing (~2026-06-27), reassess paywall pricing and discovery strategy before adding any new features." It passed its date ungraded and was caught five weeks late by accident. Graded in full in `decisions.md` (2026-08-01 entry, 90-day callback 2026-10-30); assumption-class lesson in `lessons.md`.
+
+Summary of the grading, because it changes what "reassess" means here:
+- **Discovery works; conversion is zero.** 419 `/route` requests over 7 days with zero payment attempts and zero authenticated calls, all automated crawlers — alongside 689 requests from 6 recurring third-party clients on the free read-only MCP surface.
+- **Diagnosed cause is an absent funnel**, not price and not product-market fit. All three MCP tools are read-only by design, so an agent arriving via MCP has no in-band path to becoming a paying agent.
+- **The prescribed remedy was narrowed, not executed as written.** Repricing is deferred: no agent ever reached a 402 and declined, so there is no price signal to reprice against.
+- **Payment-capable MCP tools are frozen** for the duration of the Anthropic Connectors Directory escalated review. The funnel question reopens after that decision lands, in either direction.
+
+Both freezes are recorded in `STANCE.md` `out_of_scope`. A fired criterion licenses investigation, not automatic execution of a remedy imagined months earlier.
 
 ## Phased plan (current state as of 2026-05-14, all subject to Pre-Development Filter)
 

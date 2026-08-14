@@ -21,7 +21,9 @@
     "export-7-night": "tsx scripts/export-7-night.ts",
     "import-paddock-bazaar": "tsx scripts/import-paddock-bazaar.ts",
     "smoke:c3": "tsx scripts/smoke-c3-concurrency.ts",
-    "smoke:log-redact": "tsx scripts/log-redact-smoke.ts"
+    "smoke:log-redact": "tsx scripts/log-redact-smoke.ts",
+    "callbacks": "tsx scripts/decision-callbacks.ts",
+    "stance-check": "tsx stance/check-staleness.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.11.0",

@@ -141,7 +141,9 @@ If verdict is `strong-reject`, stop and ask Johan before continuing. Critic outp
 - A 90-day check_back_date
 - Status: open
 
-During weekly Monday review, scan `decisions.md` for entries where `status: open` AND `check_back_date ≤ today`. Grade each via `prompts/decision-journal.md` Mode B. Disproven decisions ALWAYS get a `lessons.md` entry describing the assumption-class failure — that's where calibration learning compounds. Historical entries (before 2026-05-11) are NOT retrofitted; they remain frozen context.
+During weekly Monday review, run `npm run callbacks` (added 2026-08-14) rather than scanning by hand. It reports open entries that are overdue, entries coming due within 14 days, and — implementing the structural fix from the 2026-08-01 lesson — any dated commitment (`check_back_date`, `review_trigger`) sitting in a file *other* than `decisions.md`, which is invisible to the callback loop and will drift. Exit 0 = nothing due, 1 = upcoming only, 2 = overdue or untracked commitments present. Pair it with `npm run stance-check`.
+
+The manual version of this instruction is what failed: the Phase 4 kill criterion drifted five weeks past its date and was found by accident. Treat a hand-scan as a fallback for when the script is unavailable, not the default. The scan looks for entries where `status: open` AND `check_back_date ≤ today`. Grade each via `prompts/decision-journal.md` Mode B. Disproven decisions ALWAYS get a `lessons.md` entry describing the assumption-class failure — that's where calibration learning compounds. Historical entries (before 2026-05-11) are NOT retrofitted; they remain frozen context.
 
 This is non-negotiable for the same reason the Critic pass is: it closes the loop between decisions and calibration. Without it, the same assumption-class mistakes recur silently.
 

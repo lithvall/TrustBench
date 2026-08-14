@@ -2143,3 +2143,23 @@ The failure is not carelessness — each of the three was written by someone pay
 **Calibration note, in fairness to the original entry.** The 2026-08-01 grading was careful — it hedged correctly, marked the MCP-usage reading UNPROVEN, and named its own distinguishing test. The failure was not in writing it. It was that nothing in the system distinguishes a hedged claim from a settled one once both are sitting in `decisions.md` as prose. That is why the fix is a field, not more discipline.
 
 ---
+
+## 2026-08-14 (addendum, same day) — Instance four, committed minutes after writing the lesson against it
+
+**What happened.** Having just written the "inference hardening" entry above — three claims that outran their evidence, with a structural fix proposing a `status_source: observed | inferred` field — I immediately produced a fourth. I concluded the Anthropic Connectors Directory escalated review "appears not to exist," wrote it into `decisions.md`, added a supporting `lessons.md` entry, and pushed. Johan then produced the email: Anthropic MCP Directory team, **2026-07-31**, *"your submission is currently under an escalated review."* The review is real, the submission exists, and the 2026-08-01 entry I had been criticising as inference-hardened was in fact written one day after the email landed and was simply correct.
+
+**The reasoning, and precisely where it broke.** Portal requires Team/Enterprise → Johan is on Max → dashboard returns "no access" → *therefore never submitted*. The first three steps were verified and remain true. The conclusion does not follow: a submission made under different past circumstances produces identical present observations. Absence of access today is not absence of submission ever.
+
+**The part that makes this worse than instances 1–3, and worth banking on its own.** I *had already identified the disconfirming source.* The entry's own `assumption` field reads: "NOT ruled out: (a) email correspondence with `mcp-review@anthropic.com`, which is outside the repo and outside what can be checked from here." I named the exact thing that would overturn the conclusion, noted I could not check it, and then wrote the headline — "appears not to exist" — as though I had. The hedge and the claim coexisted in one entry, and the claim is what would have propagated.
+
+**So the earlier structural fix was necessary and insufficient.** A `status_source: inferred` field would not have prevented this, because I would have marked it inferred and still led with the conclusion. The missing rule is about *who checks* and *when to stop*:
+
+> **When a claim's disconfirming source exists but lies outside your reach, you do not get to conclude. You report the finding, name the source, and hand the check to whoever can run it.** "I cannot verify X from here" terminates the analysis; it does not license the negative.
+
+Concretely, the correct output was: *"The portal requires Team/Enterprise and you're on Max, which is strange given a submission was supposedly made — can you check your email for anything from Anthropic?"* That is one question, it costs Johan ten seconds, and it would have produced the right answer immediately instead of a wrong entry, a wrong lesson, and two commits to unwind.
+
+**Why the pattern recurs, honestly.** Each instance followed genuinely good verification work — real probes, real evidence, real reasoning — and the quality of the *investigation* lent unearned confidence to the *conclusion*. Having done four correct things, the fifth inherits their credibility. The failure is not sloppiness; it is that thoroughness feels like certainty, and the gap between them is exactly where these live.
+
+**Net damage: near zero, and only because of one thing.** `STANCE.md` `out_of_scope` still carried the freeze — the removal was written as a conditional next step rather than executed. The conditional saved it. That is an argument for writing consequential removals as conditions requiring confirmation rather than as actions taken on the strength of a fresh conclusion.
+
+---
